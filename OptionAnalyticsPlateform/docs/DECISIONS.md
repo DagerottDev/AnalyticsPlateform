@@ -55,3 +55,21 @@ Append all major decisions here.
 **Context:** Backend (Python) and frontend (Node.js) have different runtimes.
 **Decision:** Monorepo with `backend/` and `frontend/` directories. Each has its own Dockerfile. Docker Compose orchestrates all services locally.
 **Consequences:** Single repo for code review, shared CI/CD, independent deployments possible.
+
+---
+
+## ADR-007: Thick-Client Analytics (TypeScript Math Engine)
+**Date:** 2026-06-26
+**Status:** Accepted
+**Context:** Need sub-millisecond calculation of 1st, 2nd, and 3rd order Greeks as ticks arrive.
+**Decision:** Build the Black-Scholes engine, Newton-Raphson IV solver, and Dealer Flow math in native TypeScript (`frontend/src/lib/greeks.ts`). Ticks are streamed directly to the browser, which computes everything locally.
+**Consequences:** Zero backend latency. Scales infinitely (compute is offloaded to users). Removes need for Python QuantLib for live data.
+
+---
+
+## ADR-008: Local Geometric Brownian Motion for Replay Mode
+**Date:** 2026-06-26
+**Status:** Accepted
+**Context:** User wants a Replay Mode to test strategies.
+**Decision:** Do not download gigabytes of historical tick data. Use a TypeScript Geometric Brownian Motion (GBM) generator to mathematically simulate realistic underlying asset random walks. The TS Greek Engine dynamically prices the entire option chain based on the simulated spot.
+**Consequences:** Replay is instant, works entirely offline, but requires synthetic assumptions instead of actual historical prints.

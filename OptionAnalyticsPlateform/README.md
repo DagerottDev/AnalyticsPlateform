@@ -8,7 +8,7 @@ A production-grade, responsive web platform for Indian options analytics with mu
 |-------|-----------|
 | Frontend | Next.js 15, TypeScript, Tailwind CSS, shadcn/ui, Zustand, TanStack Query |
 | Backend | FastAPI, Python 3.12, WebSockets |
-| Analytics | NumPy, Pandas, QuantLib, Numba |
+| Analytics | Native TypeScript (Black-Scholes, Greeks, GBM Replay Engine) |
 | Storage | PostgreSQL + TimescaleDB, Redis |
 | Broker | OpenAlgo (30+ Indian brokers) |
 | Infra | Docker, GitHub Actions CI/CD |

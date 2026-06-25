@@ -50,7 +50,6 @@ const navigation: NavGroup[] = [
   {
     title: "Analytics",
     items: [
-      { icon: TrendingUp, label: "Greeks", href: "/greeks", disabled: true, badge: "M4" },
       { icon: LineChart, label: "Charts", href: "/charts", disabled: false, badge: "M5" },
       { icon: Waves, label: "Volatility", href: "/volatility", disabled: false, badge: "M6" },
       { icon: BarChart3, label: "Dealer Flow", href: "/dealer-flow", disabled: false, badge: "M7" },
