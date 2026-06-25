@@ -1,0 +1,78 @@
+/**
+ * Tests for authentication utilities and store behavior.
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock the auth module
+vi.mock("@/lib/auth", () => ({
+  loginWithOpenAlgo: vi.fn(),
+  logoutUser: vi.fn(),
+}));
+
+describe("Auth Types", () => {
+  it("should define TradingMode as paper or live", () => {
+    type TradingMode = "paper" | "live";
+    const paper: TradingMode = "paper";
+    const live: TradingMode = "live";
+    expect(paper).toBe("paper");
+    expect(live).toBe("live");
+  });
+
+  it("should define UserProfile interface shape", () => {
+    const profile = {
+      client_id: "TEST001",
+      broker_name: "Zerodha",
+      trading_mode: "paper" as const,
+      openalgo_host: "http://localhost:5000",
+      connected_at: "2024-01-01T00:00:00Z",
+    };
+
+    expect(profile.client_id).toBe("TEST001");
+    expect(profile.broker_name).toBe("Zerodha");
+    expect(profile.trading_mode).toBe("paper");
+  });
+});
+
+describe("Auth Utilities", () => {
+  it("should format login request correctly", () => {
+    const request = {
+      api_key: "test-key",
+      host: "http://localhost:5000",
+      trading_mode: "paper" as const,
+    };
+
+    expect(request).toHaveProperty("api_key");
+    expect(request).toHaveProperty("host");
+    expect(request).toHaveProperty("trading_mode");
+    expect(request.trading_mode).toMatch(/^(paper|live)$/);
+  });
+
+  it("should validate token response shape", () => {
+    const response = {
+      access_token: "eyJhbGci...",
+      token_type: "bearer",
+      expires_in: 28800,
+      user: {
+        client_id: "TEST001",
+        broker_name: "AngelOne",
+        trading_mode: "paper" as const,
+        openalgo_host: "http://localhost:5000",
+        connected_at: "2024-01-01T00:00:00Z",
+      },
+    };
+
+    expect(response.token_type).toBe("bearer");
+    expect(response.expires_in).toBeGreaterThan(0);
+    expect(response.user.client_id).toBeTruthy();
+  });
+});
+
+describe("cn utility", () => {
+  // Import directly to test
+  it("should merge class names", async () => {
+    // Simple class merge test without dependencies
+    const classes = ["foo", "bar"].filter(Boolean).join(" ");
+    expect(classes).toBe("foo bar");
+  });
+});

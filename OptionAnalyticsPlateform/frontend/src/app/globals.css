@@ -1,0 +1,243 @@
+@import "tailwindcss";
+
+/* ─── Design Tokens ─────────────────────────────────────── */
+@theme {
+  /* TradingView-inspired dark color palette */
+  --color-bg-primary: #0f1117;
+  --color-bg-secondary: #131722;
+  --color-bg-tertiary: #1c2030;
+  --color-bg-elevated: #1e222d;
+  --color-bg-surface: #252a37;
+  --color-bg-hover: #2a2e3e;
+
+  --color-border-default: #2a2e3e;
+  --color-border-subtle: #1e222d;
+  --color-border-accent: #3b3f51;
+
+  --color-text-primary: #d1d4dc;
+  --color-text-secondary: #787b86;
+  --color-text-muted: #5d606b;
+  --color-text-bright: #f0f3fa;
+
+  --color-accent-blue: #2962ff;
+  --color-accent-blue-hover: #1e53e5;
+  --color-accent-cyan: #00bcd4;
+  --color-accent-green: #26a69a;
+  --color-accent-red: #ef5350;
+  --color-accent-orange: #ff9800;
+  --color-accent-purple: #ab47bc;
+  --color-accent-yellow: #ffeb3b;
+
+  --color-profit: #26a69a;
+  --color-loss: #ef5350;
+
+  /* Gradients */
+  --gradient-brand: linear-gradient(135deg, #2962ff 0%, #00bcd4 50%, #ab47bc 100%);
+  --gradient-brand-subtle: linear-gradient(135deg, rgba(41, 98, 255, 0.15) 0%, rgba(0, 188, 212, 0.15) 50%, rgba(171, 71, 188, 0.15) 100%);
+  --gradient-surface: linear-gradient(180deg, #1c2030 0%, #131722 100%);
+
+  /* Shadows */
+  --shadow-glow-blue: 0 0 20px rgba(41, 98, 255, 0.3);
+  --shadow-glow-cyan: 0 0 20px rgba(0, 188, 212, 0.3);
+  --shadow-elevation-1: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-elevation-2: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-elevation-3: 0 8px 30px rgba(0, 0, 0, 0.5);
+
+  /* Typography */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Fira Code", monospace;
+
+  /* Border Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Animation */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+}
+
+/* ─── Base ──────────────────────────────────────────────── */
+html {
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Scrollbar (TradingView-style thin scrollbar) ──────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-accent);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ─── Selection ─────────────────────────────────────────── */
+::selection {
+  background-color: rgba(41, 98, 255, 0.3);
+  color: var(--color-text-bright);
+}
+
+/* ─── Animations ────────────────────────────────────────── */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(41, 98, 255, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(41, 98, 255, 0.4);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes gradient-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--duration-normal) var(--ease-smooth) both;
+}
+
+.animate-slide-in {
+  animation: slideInRight var(--duration-normal) var(--ease-smooth) both;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s var(--ease-smooth) infinite;
+}
+
+.animate-shimmer {
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 3s ease infinite;
+}
+
+/* ─── Glass Effect ──────────────────────────────────────── */
+.glass {
+  background: rgba(19, 23, 34, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(42, 46, 62, 0.6);
+}
+
+.glass-strong {
+  background: rgba(19, 23, 34, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(42, 46, 62, 0.8);
+}
+
+/* ─── Gradient Border ───────────────────────────────────── */
+.gradient-border {
+  position: relative;
+}
+
+.gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--gradient-brand);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  pointer-events: none;
+}
+
+/* ─── Focus Ring ────────────────────────────────────────── */
+.focus-ring {
+  outline: none;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
+}
+
+/* ─── TradingView-style input ───────────────────────────── */
+input[type="text"],
+input[type="password"],
+input[type="url"] {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  padding: 10px 14px;
+  font-size: 14px;
+  transition: all var(--duration-fast) var(--ease-smooth);
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="url"]:focus {
+  border-color: var(--color-accent-blue);
+  box-shadow: 0 0 0 3px rgba(41, 98, 255, 0.15);
+  outline: none;
+}
+
+input::placeholder {
+  color: var(--color-text-muted);
+}
