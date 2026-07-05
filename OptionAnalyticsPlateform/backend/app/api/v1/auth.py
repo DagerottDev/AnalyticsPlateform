@@ -1,8 +1,8 @@
 """Authentication endpoints.
 
-Handles login via OpenAlgo API key, token verification, user profile
-retrieval, and logout. No passwords — authentication is delegated to
-OpenAlgo's broker connection.
+Handles login via native broker credentials (Fyers or Zerodha), token
+verification, user profile retrieval, and logout. No passwords —
+authentication is delegated to the broker's own API.
 """
 
 from typing import Any
@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config import Settings, get_settings
-from app.core.exceptions import OpenAlgoAuthError, OpenAlgoConnectionError
+from app.core.exceptions import BrokerAuthError, BrokerConnectionError
 from app.core.security import create_access_token, decode_token, get_current_user
 from app.models.user import TradingMode
 from app.schemas.auth import (
@@ -22,8 +22,8 @@ from app.schemas.auth import (
     UserProfileResponse,
 )
 from app.services.fyers_service import FyersService
-from app.services.zerodha_service import ZerodhaService
 from app.services.session_manager import session_manager
+from app.services.zerodha_service import ZerodhaService
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -32,26 +32,29 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
     "/login",
     response_model=LoginResponse,
     status_code=status.HTTP_200_OK,
-    summary="Login with OpenAlgo API Key",
-    description="Authenticate using an OpenAlgo API key. Returns a JWT for subsequent requests.",
+    summary="Login with Broker Credentials",
+    description=(
+        "Authenticate using native Fyers or Zerodha credentials. "
+        "Returns a JWT for subsequent requests."
+    ),
     responses={
-        401: {"model": AuthErrorResponse, "description": "Invalid API key"},
-        503: {"model": AuthErrorResponse, "description": "OpenAlgo unreachable"},
+        401: {"model": AuthErrorResponse, "description": "Invalid credentials"},
+        503: {"model": AuthErrorResponse, "description": "Broker API unreachable"},
     },
 )
 async def login(
     request: LoginRequest,
     settings: Settings = Depends(get_settings),
 ) -> LoginResponse:
-    """Authenticate a user via OpenAlgo API key.
+    """Authenticate a user via native broker credentials.
 
-    1. Connects to the specified OpenAlgo instance.
-    2. Verifies the API key by attempting a funds query.
+    1. Connects to the requested broker (Fyers or Zerodha) using the given credentials.
+    2. Verifies the credentials by fetching the broker profile.
     3. Retrieves user profile information.
     4. Issues a JWT access token.
 
     Args:
-        request: Login credentials with API key, host, and trading mode.
+        request: Login credentials with broker name, API key/app ID, access token, and trading mode.
         settings: Application settings.
 
     Returns:
@@ -59,6 +62,7 @@ async def login(
     """
     trading_mode = TradingMode(request.trading_mode)
 
+    service: FyersService | ZerodhaService
     if request.broker_name.lower() == "fyers":
         service = FyersService(
             app_id=request.app_id or "",
@@ -102,13 +106,13 @@ async def login(
             ),
         )
 
-    except OpenAlgoAuthError as e:
+    except BrokerAuthError as e:
         await service.close()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=e.message,
         ) from e
-    except OpenAlgoConnectionError as e:
+    except BrokerConnectionError as e:
         await service.close()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

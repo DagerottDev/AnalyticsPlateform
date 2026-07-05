@@ -77,6 +77,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
 
   // Extract trading symbols for WebSocket subscription
   // Subscribe to live market data + underlying index
+  const tradingSymbols = useMemo(() => instruments.map((i) => i.trading_symbol), [instruments]);
   const allSymbols = useMemo(() => [...tradingSymbols, symbol], [tradingSymbols, symbol]);
   const { getTick } = useMarketData(allSymbols);
   

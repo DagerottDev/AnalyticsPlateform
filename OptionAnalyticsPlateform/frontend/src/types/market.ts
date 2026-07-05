@@ -25,3 +25,15 @@ export interface MarketTick {
   change: number;
   change_percent: number;
 }
+
+/** A simulated tick produced by the Replay engine. */
+export interface TickData {
+  instrument_token?: number;
+  trading_symbol: string;
+  last_price: number;
+  volume: number;
+  open_interest: number;
+  timestamp: number;
+  change: number;
+  change_percent: number;
+}

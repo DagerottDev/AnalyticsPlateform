@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import DashboardLayout from "@/components/layout/DashboardLayout";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
 import { calculateImpliedVolatility } from "@/lib/greeks";
@@ -47,8 +47,11 @@ export default function StrategyBuilderPage() {
         const data = await getInstruments(symbol);
         if (isMounted) {
           setInstruments(data.instruments);
-          if (data.expiries.length > 0) {
-            setExpiry(data.expiries[0]);
+          const expiries = Array.from(
+            new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
+          ).sort();
+          if (expiries.length > 0) {
+            setExpiry(expiries[0]);
           }
           // Reset legs when symbol changes
           setLegs([]);
@@ -74,9 +77,9 @@ export default function StrategyBuilderPage() {
         if (!leg.instrument) return leg;
         
         const tick = getTick(leg.instrument.trading_symbol);
-        if (!tick) return leg;
+        if (!tick || !leg.instrument.expiry || !leg.instrument.strike || !leg.instrument.option_type) return leg;
 
-        let newLeg = { ...leg };
+        const newLeg = { ...leg };
 
         // Auto-fill entry price if it's 0
         if (leg.entryPrice === 0 && tick.last_price > 0) {

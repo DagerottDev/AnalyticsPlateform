@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the auth module
 vi.mock("@/lib/auth", () => ({
-  loginWithOpenAlgo: vi.fn(),
+  loginWithBroker: vi.fn(),
   logoutUser: vi.fn(),
 }));
 
@@ -24,7 +24,7 @@ describe("Auth Types", () => {
       client_id: "TEST001",
       broker_name: "Zerodha",
       trading_mode: "paper" as const,
-      openalgo_host: "http://localhost:5000",
+      account_name: "Default",
       connected_at: "2024-01-01T00:00:00Z",
     };
 
@@ -37,13 +37,14 @@ describe("Auth Types", () => {
 describe("Auth Utilities", () => {
   it("should format login request correctly", () => {
     const request = {
+      broker_name: "zerodha",
       api_key: "test-key",
-      host: "http://localhost:5000",
+      access_token: "test-token",
       trading_mode: "paper" as const,
     };
 
+    expect(request).toHaveProperty("broker_name");
     expect(request).toHaveProperty("api_key");
-    expect(request).toHaveProperty("host");
     expect(request).toHaveProperty("trading_mode");
     expect(request.trading_mode).toMatch(/^(paper|live)$/);
   });
@@ -55,9 +56,9 @@ describe("Auth Utilities", () => {
       expires_in: 28800,
       user: {
         client_id: "TEST001",
-        broker_name: "AngelOne",
+        broker_name: "Fyers",
         trading_mode: "paper" as const,
-        openalgo_host: "http://localhost:5000",
+        account_name: "Default",
         connected_at: "2024-01-01T00:00:00Z",
       },
     };

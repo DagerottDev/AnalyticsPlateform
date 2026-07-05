@@ -1,7 +1,8 @@
 """JWT token creation, verification, and authentication dependencies.
 
 Uses python-jose for JWT operations. Authentication is API-key-based
-through OpenAlgo — no passwords are stored or managed.
+through the native broker SDKs (Fyers/Zerodha) — no passwords are stored
+or managed.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -45,10 +46,12 @@ def create_access_token(
     )
     to_encode.update({"exp": expire, "iat": datetime.now(UTC)})
 
-    return jwt.encode(
-        to_encode,
-        settings.jwt_secret,
-        algorithm=settings.jwt_algorithm,
+    return str(
+        jwt.encode(
+            to_encode,
+            settings.jwt_secret,
+            algorithm=settings.jwt_algorithm,
+        )
     )
 
 

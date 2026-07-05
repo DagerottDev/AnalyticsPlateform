@@ -5,25 +5,23 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient
 
-from app.config import Settings
-from app.core.security import create_access_token
-
 
 @pytest.mark.asyncio
 async def test_login_success(
     client: AsyncClient,
-    mock_openalgo_service: AsyncMock,
+    mock_broker_service: AsyncMock,
 ) -> None:
-    """Login should return JWT token on successful OpenAlgo connection."""
+    """Login should return JWT token on successful broker connection."""
     with patch(
-        "app.api.v1.auth.OpenAlgoService",
-        return_value=mock_openalgo_service,
+        "app.api.v1.auth.ZerodhaService",
+        return_value=mock_broker_service,
     ):
         response = await client.post(
             "/api/v1/auth/login",
             json={
+                "broker_name": "zerodha",
                 "api_key": "test-api-key",
-                "host": "http://localhost:5000",
+                "access_token": "test-access-token",
                 "trading_mode": "paper",
             },
         )
@@ -44,8 +42,9 @@ async def test_login_invalid_trading_mode(client: AsyncClient) -> None:
     response = await client.post(
         "/api/v1/auth/login",
         json={
+            "broker_name": "zerodha",
             "api_key": "test-api-key",
-            "host": "http://localhost:5000",
+            "access_token": "test-access-token",
             "trading_mode": "invalid",
         },
     )
@@ -53,30 +52,30 @@ async def test_login_invalid_trading_mode(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_missing_api_key(client: AsyncClient) -> None:
-    """Login should reject requests without an API key."""
+async def test_login_unsupported_broker(client: AsyncClient) -> None:
+    """Login should reject requests for an unsupported broker."""
     response = await client.post(
         "/api/v1/auth/login",
         json={
-            "host": "http://localhost:5000",
+            "broker_name": "unknown-broker",
+            "api_key": "test-api-key",
+            "access_token": "test-access-token",
             "trading_mode": "paper",
         },
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_get_me_authenticated(
     client: AsyncClient,
     auth_headers: dict[str, str],
-    test_settings: Settings,
 ) -> None:
     """GET /me should return user profile when authenticated."""
-    with patch("app.core.security.get_settings", return_value=test_settings):
-        response = await client.get(
-            "/api/v1/auth/me",
-            headers=auth_headers,
-        )
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -95,14 +94,12 @@ async def test_get_me_unauthenticated(client: AsyncClient) -> None:
 async def test_verify_valid_token(
     client: AsyncClient,
     valid_token: str,
-    test_settings: Settings,
 ) -> None:
     """Token verification should return valid=True for good tokens."""
-    with patch("app.api.v1.auth.get_settings", return_value=test_settings):
-        response = await client.post(
-            "/api/v1/auth/verify",
-            json={"token": valid_token},
-        )
+    response = await client.post(
+        "/api/v1/auth/verify",
+        json={"token": valid_token},
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -127,14 +124,12 @@ async def test_verify_invalid_token(client: AsyncClient) -> None:
 async def test_logout_authenticated(
     client: AsyncClient,
     auth_headers: dict[str, str],
-    test_settings: Settings,
 ) -> None:
     """Logout should succeed when authenticated."""
-    with patch("app.core.security.get_settings", return_value=test_settings):
-        response = await client.post(
-            "/api/v1/auth/logout",
-            headers=auth_headers,
-        )
+    response = await client.post(
+        "/api/v1/auth/logout",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 200
     data = response.json()

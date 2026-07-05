@@ -25,7 +25,7 @@ class UserProfile:
         client_id: Unique client identifier from the broker.
         broker_name: Name of the connected broker.
         trading_mode: Paper or live trading mode.
-        openalgo_host: The OpenAlgo instance this user is connected to.
+        account_name: Associated account name.
         funds: Available trading funds (optional, fetched on demand).
         connected_at: Timestamp when the connection was established.
     """

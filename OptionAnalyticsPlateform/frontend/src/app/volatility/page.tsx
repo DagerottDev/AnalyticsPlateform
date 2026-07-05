@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import DashboardLayout from "@/components/layout/DashboardLayout";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
@@ -67,8 +67,11 @@ export default function VolatilityPage() {
         if (isMounted) {
           setInstruments(data.instruments);
           // Set initial expiry if none selected
-          if (!expiry && data.expiries.length > 0) {
-            setExpiry(data.expiries[0]);
+          const expiries = Array.from(
+            new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
+          ).sort();
+          if (!expiry && expiries.length > 0) {
+            setExpiry(expiries[0]);
           }
         }
       } catch (err) {
@@ -89,13 +92,13 @@ export default function VolatilityPage() {
     return instruments.map(inst => {
       const tick = getTick(inst.trading_symbol);
       let iv = 0;
-      if (tick && tick.last_price > 0 && inst.strike) {
+      if (tick && tick.last_price > 0 && inst.strike && inst.expiry && inst.option_type) {
         // Calculate T
         const expDate = new Date(inst.expiry);
         expDate.setHours(15, 30, 0, 0);
         const diffDays = (expDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24);
         const T = Math.max(diffDays / 365, 0.0001);
-        
+
         iv = calculateImpliedVolatility(inst.option_type, S, inst.strike, T, r, tick.last_price);
       }
       return { ...inst, iv };
@@ -129,7 +132,9 @@ export default function VolatilityPage() {
     
     const atmStrike = strikes.reduce((prev, curr) => Math.abs(curr - S) < Math.abs(prev - S) ? curr : prev);
     
-    const expiries = Array.from(new Set(instruments.map(i => i.expiry))).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+    const expiries = Array.from(
+      new Set(instruments.map(i => i.expiry).filter((e): e is string => !!e))
+    ).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
     
     return expiries.map(exp => {
       const atmCE = liveIVData.find(i => i.expiry === exp && i.strike === atmStrike && i.option_type === "CE");
@@ -181,11 +186,11 @@ export default function VolatilityPage() {
         {/* Top Controls & Metrics */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
           <div className="col-span-1 flex flex-col gap-4">
-            <InstrumentSelector 
-              selectedSymbol={symbol} 
-              onSymbolChange={(s) => { setSymbol(s); setExpiry(null); }} 
-              selectedExpiry={expiry} 
-              onExpiryChange={setExpiry} 
+            <InstrumentSelector
+              symbol={symbol}
+              onSymbolChange={(s) => { setSymbol(s); setExpiry(null); }}
+              expiry={expiry}
+              onExpiryChange={setExpiry}
             />
             
             {/* Metrics Cards */}

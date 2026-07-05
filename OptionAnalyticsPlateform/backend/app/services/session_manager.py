@@ -4,12 +4,13 @@ Maintains in-memory dictionary of authenticated broker sessions keyed by client_
 This enables a stateless single-account flow without persisting credentials in the DB.
 """
 
-from typing import Dict
+
 from app.services.broker_base import BrokerService
 
+
 class SessionManager:
-    def __init__(self):
-        self._sessions: Dict[str, BrokerService] = {}
+    def __init__(self) -> None:
+        self._sessions: dict[str, BrokerService] = {}
 
     def set_session(self, client_id: str, service: BrokerService) -> None:
         """Store an active broker service session."""

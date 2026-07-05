@@ -29,8 +29,8 @@ export function useAlertEngine() {
     activeAlerts.forEach(a => {
       syms.add(a.instrument.trading_symbol);
       // If it's an option, we also need the underlying to calculate greeks
-      if (a.instrument.name) {
-        syms.add(a.instrument.name); 
+      if (a.instrument.symbol) {
+        syms.add(a.instrument.symbol); 
       }
     });
     return Array.from(syms);
@@ -57,9 +57,9 @@ export function useAlertEngine() {
         currentValue = tick.last_price;
       } 
       // Greeks / IV / GEX require underlying spot price
-      else if (alert.instrument.strike && alert.instrument.option_type) {
-        const underlyingTick = getTick(alert.instrument.name);
-        const S = underlyingTick?.last_price || (alert.instrument.name === "NIFTY" ? 22000 : 48000); // fallback
+      else if (alert.instrument.strike && alert.instrument.option_type && alert.instrument.expiry) {
+        const underlyingTick = getTick(alert.instrument.symbol);
+        const S = underlyingTick?.last_price || (alert.instrument.symbol === "NIFTY" ? 22000 : 48000); // fallback
         
         const expDate = new Date(alert.instrument.expiry);
         expDate.setHours(15, 30, 0, 0);
@@ -94,7 +94,7 @@ export function useAlertEngine() {
           else if (alert.metric === "Theta") currentValue = greeks.theta;
           else if (alert.metric === "Vega") currentValue = greeks.vega;
           else if (alert.metric.includes("GEX")) {
-            const lotSize = getLotSize(alert.instrument.name);
+            const lotSize = getLotSize(alert.instrument.symbol);
             const oi = tick.open_interest || 0;
             const gex = calculateContractGEX(greeks.gamma, oi, S, lotSize, alert.instrument.option_type as "CE" | "PE");
             // Simplified for single contract

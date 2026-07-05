@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * LoginForm — Premium OpenAlgo authentication form.
+ * LoginForm — Premium native broker authentication form.
  *
  * Features:
  * - Broker selection (Fyers / Zerodha)
@@ -76,7 +76,7 @@ export function LoginForm() {
             </label>
             <select
               value={brokerName}
-              onChange={(e) => setBrokerName(e.target.value as any)}
+              onChange={(e) => setBrokerName(e.target.value as "fyers" | "zerodha")}
               className="focus-ring w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-text-primary)]"
             >
               <option value="fyers">Fyers</option>

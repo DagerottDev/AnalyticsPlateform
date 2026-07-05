@@ -5,7 +5,6 @@ Creates the FastAPI app with middleware, routers, and lifespan management.
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

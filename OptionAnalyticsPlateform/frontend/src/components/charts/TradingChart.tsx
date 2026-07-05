@@ -78,8 +78,8 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     });
 
     chartRef.current = chart;
-    candleSeriesRef.current = candleSeries as any;
-    volumeSeriesRef.current = volumeSeries as any;
+    candleSeriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
 
     return () => {
       chart.remove();
@@ -119,7 +119,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     // SMA
     if (indicators?.sma) {
       if (!smaSeriesRef.current) {
-        smaSeriesRef.current = chartRef.current.addLineSeries({ color: "#eab308", lineWidth: 2 }) as any;
+        smaSeriesRef.current = chartRef.current.addLineSeries({ color: "#eab308", lineWidth: 2 });
       }
       const smaData = calculateSMA(data, 20).map(d => ({
         time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
@@ -134,8 +134,8 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     // Bollinger Bands
     if (indicators?.bbands) {
       if (!bbUpperRef.current) {
-        bbUpperRef.current = chartRef.current.addLineSeries({ color: "rgba(56, 189, 248, 0.5)", lineWidth: 1 }) as any;
-        bbLowerRef.current = chartRef.current.addLineSeries({ color: "rgba(56, 189, 248, 0.5)", lineWidth: 1 }) as any;
+        bbUpperRef.current = chartRef.current.addLineSeries({ color: "rgba(56, 189, 248, 0.5)", lineWidth: 1 });
+        bbLowerRef.current = chartRef.current.addLineSeries({ color: "rgba(56, 189, 248, 0.5)", lineWidth: 1 });
       }
       const bbData = calculateBollingerBands(data, 20, 2);
       bbUpperRef.current?.setData(bbData.map(d => ({ time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time, value: d.upper })));
@@ -162,7 +162,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
           autoSize: true,
         });
         
-        rsiSeriesRef.current = rsiChartRef.current.addLineSeries({ color: "#a855f7", lineWidth: 2 }) as any;
+        rsiSeriesRef.current = rsiChartRef.current.addLineSeries({ color: "#a855f7", lineWidth: 2 });
         
         // Add 70 / 30 lines using a very thin series or baseline
         const upperLine = rsiChartRef.current.addLineSeries({ color: "rgba(239, 68, 68, 0.5)", lineWidth: 1, lineStyle: 2 });

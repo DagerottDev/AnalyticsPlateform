@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import DashboardLayout from "@/components/layout/DashboardLayout";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
@@ -39,8 +39,11 @@ export default function DealerFlowPage() {
         const data = await getInstruments(symbol);
         if (isMounted) {
           setInstruments(data.instruments);
-          if (!expiry && data.expiries.length > 0) {
-            setExpiry(data.expiries[0]);
+          const expiries = Array.from(
+            new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
+          ).sort();
+          if (!expiry && expiries.length > 0) {
+            setExpiry(expiries[0]);
           }
         }
       } catch (err) {
@@ -60,7 +63,7 @@ export default function DealerFlowPage() {
   const exposures = useMemo(() => {
     if (!expiry || instruments.length === 0) return { gex: [], vanna: [], charm: [] };
 
-    const currentExpiryInts = instruments.filter(i => i.expiry === expiry && i.strike);
+    const currentExpiryInts = instruments.filter(i => i.expiry === expiry && i.strike && i.option_type);
     
     // T Calculation
     const expDate = new Date(expiry);
@@ -79,10 +82,11 @@ export default function DealerFlowPage() {
       if (!tick || !inst.strike) return;
 
       // Need IV to get Greeks
-      const iv = calculateImpliedVolatility(inst.option_type, S, inst.strike, T, r, tick.last_price);
+      const optionType = inst.option_type as "CE" | "PE";
+      const iv = calculateImpliedVolatility(optionType, S, inst.strike, T, r, tick.last_price);
       if (iv === 0) return;
 
-      const greeks = calculateGreeks(inst.option_type, S, inst.strike, T, r, iv);
+      const greeks = calculateGreeks(optionType, S, inst.strike, T, r, iv);
       const oi = tick.open_interest || 0;
 
       // Exposures
@@ -138,12 +142,11 @@ export default function DealerFlowPage() {
         </div>
 
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <InstrumentSelector 
-            selectedSymbol={symbol} 
-            onSymbolChange={(s) => { setSymbol(s); setExpiry(null); }} 
-            selectedExpiry={expiry} 
-            onExpiryChange={setExpiry} 
-            availableExpiries={Array.from(new Set(instruments.map(i => i.expiry))).sort((a, b) => new Date(a).getTime() - new Date(b).getTime())}
+          <InstrumentSelector
+            symbol={symbol}
+            onSymbolChange={(s) => { setSymbol(s); setExpiry(null); }}
+            expiry={expiry}
+            onExpiryChange={setExpiry}
           />
         </div>
 

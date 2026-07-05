@@ -5,22 +5,22 @@ Provides structured error responses across the API.
 
 from typing import Any
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 from fastapi.responses import JSONResponse
 
 
-class OpenAlgoConnectionError(Exception):
-    """Raised when the connection to OpenAlgo fails."""
+class BrokerConnectionError(Exception):
+    """Raised when the connection to a broker's API fails."""
 
-    def __init__(self, message: str = "Unable to connect to OpenAlgo") -> None:
+    def __init__(self, message: str = "Unable to connect to broker") -> None:
         self.message = message
         super().__init__(self.message)
 
 
-class OpenAlgoAuthError(Exception):
-    """Raised when OpenAlgo API key validation fails."""
+class BrokerAuthError(Exception):
+    """Raised when broker API credential validation fails."""
 
-    def __init__(self, message: str = "Invalid OpenAlgo API key") -> None:
+    def __init__(self, message: str = "Invalid broker credentials") -> None:
         self.message = message
         super().__init__(self.message)
 
@@ -33,30 +33,30 @@ class BrokerNotConnectedError(Exception):
         super().__init__(self.message)
 
 
-async def openalgo_connection_error_handler(
+async def broker_connection_error_handler(
     request: Request,
-    exc: OpenAlgoConnectionError,
+    exc: BrokerConnectionError,
 ) -> JSONResponse:
-    """Handle OpenAlgo connection errors."""
+    """Handle broker connection errors."""
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
             "detail": exc.message,
-            "error_type": "openalgo_connection_error",
+            "error_type": "broker_connection_error",
         },
     )
 
 
-async def openalgo_auth_error_handler(
+async def broker_auth_error_handler(
     request: Request,
-    exc: OpenAlgoAuthError,
+    exc: BrokerAuthError,
 ) -> JSONResponse:
-    """Handle OpenAlgo authentication errors."""
+    """Handle broker authentication errors."""
     return JSONResponse(
         status_code=status.HTTP_401_UNAUTHORIZED,
         content={
             "detail": exc.message,
-            "error_type": "openalgo_auth_error",
+            "error_type": "broker_auth_error",
         },
     )
 
@@ -67,5 +67,5 @@ def register_exception_handlers(app: Any) -> None:
     Args:
         app: The FastAPI application instance.
     """
-    app.add_exception_handler(OpenAlgoConnectionError, openalgo_connection_error_handler)
-    app.add_exception_handler(OpenAlgoAuthError, openalgo_auth_error_handler)
+    app.add_exception_handler(BrokerConnectionError, broker_connection_error_handler)
+    app.add_exception_handler(BrokerAuthError, broker_auth_error_handler)

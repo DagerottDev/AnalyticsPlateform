@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import DashboardLayout from "@/components/layout/DashboardLayout";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { getInstruments } from "@/lib/market";
 import { Instrument } from "@/types/market";
@@ -28,7 +28,10 @@ export default function AlertsPage() {
         const data = await getInstruments(symbol);
         if (isMounted) {
           setInstruments(data.instruments);
-          if (data.expiries.length > 0) setExpiry(data.expiries[0]);
+          const expiries = Array.from(
+            new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
+          ).sort();
+          if (expiries.length > 0) setExpiry(expiries[0]);
           setSelectedInstrumentToken(""); // Reset selection
         }
       } catch (err) {
@@ -48,21 +51,16 @@ export default function AlertsPage() {
     if (metric === "Price" && !selectedInstrumentToken) {
       // Find underlying instrument object (mock it if not in list, usually we only get options back)
       targetInst = {
-        instrument_token: parseInt(Math.random().toString().substr(2, 6)),
-        exchange_token: "0",
-        tradingsymbol: symbol,
-        name: symbol,
-        expiry: "",
-        strike: 0,
-        tick_size: 0.05,
-        lot_size: 1,
+        trading_symbol: symbol,
+        symbol: symbol,
         instrument_type: "EQ",
-        option_type: "",
+        expiry: null,
+        strike: null,
+        option_type: null,
         exchange: "NSE",
-        trading_symbol: symbol
       };
     } else {
-      targetInst = instruments.find(i => i.instrument_token.toString() === selectedInstrumentToken);
+      targetInst = instruments.find(i => i.trading_symbol === selectedInstrumentToken);
     }
 
     if (!targetInst) return;
@@ -96,12 +94,11 @@ export default function AlertsPage() {
           
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
             <div className="md:col-span-3">
-               <InstrumentSelector 
-                 selectedSymbol={symbol} 
-                 onSymbolChange={setSymbol} 
-                 selectedExpiry={expiry} 
-                 onExpiryChange={setExpiry} 
-                 availableExpiries={Array.from(new Set(instruments.map(i => i.expiry))).sort()}
+               <InstrumentSelector
+                 symbol={symbol}
+                 onSymbolChange={setSymbol}
+                 expiry={expiry}
+                 onExpiryChange={setExpiry}
                />
             </div>
             
@@ -113,7 +110,7 @@ export default function AlertsPage() {
                >
                  <option value="">{symbol} (Underlying)</option>
                  {instruments.filter(i => i.expiry === expiry).map(i => (
-                   <option key={i.instrument_token} value={i.instrument_token}>
+                   <option key={i.trading_symbol} value={i.trading_symbol}>
                      {i.strike} {i.option_type}
                    </option>
                  ))}

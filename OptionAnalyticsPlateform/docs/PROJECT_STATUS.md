@@ -81,16 +81,33 @@ Pending:
 - Final Verification & Cleanup (M11 - if applicable)
 
 Known Issues:
-- None
+- None currently open. A post-migration audit (2026-07-06) found and fixed a batch of
+  regressions left over from the OpenAlgo → native broker SDK migration (2f06dfb, acff4bf):
+  a syntax error that prevented the backend from importing at all, a double-prefixed API
+  router (every route was mounted at e.g. `/api/v1/auth/auth/login`), a dead `openalgo_host`
+  field reference that silently disabled the live WebSocket subscription, an undefined
+  `tradingSymbols` reference that crashed the `/chain` page, a missing `calculateOptionPrice`
+  export that broke the Strategy Builder's T+0 payoff line, and a stale/broken backend +
+  frontend test suite. All of `ruff`, `mypy --strict`, `tsc --noEmit`, `next lint`, `pytest`,
+  and `vitest` are green again as of this pass.
+- `@tanstack/react-query` is an installed frontend dependency but is not wired up anywhere in
+  `src/` — either finish adopting it or drop it, it's currently dead weight.
+- Redis is provisioned (docker-compose, `REDIS_URL` setting) but no endpoint or service uses
+  it yet — reserved for future session cache / WebSocket pub-sub scaling.
+- Live broker instrument fetching (`get_instruments`/`get_historical_data` on
+  `FyersService`/`ZerodhaService`) is still stubbed to return `[]` — not yet implemented
+  against the real broker APIs.
 
 Next Actions:
-- Platform is functionally complete up to M10! Ready for final review.
+- Platform is functionally complete up to M10 and CI-clean. Decide on TanStack Query /
+  Redis (adopt or remove) and implement real broker instrument/historical data fetching
+  before relying on this in production.
 
 Tech Stack Locked:
 - Backend: FastAPI + Python 3.12 + Poetry
-- Frontend: Next.js 15 + TypeScript + Tailwind v4 + Zustand + TanStack Query + Lightweight Charts + Recharts + Sonner
+- Frontend: Next.js 15 + TypeScript + Tailwind v4 + Zustand + Lightweight Charts + Recharts + Sonner
 - Database: PostgreSQL + TimescaleDB
-- Cache: Redis
+- Cache: Redis (provisioned, not yet consumed by any code path)
 - Broker: Native SDKs (Fyers, Zerodha)
 - CI/CD: GitHub Actions
 - Container: Docker + Docker Compose

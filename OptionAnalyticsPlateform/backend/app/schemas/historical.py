@@ -1,8 +1,11 @@
-from typing import List
 from datetime import datetime
-from pydantic import BaseModel
+
+from pydantic import BaseModel, ConfigDict
+
 
 class OHLCV(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     timestamp: datetime
     trading_symbol: str
     open: float
@@ -11,9 +14,6 @@ class OHLCV(BaseModel):
     close: float
     volume: int
     open_interest: int
-
-    class Config:
-        from_attributes = True
 
 class BackfillRequest(BaseModel):
     symbol: str

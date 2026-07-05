@@ -47,8 +47,6 @@ export function LegManager({
     onChange(legs.map(l => l.id === id ? { ...l, ...updates } : l));
   };
 
-  const availableExpiries = Array.from(new Set(availableInstruments.map(i => i.expiry))).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-sm">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b border-[var(--color-border-subtle)] pb-4">
@@ -56,12 +54,11 @@ export function LegManager({
           <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Strategy Legs</h3>
           <p className="text-[10px] text-[var(--color-text-muted)] mt-1">Lot Size: {lotSize}</p>
         </div>
-        <InstrumentSelector 
-          selectedSymbol={underlyingSymbol} 
-          onSymbolChange={onSymbolChange} 
-          selectedExpiry={currentExpiry} 
+        <InstrumentSelector
+          symbol={underlyingSymbol}
+          onSymbolChange={onSymbolChange}
+          expiry={currentExpiry}
           onExpiryChange={onExpiryChange}
-          availableExpiries={availableExpiries}
         />
       </div>
 
@@ -92,17 +89,17 @@ export function LegManager({
             </div>
 
             <div className="col-span-12 md:col-span-4">
-              <select 
+              <select
                 className="w-full bg-[#27272a] text-sm text-[var(--color-text-primary)] rounded p-1.5 outline-none border border-[var(--color-border-subtle)]"
-                value={leg.instrument?.instrument_token || ""}
+                value={leg.instrument?.trading_symbol || ""}
                 onChange={e => {
-                  const inst = availableInstruments.find(i => i.instrument_token.toString() === e.target.value);
+                  const inst = availableInstruments.find(i => i.trading_symbol === e.target.value);
                   updateLeg(leg.id, { instrument: inst || null });
                 }}
               >
                 <option value="">Select Strike...</option>
                 {availableInstruments.filter(i => i.expiry === currentExpiry).map(i => (
-                  <option key={i.instrument_token} value={i.instrument_token}>
+                  <option key={i.trading_symbol} value={i.trading_symbol}>
                     {i.strike} {i.option_type}
                   </option>
                 ))}

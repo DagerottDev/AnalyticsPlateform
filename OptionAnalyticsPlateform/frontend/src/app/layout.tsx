@@ -7,7 +7,7 @@ import { ReplayController } from "@/components/replay/ReplayController";
 export const metadata: Metadata = {
   title: "Option Analytics Platform",
   description:
-    "Production-grade Indian options analytics with multi-broker support through OpenAlgo. Advanced Greeks, volatility dashboards, dealer-flow analytics, and TradingView-style UX.",
+    "Production-grade Indian options analytics with native Fyers and Zerodha broker support. Advanced Greeks, volatility dashboards, dealer-flow analytics, and TradingView-style UX.",
   keywords: [
     "options analytics",
     "Indian stock market",
@@ -18,7 +18,8 @@ export const metadata: Metadata = {
     "option chain",
     "Greeks",
     "implied volatility",
-    "OpenAlgo",
+    "Fyers",
+    "Zerodha",
   ],
   authors: [{ name: "Option Analytics Team" }],
 };

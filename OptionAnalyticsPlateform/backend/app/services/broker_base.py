@@ -12,7 +12,11 @@ from app.models.user import TradingMode, UserProfile
 class BrokerService(ABC):
     """Abstract base class for broker integrations."""
 
-    def __init__(self, trading_mode: TradingMode = TradingMode.PAPER, account_name: str = "Default"):
+    def __init__(
+        self,
+        trading_mode: TradingMode = TradingMode.PAPER,
+        account_name: str = "Default",
+    ) -> None:
         self.trading_mode = trading_mode
         self.account_name = account_name
 
@@ -52,7 +56,9 @@ class BrokerService(ABC):
         pass
 
     @abstractmethod
-    async def get_historical_data(self, symbol: str, from_date: str, to_date: str, resolution: str) -> list[dict[str, Any]]:
+    async def get_historical_data(
+        self, symbol: str, from_date: str, to_date: str, resolution: str
+    ) -> list[dict[str, Any]]:
         """Retrieve historical OHLCV data."""
         pass
 

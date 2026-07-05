@@ -111,7 +111,7 @@ export default function DashboardPage() {
                   Welcome back, {user?.client_id || "Trader"}
                 </h2>
                 <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                  Connected to {user?.broker_name} via OpenAlgo •{" "}
+                  Connected to {user?.broker_name} •{" "}
                   {tradingMode === "paper" ? "📝 Paper Trading" : "⚡ Live Trading"}
                 </p>
                 {user?.connected_at && (
@@ -171,7 +171,7 @@ export default function DashboardPage() {
               icon={CandlestickChart}
               title="Live Option Chain"
               milestone="M2"
-              description="Real-time option chain with OpenAlgo WebSocket data"
+              description="Real-time option chain with live WebSocket data"
             />
             <FeaturePreviewCard
               icon={TrendingUp}

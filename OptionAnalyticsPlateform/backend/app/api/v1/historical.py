@@ -1,9 +1,10 @@
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, asc
+from typing import Any
 
-from app.api.v1.auth import get_current_user
+from fastapi import APIRouter, BackgroundTasks, Depends
+from sqlalchemy import asc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.market_data import MarketData
 from app.schemas.historical import OHLCV, BackfillRequest, BackfillResponse
@@ -15,26 +16,25 @@ async def process_backfill(
     request: BackfillRequest,
     client_id: str,
     db: AsyncSession
-):
+) -> None:
     """Background task to fetch and save historical data."""
     service = session_manager.get_session(client_id)
     if not service:
         print(f"Session not found for {client_id}")
         return
-    
+
     try:
         raw_data = await service.get_historical_data(
             request.symbol, request.from_date, request.to_date, request.resolution
         )
-        
+
         # Save to DB
-        records = []
         for row in raw_data:
             # We use merge or ignore conflicts in a real app,
             # here we just insert ignoring existing for simplicity in MVP.
             # Postgres: INSERT ... ON CONFLICT DO NOTHING
             from sqlalchemy.dialects.postgresql import insert
-            
+
             stmt = insert(MarketData).values(
                 timestamp=row["timestamp"],
                 trading_symbol=request.symbol,
@@ -48,7 +48,7 @@ async def process_backfill(
                 index_elements=['trading_symbol', 'timestamp']
             )
             await db.execute(stmt)
-        
+
         await db.commit()
     except Exception as e:
         print(f"Backfill failed for {request.symbol}: {e}")
@@ -59,34 +59,37 @@ async def process_backfill(
 async def trigger_backfill(
     request: BackfillRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> BackfillResponse:
     """Trigger a background job to backfill historical OHLCV data."""
-    
+
     # We trigger the backfill async
     background_tasks.add_task(process_backfill, request, current_user["sub"], db)
-    
+
     return BackfillResponse(
-        message=f"Backfill job started for {request.symbol} from {request.from_date} to {request.to_date}",
+        message=(
+            f"Backfill job started for {request.symbol} "
+            f"from {request.from_date} to {request.to_date}"
+        ),
         records_inserted=0  # Since it's async
     )
 
 
-@router.get("/ohlcv/{symbol}", response_model=List[OHLCV])
+@router.get("/ohlcv/{symbol}", response_model=list[OHLCV])
 async def get_historical_ohlcv(
     symbol: str,
     limit: int = 1000,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
-) -> List[OHLCV]:
+) -> list[OHLCV]:
     """Retrieve historical OHLCV data from the database."""
-    
+
     query = select(MarketData).where(
         MarketData.trading_symbol == symbol
     ).order_by(asc(MarketData.timestamp)).limit(limit)
-    
+
     result = await db.execute(query)
     records = result.scalars().all()
-    
-    return records
+
+    return [OHLCV.model_validate(record) for record in records]

@@ -4,12 +4,13 @@ These schemas define the API contract for all auth-related operations.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    """Request body for POST /api/v1/auth/login.
+    """Request body for POST /api/v1/auth/login."""
 
     broker_name: str = Field(
         ...,
@@ -79,7 +80,7 @@ class TokenVerifyResponse(BaseModel):
     """
 
     valid: bool
-    payload: dict | None = None
+    payload: dict[str, Any] | None = None
 
 
 class AuthErrorResponse(BaseModel):

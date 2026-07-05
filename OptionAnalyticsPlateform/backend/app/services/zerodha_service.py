@@ -1,11 +1,11 @@
 """Zerodha Kite broker service implementation."""
 
-from typing import Any
 import asyncio
+from typing import Any, cast
 
 from kiteconnect import KiteConnect
 
-from app.core.exceptions import OpenAlgoAuthError, OpenAlgoConnectionError
+from app.core.exceptions import BrokerAuthError, BrokerConnectionError
 from app.models.user import TradingMode, UserProfile
 from app.services.broker_base import BrokerService
 
@@ -32,9 +32,9 @@ class ZerodhaService(BrokerService):
             profile = await asyncio.to_thread(self.client.profile)
             if profile:
                 return True
-            raise OpenAlgoAuthError("Zerodha authentication failed")
+            raise BrokerAuthError("Zerodha authentication failed")
         except Exception as e:
-            raise OpenAlgoConnectionError(f"Cannot connect to Zerodha: {e}") from e
+            raise BrokerConnectionError(f"Cannot connect to Zerodha: {e}") from e
 
     async def get_profile(self) -> UserProfile:
         try:
@@ -47,38 +47,40 @@ class ZerodhaService(BrokerService):
                 funds=None,
             )
         except Exception as e:
-            raise OpenAlgoConnectionError(f"Failed to retrieve profile: {e}") from e
+            raise BrokerConnectionError(f"Failed to retrieve profile: {e}") from e
 
     async def get_funds(self) -> dict[str, Any]:
         try:
             margins = await asyncio.to_thread(self.client.margins)
-            return margins.get('equity', {})
+            return cast(dict[str, Any], margins.get('equity', {}))
         except Exception as e:
-            raise OpenAlgoConnectionError(f"Failed to retrieve funds: {e}") from e
+            raise BrokerConnectionError(f"Failed to retrieve funds: {e}") from e
 
     async def get_holdings(self) -> list[dict[str, Any]]:
         try:
             return await asyncio.to_thread(self.client.holdings)
         except Exception as e:
-            raise OpenAlgoConnectionError(f"Failed to retrieve holdings: {e}") from e
+            raise BrokerConnectionError(f"Failed to retrieve holdings: {e}") from e
 
     async def get_positions(self) -> list[dict[str, Any]]:
         try:
             positions = await asyncio.to_thread(self.client.positions)
-            return positions.get("net", [])
+            return cast(list[dict[str, Any]], positions.get("net", []))
         except Exception as e:
-            raise OpenAlgoConnectionError(f"Failed to retrieve positions: {e}") from e
+            raise BrokerConnectionError(f"Failed to retrieve positions: {e}") from e
 
     async def get_orderbook(self) -> list[dict[str, Any]]:
         try:
             return await asyncio.to_thread(self.client.orders)
         except Exception as e:
-            raise OpenAlgoConnectionError(f"Failed to retrieve orderbook: {e}") from e
+            raise BrokerConnectionError(f"Failed to retrieve orderbook: {e}") from e
 
     async def get_instruments(self, symbol: str) -> list[dict[str, Any]]:
         return []
-        
-    async def get_historical_data(self, symbol: str, from_date: str, to_date: str, resolution: str) -> list[dict[str, Any]]:
+
+    async def get_historical_data(
+        self, symbol: str, from_date: str, to_date: str, resolution: str
+    ) -> list[dict[str, Any]]:
         return []
 
     async def close(self) -> None:

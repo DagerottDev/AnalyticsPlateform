@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import DashboardLayout from "@/components/layout/DashboardLayout";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useReplayStore } from "@/stores/replayStore";
 import { generateSessionTicks, startPlayback, stopPlayback } from "@/lib/replayEngine";
 import { getInstruments } from "@/lib/market";
@@ -133,7 +133,7 @@ export default function ReplayPage() {
             <div className="bg-[#18181b] p-4 rounded-lg flex gap-3 text-sm text-[var(--color-text-muted)] border border-[var(--color-border-subtle)]">
               <AlertTriangle className="w-5 h-5 text-yellow-500 shrink-0" />
               <p>
-                This mode will disconnect your live OpenAlgo WebSocket feed and inject thousands of mathematically simulated 
+                This mode will disconnect your live broker WebSocket feed and inject thousands of mathematically simulated
                 ticks (using Geometric Brownian Motion) to test platform stability and analytic responsiveness. 
                 <br/><br/>
                 <b>All dashboards will render this simulated data until stopped.</b>

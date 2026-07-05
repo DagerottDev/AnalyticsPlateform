@@ -4,6 +4,9 @@ import { MarketTick, TickData } from "@/types/market";
 import { useAuth } from "@/hooks/useAuth";
 import { useReplayStore } from "@/stores/replayStore";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 export function useMarketData(symbols: string[]) {
   const { user } = useAuth();
   const [ticks, setTicks] = useState<Record<string, MarketTick>>({});
@@ -20,9 +23,9 @@ export function useMarketData(symbols: string[]) {
     // If Replay Mode is active, we disconnect/ignore live websocket
     if (replayIsActive) return;
 
-    if (!user?.openalgo_host || !user?.client_id) return;
-    
-    const ws = getWebSocket(user.openalgo_host, "internal_dev_key");
+    if (!user?.client_id) return;
+
+    const ws = getWebSocket(API_BASE_URL, "internal_dev_key");
     
     const handleTick = (tick: MarketTick) => {
       setTicks((prev) => ({

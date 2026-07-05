@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import DashboardLayout from "@/components/layout/DashboardLayout";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TradingChart } from "@/components/charts/TradingChart";
 import { Heatmap } from "@/components/charts/Heatmap";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
-import { api } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 import { OHLCVData } from "@/lib/indicators";
 import { Instrument } from "@/types/market";
 import { getInstruments } from "@/lib/market";
@@ -59,11 +59,18 @@ export default function ChartsPage() {
       try {
         // Fetch historical data from backend
         // Defaulting to base symbol for the main chart
-        const response = await api.get(`/historical/ohlcv/${symbol}`);
+        const response = await apiClient.get(`/historical/ohlcv/${symbol}`);
         if (isMounted) {
           // Response is expected to be array of OHLCV
-          if (Array.isArray(response) && response.length > 0) {
-            const formatted = response.map((item: any) => ({
+          if (Array.isArray(response.data) && response.data.length > 0) {
+            const formatted = response.data.map((item: {
+              timestamp: string;
+              open: number;
+              high: number;
+              low: number;
+              close: number;
+              volume: number;
+            }) => ({
               time: item.timestamp,
               open: item.open,
               high: item.high,
@@ -89,7 +96,7 @@ export default function ChartsPage() {
       // Generate realistic mock data for UI testing
       const data: OHLCVData[] = [];
       let currentPrice = symbol === "NIFTY" ? 22000 : 48000;
-      let currentTime = new Date();
+      const currentTime = new Date();
       currentTime.setHours(9, 15, 0, 0); // Market open
 
       for (let i = 0; i < 375; i++) { // 1 minute candles for a trading day
@@ -152,11 +159,11 @@ export default function ChartsPage() {
 
         {/* Controls */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <InstrumentSelector 
-            selectedSymbol={symbol} 
-            onSymbolChange={(s) => { setSymbol(s); setExpiry(null); }} 
-            selectedExpiry={expiry} 
-            onExpiryChange={setExpiry} 
+          <InstrumentSelector
+            symbol={symbol}
+            onSymbolChange={(s) => { setSymbol(s); setExpiry(null); }}
+            expiry={expiry}
+            onExpiryChange={setExpiry}
           />
           
           <div className="flex items-center gap-2 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 shadow-sm">

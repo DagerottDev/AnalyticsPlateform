@@ -7,25 +7,19 @@ import {
 
 describe("Strategy Builder Engine", () => {
   const dummyInstrumentCE = {
-    instrument_token: 1,
-    exchange_token: "1",
-    tradingsymbol: "NIFTY24DEC22000CE",
-    name: "NIFTY",
+    trading_symbol: "NIFTY24DEC22000CE",
+    symbol: "NIFTY",
+    instrument_type: "OPTIDX",
     expiry: new Date(new Date().getTime() + 86400000 * 10).toISOString(), // 10 days
     strike: 22000,
-    tick_size: 0.05,
-    lot_size: 25,
-    instrument_type: "OPTIDX",
-    option_type: "CE",
+    option_type: "CE" as const,
     exchange: "NFO",
-    trading_symbol: "NIFTY24DEC22000CE"
   };
 
   const dummyInstrumentPE = {
     ...dummyInstrumentCE,
-    tradingsymbol: "NIFTY24DEC22000PE",
-    option_type: "PE",
-    trading_symbol: "NIFTY24DEC22000PE"
+    trading_symbol: "NIFTY24DEC22000PE",
+    option_type: "PE" as const,
   };
 
   it("calculates Long Call payoff correctly", () => {

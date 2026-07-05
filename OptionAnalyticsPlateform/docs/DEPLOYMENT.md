@@ -32,7 +32,7 @@ This approach uses Docker only for the database/cache, while you run the fronten
 
 1. **Start Infrastructure (DB & Redis)**:
    ```bash
-   docker compose -f docker/docker-compose.yml up db redis -d
+   docker compose -f docker/docker-compose.yml up postgres redis -d
    ```
 
 2. **Start Backend**:
@@ -79,19 +79,18 @@ To deploy this platform securely to a live server (e.g., Ubuntu 22.04 on Digital
    - For the **Backend** (`backend/.env`):
      ```env
      # backend/.env
-     PROJECT_NAME="Option Analytics Platform"
-     VERSION="1.0.0"
-     API_V1_STR="/api/v1"
-     SECRET_KEY="generate_a_very_long_random_string_here"
-     POSTGRES_SERVER="db"
-     POSTGRES_USER="postgres"
-     POSTGRES_PASSWORD="secure_prod_password"
-     POSTGRES_DB="option_analytics"
-     REDIS_HOST="redis"
-     REDIS_PORT=6379
+     APP_ENV=production
+     APP_DEBUG=false
+     JWT_SECRET=generate_a_very_long_random_string_here
+     JWT_ALGORITHM=HS256
+     JWT_EXPIRY_MINUTES=480
+     DATABASE_URL=postgresql+asyncpg://postgres:secure_prod_password@postgres:5432/option_analytics
+     REDIS_URL=redis://redis:6379/0
      # Important: In prod, CORS should be specific
-     CORS_ORIGINS=["https://yourdomain.com"]
+     CORS_ORIGINS=https://yourdomain.com
      ```
+     Note: broker credentials (Fyers/Zerodha) are not environment variables — they are
+     supplied per-request via the `/api/v1/auth/login` body.
    - For the **Frontend** (`frontend/.env.local`):
      ```env
      # frontend/.env.local
@@ -163,10 +162,10 @@ Follow the prompts. Certbot will automatically modify your Nginx config to use S
 ### Viewing Logs
 ```bash
 # View backend logs
-docker compose -f docker/docker-compose.yml logs -f api
+docker compose -f docker/docker-compose.yml logs -f backend
 
 # View frontend logs
-docker compose -f docker/docker-compose.yml logs -f web
+docker compose -f docker/docker-compose.yml logs -f frontend
 ```
 
 ### Updating to a New Version

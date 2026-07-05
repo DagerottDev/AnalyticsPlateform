@@ -82,3 +82,10 @@ Track implementation status per feature.
 | CI/CD pipeline | M1 | ✅ Done | GitHub Actions |
 | Premium dark theme | M1 | ✅ Done | TradingView-style |
 | Responsive layout | M1 | ✅ Done | Sidebar + header |
+
+> **Caveat**: "Done" means the UI/logic is built and wired end-to-end, including a mock-data
+> fallback. `FyersService.get_instruments`/`get_historical_data` and
+> `ZerodhaService.get_instruments`/`get_historical_data` are still stubbed to return `[]` —
+> real broker instrument/candle fetching is not implemented yet, so Market Data, Charting,
+> Volatility, Dealer Flow, and Strategy Builder currently run on the frontend's mock-data
+> fallback rather than live broker data. See `docs/PROJECT_STATUS.md` Known Issues.
