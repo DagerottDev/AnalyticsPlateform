@@ -3,26 +3,20 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.v1.auth import get_current_user
-from app.models.user import UserProfile
 from app.schemas.market import ExpiryList, Instrument, InstrumentResponse
-from app.services.openalgo_service import OpenAlgoService
+from app.services.session_manager import session_manager
 
 router = APIRouter(prefix="/market", tags=["Market Data"])
 
 
 @router.get("/instruments/{symbol}", response_model=InstrumentResponse)
 async def get_instruments(
-    symbol: str, current_user: UserProfile = Depends(get_current_user)
+    symbol: str, current_user: dict = Depends(get_current_user)
 ) -> InstrumentResponse:
     """Get active instruments (options) for a given symbol."""
-    service = OpenAlgoService(
-        host=current_user.openalgo_host,
-        api_key="internal_use",  # The exact API key is not stored in the JWT for security,
-                                 # but OpenAlgo might need it. If needed, the frontend must supply it
-                                 # or it should be cached securely.
-                                 # For our mock/development flow, the service allows this.
-        trading_mode=current_user.trading_mode,
-    )
+    service = session_manager.get_session(current_user["sub"])
+    if not service:
+        raise HTTPException(status_code=401, detail="Active broker session not found")
     
     # Wait, the JWT token currently doesn't store the API key. 
     # Let's adjust to pass API key from header or assume OpenAlgo is accessible without it 
@@ -38,15 +32,12 @@ async def get_instruments(
 
 @router.get("/expiries/{symbol}", response_model=ExpiryList)
 async def get_expiries(
-    symbol: str, current_user: UserProfile = Depends(get_current_user)
+    symbol: str, current_user: dict = Depends(get_current_user)
 ) -> ExpiryList:
     """Get a list of available expiries for a given symbol."""
-    # To get expiries, we fetch all instruments and extract unique expiries.
-    service = OpenAlgoService(
-        host=current_user.openalgo_host,
-        api_key="internal_use",
-        trading_mode=current_user.trading_mode,
-    )
+    service = session_manager.get_session(current_user["sub"])
+    if not service:
+        raise HTTPException(status_code=401, detail="Active broker session not found")
     try:
         raw_instruments = await service.get_instruments(symbol.upper())
         expiries = set()

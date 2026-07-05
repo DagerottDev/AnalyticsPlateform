@@ -33,7 +33,7 @@ class UserProfile:
     client_id: str
     broker_name: str
     trading_mode: TradingMode
-    openalgo_host: str
+    account_name: str = "Default"
     funds: dict[str, Any] | None = None
     connected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -43,6 +43,6 @@ class UserProfile:
             "sub": self.client_id,
             "broker": self.broker_name,
             "trading_mode": self.trading_mode.value,
-            "openalgo_host": self.openalgo_host,
+            "account_name": self.account_name,
             "connected_at": self.connected_at.isoformat(),
         }

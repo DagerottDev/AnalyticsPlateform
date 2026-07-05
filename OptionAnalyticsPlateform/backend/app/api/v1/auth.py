@@ -21,7 +21,9 @@ from app.schemas.auth import (
     TokenVerifyResponse,
     UserProfileResponse,
 )
-from app.services.openalgo_service import OpenAlgoService
+from app.services.fyers_service import FyersService
+from app.services.zerodha_service import ZerodhaService
+from app.services.session_manager import session_manager
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -57,11 +59,23 @@ async def login(
     """
     trading_mode = TradingMode(request.trading_mode)
 
-    service = OpenAlgoService(
-        host=request.host,
-        api_key=request.api_key,
-        trading_mode=trading_mode,
-    )
+    if request.broker_name.lower() == "fyers":
+        service = FyersService(
+            app_id=request.app_id or "",
+            access_token=request.access_token or "",
+            trading_mode=trading_mode,
+        )
+    elif request.broker_name.lower() == "zerodha":
+        service = ZerodhaService(
+            api_key=request.api_key or "",
+            access_token=request.access_token or "",
+            trading_mode=trading_mode,
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported broker",
+        )
 
     try:
         # Verify connection and get profile
@@ -73,6 +87,9 @@ async def login(
             settings=settings,
         )
 
+        # Store service in memory session
+        session_manager.set_session(profile.client_id, service)
+
         return LoginResponse(
             access_token=token,
             expires_in=settings.jwt_expiry_minutes * 60,
@@ -80,23 +97,23 @@ async def login(
                 client_id=profile.client_id,
                 broker_name=profile.broker_name,
                 trading_mode=profile.trading_mode.value,
-                openalgo_host=profile.openalgo_host,
+                account_name=profile.account_name,
                 connected_at=profile.connected_at,
             ),
         )
 
     except OpenAlgoAuthError as e:
+        await service.close()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=e.message,
         ) from e
     except OpenAlgoConnectionError as e:
+        await service.close()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=e.message,
         ) from e
-    finally:
-        await service.close()
 
 
 @router.get(
@@ -123,7 +140,7 @@ async def get_me(
         client_id=current_user["sub"],
         broker_name=current_user.get("broker", "Unknown"),
         trading_mode=current_user.get("trading_mode", "paper"),
-        openalgo_host=current_user.get("openalgo_host", ""),
+        account_name=current_user.get("account_name", ""),
         connected_at=current_user.get("connected_at", ""),
     )
 
@@ -175,4 +192,6 @@ async def logout(
     Returns:
         Success message.
     """
-    return {"message": "Successfully logged out", "client_id": current_user["sub"]}
+    client_id = current_user["sub"]
+    await session_manager.remove_session(client_id)
+    return {"message": "Successfully logged out", "client_id": client_id}

@@ -5,24 +5,22 @@ from sqlalchemy import select, asc
 
 from app.api.v1.auth import get_current_user
 from app.db.session import get_db
-from app.models.user import UserProfile
 from app.models.market_data import MarketData
 from app.schemas.historical import OHLCV, BackfillRequest, BackfillResponse
-from app.services.openalgo_service import OpenAlgoService
+from app.services.session_manager import session_manager
 
 router = APIRouter(prefix="/historical", tags=["Historical Data"])
 
 async def process_backfill(
     request: BackfillRequest,
-    current_user: UserProfile,
+    client_id: str,
     db: AsyncSession
 ):
     """Background task to fetch and save historical data."""
-    service = OpenAlgoService(
-        host=current_user.openalgo_host,
-        api_key="internal_use",
-        trading_mode=current_user.trading_mode,
-    )
+    service = session_manager.get_session(client_id)
+    if not service:
+        print(f"Session not found for {client_id}")
+        return
     
     try:
         raw_data = await service.get_historical_data(
@@ -61,13 +59,13 @@ async def process_backfill(
 async def trigger_backfill(
     request: BackfillRequest,
     background_tasks: BackgroundTasks,
-    current_user: UserProfile = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> BackfillResponse:
     """Trigger a background job to backfill historical OHLCV data."""
     
     # We trigger the backfill async
-    background_tasks.add_task(process_backfill, request, current_user, db)
+    background_tasks.add_task(process_backfill, request, current_user["sub"], db)
     
     return BackfillResponse(
         message=f"Backfill job started for {request.symbol} from {request.from_date} to {request.to_date}",
@@ -79,7 +77,7 @@ async def trigger_backfill(
 async def get_historical_ohlcv(
     symbol: str,
     limit: int = 1000,
-    current_user: UserProfile = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> List[OHLCV]:
     """Retrieve historical OHLCV data from the database."""

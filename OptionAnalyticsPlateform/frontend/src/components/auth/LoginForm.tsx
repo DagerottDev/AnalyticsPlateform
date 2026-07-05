@@ -4,8 +4,8 @@
  * LoginForm — Premium OpenAlgo authentication form.
  *
  * Features:
- * - OpenAlgo host URL input
- * - API key input with visibility toggle
+ * - Broker selection (Fyers / Zerodha)
+ * - Dynamic credential fields
  * - Paper/Live trading mode toggle
  * - Connection verification with animated feedback
  * - Gradient border and glassmorphism styling
@@ -30,16 +30,18 @@ import {
 
 export function LoginForm() {
   const { login, isLoading, error, clearError } = useAuth();
-  const [host, setHost] = useState("http://127.0.0.1:5000");
+  const [brokerName, setBrokerName] = useState<"fyers" | "zerodha">("fyers");
+  const [appId, setAppId] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [accessToken, setAccessToken] = useState("");
   const [tradingMode, setTradingMode] = useState<TradingMode>("paper");
-  const [showApiKey, setShowApiKey] = useState(false);
+  const [showToken, setShowToken] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     clearError();
     try {
-      await login(apiKey, host, tradingMode);
+      await login(brokerName, appId, apiKey, accessToken, tradingMode);
     } catch {
       // Error is handled by the store
     }
@@ -56,7 +58,7 @@ export function LoginForm() {
           Option Analytics
         </h1>
         <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-          Connect to your broker through OpenAlgo
+          Connect to your broker directly
         </p>
       </div>
 
@@ -66,52 +68,78 @@ export function LoginForm() {
           onSubmit={handleSubmit}
           className="glass-strong space-y-5 rounded-xl p-6"
         >
-          {/* OpenAlgo Host */}
+          {/* Broker Selection */}
           <div className="space-y-2">
-            <label
-              htmlFor="openalgo-host"
-              className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]"
-            >
+            <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
               <Server className="h-3.5 w-3.5" />
-              OpenAlgo Host
+              Broker
             </label>
-            <input
-              id="openalgo-host"
-              type="url"
-              value={host}
-              onChange={(e) => setHost(e.target.value)}
-              placeholder="http://127.0.0.1:5000"
-              required
-              className="focus-ring w-full"
-            />
+            <select
+              value={brokerName}
+              onChange={(e) => setBrokerName(e.target.value as any)}
+              className="focus-ring w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-surface)] p-2 text-sm text-[var(--color-text-primary)]"
+            >
+              <option value="fyers">Fyers</option>
+              <option value="zerodha">Zerodha</option>
+            </select>
           </div>
 
-          {/* API Key */}
+          {/* Broker Specific Fields */}
+          {brokerName === "fyers" && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                <KeyRound className="h-3.5 w-3.5" />
+                App ID (Client ID)
+              </label>
+              <input
+                type="text"
+                value={appId}
+                onChange={(e) => setAppId(e.target.value)}
+                placeholder="Enter your Fyers App ID"
+                required
+                className="focus-ring w-full"
+              />
+            </div>
+          )}
+
+          {brokerName === "zerodha" && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                <KeyRound className="h-3.5 w-3.5" />
+                API Key
+              </label>
+              <input
+                type="text"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Enter your Zerodha API key"
+                required
+                className="focus-ring w-full"
+              />
+            </div>
+          )}
+
           <div className="space-y-2">
-            <label
-              htmlFor="api-key"
-              className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]"
-            >
+            <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
               <KeyRound className="h-3.5 w-3.5" />
-              API Key
+              Access Token
             </label>
             <div className="relative">
               <input
-                id="api-key"
-                type={showApiKey ? "text" : "password"}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Enter your OpenAlgo API key"
+                type={showToken ? "text" : "password"}
+                value={accessToken}
+                onChange={(e) => setAccessToken(e.target.value)}
+                placeholder="Enter your Access Token"
                 required
                 className="focus-ring w-full pr-10"
               />
               <button
                 type="button"
-                onClick={() => setShowApiKey(!showApiKey)}
+                onClick={() => setShowToken(!showToken)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]"
-                aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                aria-label={showToken ? "Hide token" : "Show token"}
               >
-                {showApiKey ? (
+                {showToken ? (
                   <EyeOff className="h-4 w-4" />
                 ) : (
                   <Eye className="h-4 w-4" />
@@ -173,10 +201,10 @@ export function LoginForm() {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isLoading || !apiKey}
+            disabled={isLoading || !accessToken || (brokerName === 'fyers' ? !appId : !apiKey)}
             className={cn(
               "flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white transition-all",
-              isLoading || !apiKey
+              isLoading || !accessToken || (brokerName === 'fyers' ? !appId : !apiKey)
                 ? "cursor-not-allowed bg-[var(--color-bg-surface)] text-[var(--color-text-muted)]"
                 : "bg-gradient-to-r from-[var(--color-accent-blue)] to-[var(--color-accent-cyan)] shadow-lg hover:shadow-[var(--shadow-glow-blue)] hover:brightness-110 active:scale-[0.98]"
             )}
@@ -184,7 +212,7 @@ export function LoginForm() {
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Connecting to OpenAlgo...
+                Connecting to Broker...
               </>
             ) : (
               <>
@@ -198,7 +226,7 @@ export function LoginForm() {
 
       {/* Footer */}
       <p className="mt-6 text-center text-xs text-[var(--color-text-muted)]">
-        Secured by OpenAlgo • Supports 30+ Indian Brokers
+        Secured directly by Broker API
       </p>
     </div>
   );

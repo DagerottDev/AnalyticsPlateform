@@ -28,8 +28,8 @@ export function useAuth() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = useCallback(
-    async (apiKey: string, host: string, tradingMode: TradingMode) => {
-      await store.login({ api_key: apiKey, host, trading_mode: tradingMode });
+    async (brokerName: string, appId: string, apiKey: string, accessToken: string, tradingMode: TradingMode) => {
+      await store.login({ broker_name: brokerName, app_id: appId, api_key: apiKey, access_token: accessToken, trading_mode: tradingMode });
     },
     [store]
   );

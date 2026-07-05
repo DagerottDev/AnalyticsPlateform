@@ -2,13 +2,13 @@
  * Zustand authentication store.
  *
  * Manages auth state with localStorage persistence.
- * Handles login via OpenAlgo API key, logout, and session hydration.
+ * Handles login via Broker API keys, logout, and session hydration.
  */
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { AuthStore, TradingMode } from "@/types/auth";
-import { loginWithOpenAlgo, logoutUser } from "@/lib/auth";
+import { loginWithBroker, logoutUser } from "@/lib/auth";
 
 export const useAuthStore = create<AuthStore>()(
   persist(
@@ -25,7 +25,7 @@ export const useAuthStore = create<AuthStore>()(
       login: async (request) => {
         set({ isLoading: true, error: null });
         try {
-          const response = await loginWithOpenAlgo(request);
+          const response = await loginWithBroker(request);
           set({
             token: response.access_token,
             user: response.user,
@@ -38,7 +38,7 @@ export const useAuthStore = create<AuthStore>()(
           const message =
             error instanceof Error
               ? error.message
-              : "Login failed. Please check your API key and OpenAlgo connection.";
+              : "Login failed. Please check your credentials.";
 
           // Extract axios error message if available
           const axiosError = error as {

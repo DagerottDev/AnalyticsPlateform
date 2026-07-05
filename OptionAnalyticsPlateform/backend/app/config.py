@@ -26,10 +26,6 @@ class Settings(BaseSettings):
     app_title: str = "Option Analytics Platform"
     app_version: str = "0.1.0"
 
-    # OpenAlgo
-    openalgo_host: str = "http://127.0.0.1:5000"
-    openalgo_api_key: str = ""
-
     # JWT
     jwt_secret: str = "change-this-to-a-secure-random-string-in-production"
     jwt_algorithm: str = "HS256"

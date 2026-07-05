@@ -1,6 +1,6 @@
 # Option Analytics Platform
 
-A production-grade, responsive web platform for Indian options analytics with multi-broker support through [OpenAlgo](https://openalgo.in).
+A production-grade, responsive web platform for Indian options analytics with native multi-broker support (Fyers, Zerodha). It uses a stateless, single-account session flow ensuring your data routes securely through your connected broker.
 
 ## Architecture
 
@@ -10,14 +10,14 @@ A production-grade, responsive web platform for Indian options analytics with mu
 | Backend | FastAPI, Python 3.12, WebSockets |
 | Analytics | Native TypeScript (Black-Scholes, Greeks, GBM Replay Engine) |
 | Storage | PostgreSQL + TimescaleDB, Redis |
-| Broker | OpenAlgo (30+ Indian brokers) |
+| Broker | Native SDKs (Fyers API v3, Kite Connect) |
 | Infra | Docker, GitHub Actions CI/CD |
 
 ## Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
-- OpenAlgo running locally (default: `http://127.0.0.1:5000`)
+- Valid API credentials for your preferred broker (e.g. Fyers App ID/Token, Zerodha API Key/Token).
 
 ### Development
 

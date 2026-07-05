@@ -13,14 +13,16 @@ export interface UserProfile {
   client_id: string;
   broker_name: string;
   trading_mode: TradingMode;
-  openalgo_host: string;
+  account_name: string;
   connected_at: string;
 }
 
 /** Login request payload */
 export interface LoginRequest {
-  api_key: string;
-  host: string;
+  broker_name: string;
+  app_id?: string;
+  api_key?: string;
+  access_token?: string;
   trading_mode: TradingMode;
 }
 

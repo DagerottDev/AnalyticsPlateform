@@ -25,7 +25,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     print(f"🚀 Starting {settings.app_title} v{settings.app_version}")
     print(f"   Environment: {settings.app_env}")
-    print(f"   OpenAlgo Host: {settings.openalgo_host}")
     yield
     # Shutdown
     print(f"👋 Shutting down {settings.app_title}")
@@ -38,7 +37,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_title,
         version=settings.app_version,
-        description="Production-grade Indian options analytics platform with OpenAlgo integration",
+        description="Production-grade Indian options analytics platform",
         docs_url="/api/docs" if settings.is_development else None,
         redoc_url="/api/redoc" if settings.is_development else None,
         openapi_url="/api/openapi.json" if settings.is_development else None,

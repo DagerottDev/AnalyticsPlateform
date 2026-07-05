@@ -11,23 +11,14 @@ from pydantic import BaseModel, Field
 class LoginRequest(BaseModel):
     """Request body for POST /api/v1/auth/login.
 
-    Attributes:
-        api_key: OpenAlgo API key for authentication.
-        host: OpenAlgo instance URL (defaults to localhost).
-        trading_mode: Paper or live trading mode.
-    """
-
-    api_key: str = Field(
+    broker_name: str = Field(
         ...,
-        min_length=1,
-        description="OpenAlgo API key",
-        examples=["your_openalgo_api_key"],
+        description="Broker name (fyers or zerodha)",
     )
-    host: str = Field(
-        default="http://127.0.0.1:5000",
-        description="OpenAlgo host URL",
-        examples=["http://127.0.0.1:5000"],
-    )
+    app_id: str | None = Field(default=None, description="App ID / Client ID")
+    api_key: str | None = Field(default=None, description="API Key")
+    api_secret: str | None = Field(default=None, description="API Secret")
+    access_token: str | None = Field(default=None, description="Access Token")
     trading_mode: str = Field(
         default="paper",
         pattern="^(paper|live)$",
@@ -58,14 +49,14 @@ class UserProfileResponse(BaseModel):
         client_id: Broker client ID.
         broker_name: Connected broker name.
         trading_mode: Current trading mode.
-        openalgo_host: Connected OpenAlgo instance.
+        account_name: Associated account name.
         connected_at: Connection timestamp.
     """
 
     client_id: str
     broker_name: str
     trading_mode: str
-    openalgo_host: str
+    account_name: str
     connected_at: datetime
 
 
