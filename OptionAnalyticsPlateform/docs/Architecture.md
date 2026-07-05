@@ -27,7 +27,7 @@ Storage:
 - Redis
 
 Broker Layer:
-- OpenAlgo
+- Native Broker SDKs
 
 Deployment:
 - Docker

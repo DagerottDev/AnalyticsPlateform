@@ -6,7 +6,7 @@ Current Milestone:
 Completed:
 - M1: Foundation
   - Monorepo structure (backend/ + frontend/)
-  - FastAPI backend with OpenAlgo auth (JWT)
+  - FastAPI backend with Broker API auth (JWT)
   - Next.js 15 frontend with Tailwind v4 + Zustand
   - Premium TradingView-style dark theme
   - Docker Compose (backend, frontend, PostgreSQL+TimescaleDB, Redis)
@@ -16,7 +16,7 @@ Completed:
 
 - M2: Market Data
   - Market data schemas and API endpoints (`/market/instruments`, `/market/expiries`)
-  - OpenAlgo WebSocket client with reconnect and mock fallback
+  - Broker WebSocket client with reconnect and mock fallback
   - `useMarketData` React hook for live streaming ticks
   - Option Chain UI with Calls/Puts grid and ITM highlighting
   - Instrument selection (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY) and expiry picker
@@ -24,7 +24,7 @@ Completed:
 - M3: Historical Engine
   - Database setup with SQLAlchemy and Alembic.
   - TimescaleDB hypertable migration for `market_data` (OHLCV).
-  - Background jobs for fetching historical data from OpenAlgo API (with mock fallback).
+  - Background jobs for fetching historical data from Broker API (with mock fallback).
   - Backend API endpoints (`/historical/backfill`, `/historical/ohlcv/{symbol}`).
 
 - M4: Greek Engine
@@ -91,7 +91,7 @@ Tech Stack Locked:
 - Frontend: Next.js 15 + TypeScript + Tailwind v4 + Zustand + TanStack Query + Lightweight Charts + Recharts + Sonner
 - Database: PostgreSQL + TimescaleDB
 - Cache: Redis
-- Broker: OpenAlgo
+- Broker: Native SDKs (Fyers, Zerodha)
 - CI/CD: GitHub Actions
 - Container: Docker + Docker Compose
 

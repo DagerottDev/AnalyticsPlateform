@@ -5,8 +5,8 @@ Track implementation status per feature.
 | Feature | Milestone | Status | Notes |
 |---------|-----------|--------|-------|
 | **Authentication** | | | |
-| OpenAlgo integration | M1 | ✅ Done | API key → JWT flow |
-| Broker abstraction layer | M1 | ✅ Done | OpenAlgoService class |
+| Direct Broker integration | M1 | ✅ Done | Broker credentials → JWT flow |
+| Broker abstraction layer | M1 | ✅ Done | BrokerService class |
 | Paper trading mode | M1 | ✅ Done | Paper/Live toggle |
 | Live trading mode | M1 | ✅ Done | With warning badge |
 | **Instrument Selection** | | | |

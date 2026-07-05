@@ -9,7 +9,7 @@ Foundation
 
 M2:
 Market Data
-- OpenAlgo
+- Native Broker Auth
 - Option Chain
 - WebSockets
 

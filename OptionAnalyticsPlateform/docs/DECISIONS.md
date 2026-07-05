@@ -4,12 +4,12 @@ Append all major decisions here.
 
 ---
 
-## ADR-001: OpenAlgo API Key as Authentication Identity
+## ADR-001: Broker API Credentials as Authentication Identity
 **Date:** 2026-06-26
 **Status:** Accepted
-**Context:** The platform needs user authentication but OpenAlgo is self-hosted and users authenticate through their broker's login flow within OpenAlgo.
-**Decision:** Use OpenAlgo API key as the sole authentication credential. No passwords stored. API key verification is done by calling OpenAlgo's `/api/v1/funds` endpoint. On success, a JWT session token is issued.
-**Consequences:** Simple auth flow, no password management, but requires OpenAlgo to be running for login.
+**Context:** The platform needs user authentication but uses native broker APIs directly to connect the user to their trading account.
+**Decision:** Use Broker credentials (App ID/API Key) as the sole authentication credential. No passwords stored. API key verification is done by fetching the broker profile. On success, a JWT session token is issued and the broker session is kept in-memory.
+**Consequences:** Simple auth flow, no password management, relies on broker API availability.
 
 ---
 

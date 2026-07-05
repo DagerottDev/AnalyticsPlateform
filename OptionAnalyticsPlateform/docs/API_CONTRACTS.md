@@ -10,7 +10,7 @@ Frontend/backend interface definitions.
 ## Authentication
 
 ### POST `/auth/login`
-Authenticate with OpenAlgo API key.
+Authenticate with Broker API credentials.
 
 **Request:**
 ```json
@@ -31,13 +31,13 @@ Authenticate with OpenAlgo API key.
     "client_id": "ABC123",
     "broker_name": "Zerodha",
     "trading_mode": "paper",
-    "openalgo_host": "http://127.0.0.1:5000",
+    "broker_name": "fyers",
     "connected_at": "2024-01-01T00:00:00+00:00"
   }
 }
 ```
 
-**Errors:** `401` (invalid key), `503` (OpenAlgo unreachable), `422` (validation)
+**Errors:** `401` (invalid credentials), `503` (Broker API unreachable), `422` (validation)
 
 ---
 
@@ -50,7 +50,7 @@ Get current user profile. Requires Bearer token.
   "client_id": "ABC123",
   "broker_name": "Zerodha",
   "trading_mode": "paper",
-  "openalgo_host": "http://127.0.0.1:5000",
+  "broker_name": "fyers",
   "connected_at": "2024-01-01T00:00:00+00:00"
 }
 ```
