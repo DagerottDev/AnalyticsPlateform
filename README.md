@@ -28,7 +28,7 @@ docker compose -f docker/docker-compose.yml up -d
 # Backend only (development)
 cd backend
 poetry install
-poetry run uvicorn app.main:app --reload --port 8000
+poetry run uvicorn app.main:app --reload --port 8001
 
 # Frontend only (development)
 cd frontend

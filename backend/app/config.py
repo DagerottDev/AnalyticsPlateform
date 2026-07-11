@@ -32,13 +32,13 @@ class Settings(BaseSettings):
     jwt_expiry_minutes: int = 480  # 8 hours
 
     # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/option_analytics"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/option_analytics"
 
     # Redis
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://localhost:6380/0"
 
     # CORS
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3001"
 
     @property
     def cors_origin_list(self) -> list[str]:

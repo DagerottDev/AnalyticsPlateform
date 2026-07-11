@@ -107,3 +107,23 @@ class HealthResponse(BaseModel):
     status: str = "healthy"
     version: str
     environment: str
+
+
+class AutoLoginRequest(BaseModel):
+    """Request body for POST /api/v1/auth/auto-login."""
+
+    broker_name: str = Field(
+        default="zerodha",
+        pattern="^(zerodha)$",
+        description="Broker name (currently only zerodha is supported for auto-login)",
+    )
+    user_id: str = Field(..., description="Broker User ID")
+    password: str = Field(..., description="Broker Password")
+    totp_secret: str = Field(..., description="TOTP Secret for 2FA")
+    api_key: str = Field(..., description="Broker API Key")
+    api_secret: str = Field(..., description="Broker API Secret")
+    trading_mode: str = Field(
+        default="paper",
+        pattern="^(paper|live)$",
+        description="Trading mode: 'paper' or 'live'",
+    )

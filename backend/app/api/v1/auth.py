@@ -20,10 +20,12 @@ from app.schemas.auth import (
     TokenVerifyRequest,
     TokenVerifyResponse,
     UserProfileResponse,
+    AutoLoginRequest,
 )
 from app.services.fyers_service import FyersService
 from app.services.session_manager import session_manager
 from app.services.zerodha_service import ZerodhaService
+from app.services.zerodha_auto_login import generate_zerodha_access_token
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -117,6 +119,87 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=e.message,
+        ) from e
+
+
+@router.post(
+    "/auto-login",
+    response_model=LoginResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Auto Login with Broker Credentials and TOTP",
+    description="Automate broker login using user ID, password, and TOTP secret.",
+    responses={
+        401: {"model": AuthErrorResponse, "description": "Invalid credentials or TOTP"},
+        503: {"model": AuthErrorResponse, "description": "Broker API unreachable"},
+    },
+)
+async def auto_login(
+    request: AutoLoginRequest,
+    settings: Settings = Depends(get_settings),
+) -> LoginResponse:
+    """Automate the broker login process.
+
+    Currently supports only Zerodha. Automates the flow by generating the TOTP,
+    fetching the request_token, and exchanging it for an access_token.
+    """
+    trading_mode = TradingMode(request.trading_mode)
+
+    if request.broker_name.lower() != "zerodha":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Auto login is currently supported only for Zerodha",
+        )
+
+    try:
+        # 1. Automate the login to get access_token
+        access_token = await generate_zerodha_access_token(
+            user_id=request.user_id,
+            password=request.password,
+            totp_secret=request.totp_secret,
+            api_key=request.api_key,
+            api_secret=request.api_secret,
+        )
+
+        # 2. Initialize the service with the acquired access_token
+        service = ZerodhaService(
+            api_key=request.api_key,
+            access_token=access_token,
+            trading_mode=trading_mode,
+        )
+
+        # 3. Verify connection and get profile
+        profile = await service.get_profile()
+
+        # 4. Create JWT token
+        token = create_access_token(
+            data=profile.to_jwt_payload(),
+            settings=settings,
+        )
+
+        # 5. Store service in memory session
+        session_manager.set_session(profile.client_id, service)
+
+        return LoginResponse(
+            access_token=token,
+            expires_in=settings.jwt_expiry_minutes * 60,
+            user=UserProfileResponse(
+                client_id=profile.client_id,
+                broker_name=profile.broker_name,
+                trading_mode=profile.trading_mode.value,
+                account_name=profile.account_name,
+                connected_at=profile.connected_at,
+            ),
+        )
+
+    except BrokerAuthError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        ) from e
+    except BrokerConnectionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e),
         ) from e
 
 
