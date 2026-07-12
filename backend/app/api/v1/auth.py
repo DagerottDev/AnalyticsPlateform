@@ -188,6 +188,7 @@ async def auto_login(
                 app_id=request.api_key,
                 api_secret=request.api_secret,
                 redirect_uri=request.redirect_uri or "https://trade.fyers.in/",
+                ttl_seconds=settings.broker_token_cache_ttl_seconds,
             )
             # 2. Initialize Fyers service
             service = FyersService(

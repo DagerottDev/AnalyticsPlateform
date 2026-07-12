@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:3001"
 
+    # Broker auto-login
+    # Fyers access tokens are valid ~24h; caching avoids re-hitting the
+    # internal Vagator login endpoints on every /auto-login call, which is
+    # what triggers Cloudflare's rate limiting on repeated automated logins.
+    broker_token_cache_ttl_seconds: int = 82800  # 23 hours
+
     @property
     def cors_origin_list(self) -> list[str]:
         """Parse comma-separated CORS origins into a list."""
