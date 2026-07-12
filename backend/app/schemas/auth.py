@@ -114,16 +114,49 @@ class AutoLoginRequest(BaseModel):
 
     broker_name: str = Field(
         default="zerodha",
-        pattern="^(zerodha)$",
-        description="Broker name (currently only zerodha is supported for auto-login)",
+        pattern="^(zerodha|fyers)$",
+        description="Broker name (zerodha or fyers)",
     )
     user_id: str = Field(..., description="Broker User ID")
-    password: str = Field(..., description="Broker Password")
+    password: str | None = Field(default=None, description="Broker Password (required for Zerodha)")
     totp_secret: str = Field(..., description="TOTP Secret for 2FA")
-    api_key: str = Field(..., description="Broker API Key")
+    api_key: str = Field(..., description="Broker API Key / App ID")
     api_secret: str = Field(..., description="Broker API Secret")
+    pin: str | None = Field(default=None, description="Security PIN (required for Fyers)")
+    redirect_uri: str | None = Field(
+        default="https://trade.fyers.in/",
+        description="Fyers Redirect URI",
+    )
     trading_mode: str = Field(
         default="paper",
         pattern="^(paper|live)$",
         description="Trading mode: 'paper' or 'live'",
     )
+
+
+class ExchangeCodeRequest(BaseModel):
+    """Request body for POST /api/v1/auth/exchange-code."""
+
+    broker_name: str = Field(
+        ...,
+        pattern="^(zerodha|fyers)$",
+        description="Broker name (zerodha or fyers)",
+    )
+    auth_code: str = Field(
+        ...,
+        min_length=1,
+        description="Authorization code (Fyers) or Request token (Zerodha)",
+    )
+    api_key: str = Field(..., description="Broker API Key / App ID")
+    api_secret: str = Field(..., description="Broker API Secret")
+    redirect_uri: str = Field(
+        default="http://localhost:3001",
+        description="Redirect URI used during authorization",
+    )
+    trading_mode: str = Field(
+        default="paper",
+        pattern="^(paper|live)$",
+        description="Trading mode: 'paper' or 'live'",
+    )
+
+

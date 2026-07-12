@@ -55,9 +55,34 @@ export interface AuthState {
   tradingMode: TradingMode;
 }
 
+/** Auto login request payload */
+export interface AutoLoginRequest {
+  broker_name: string;
+  user_id: string;
+  password?: string;
+  totp_secret: string;
+  api_key: string;
+  api_secret: string;
+  pin?: string;
+  redirect_uri?: string;
+  trading_mode: TradingMode;
+}
+
+/** Exchange code request payload */
+export interface ExchangeCodeRequest {
+  broker_name: string;
+  auth_code: string;
+  api_key: string;
+  api_secret: string;
+  redirect_uri: string;
+  trading_mode: TradingMode;
+}
+
 /** Auth store actions */
 export interface AuthActions {
   login: (request: LoginRequest) => Promise<void>;
+  autoLogin: (request: AutoLoginRequest) => Promise<void>;
+  exchangeCode: (request: ExchangeCodeRequest) => Promise<void>;
   logout: () => void;
   setTradingMode: (mode: TradingMode) => void;
   clearError: () => void;
@@ -66,3 +91,4 @@ export interface AuthActions {
 
 /** Combined auth store type */
 export type AuthStore = AuthState & AuthActions;
+

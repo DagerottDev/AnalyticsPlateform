@@ -34,6 +34,54 @@ export function useAuth() {
     [store]
   );
 
+  const autoLogin = useCallback(
+    async (
+      brokerName: string,
+      userId: string,
+      password: string | undefined,
+      totpSecret: string,
+      apiKey: string,
+      apiSecret: string,
+      tradingMode: TradingMode,
+      pin?: string,
+      redirectUri?: string
+    ) => {
+      await store.autoLogin({
+        broker_name: brokerName,
+        user_id: userId,
+        password,
+        totp_secret: totpSecret,
+        api_key: apiKey,
+        api_secret: apiSecret,
+        pin,
+        redirect_uri: redirectUri,
+        trading_mode: tradingMode,
+      });
+    },
+    [store]
+  );
+
+  const exchangeCode = useCallback(
+    async (
+      brokerName: string,
+      authCode: string,
+      apiKey: string,
+      apiSecret: string,
+      redirectUri: string,
+      tradingMode: TradingMode
+    ) => {
+      await store.exchangeCode({
+        broker_name: brokerName,
+        auth_code: authCode,
+        api_key: apiKey,
+        api_secret: apiSecret,
+        redirect_uri: redirectUri,
+        trading_mode: tradingMode,
+      });
+    },
+    [store]
+  );
+
   return {
     // State
     user: store.user,
@@ -51,6 +99,8 @@ export function useAuth() {
 
     // Actions
     login,
+    autoLogin,
+    exchangeCode,
     logout: store.logout,
     setTradingMode: store.setTradingMode,
     clearError: store.clearError,

@@ -141,3 +141,32 @@ async def test_logout_unauthenticated(client: AsyncClient) -> None:
     """Logout should fail without authentication."""
     response = await client.post("/api/v1/auth/logout")
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_exchange_code_success(
+    client: AsyncClient,
+    mock_broker_service: AsyncMock,
+) -> None:
+    """Exchange code should exchange Fyers auth code and return JWT token."""
+    with patch(
+        "app.api.v1.auth.FyersService",
+        return_value=mock_broker_service,
+    ):
+        response = await client.post(
+            "/api/v1/auth/exchange-code",
+            json={
+                "broker_name": "fyers",
+                "auth_code": "mock",
+                "api_key": "mock-app-id",
+                "api_secret": "mock-secret",
+                "redirect_uri": "http://127.0.0.1:3001",
+                "trading_mode": "paper",
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "access_token" in data
+    assert data["user"]["client_id"] == "TEST_CLIENT_001"
+

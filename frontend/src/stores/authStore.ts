@@ -8,7 +8,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { AuthStore, TradingMode } from "@/types/auth";
-import { loginWithBroker, logoutUser } from "@/lib/auth";
+import { loginWithBroker, autoLoginWithBroker, exchangeCodeWithBroker, logoutUser } from "@/lib/auth";
 
 export const useAuthStore = create<AuthStore>()(
   persist(
@@ -41,6 +41,74 @@ export const useAuthStore = create<AuthStore>()(
               : "Login failed. Please check your credentials.";
 
           // Extract axios error message if available
+          const axiosError = error as {
+            response?: { data?: { detail?: string } };
+          };
+          const detail = axiosError?.response?.data?.detail || message;
+
+          set({
+            token: null,
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+            error: detail,
+          });
+          throw error;
+        }
+      },
+
+      autoLogin: async (request) => {
+        set({ isLoading: true, error: null });
+        try {
+          const response = await autoLoginWithBroker(request);
+          set({
+            token: response.access_token,
+            user: response.user,
+            isAuthenticated: true,
+            isLoading: false,
+            error: null,
+            tradingMode: response.user.trading_mode,
+          });
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Auto-login failed. Please check your credentials.";
+
+          const axiosError = error as {
+            response?: { data?: { detail?: string } };
+          };
+          const detail = axiosError?.response?.data?.detail || message;
+
+          set({
+            token: null,
+            user: null,
+            isAuthenticated: false,
+            isLoading: false,
+            error: detail,
+          });
+          throw error;
+        }
+      },
+
+      exchangeCode: async (request) => {
+        set({ isLoading: true, error: null });
+        try {
+          const response = await exchangeCodeWithBroker(request);
+          set({
+            token: response.access_token,
+            user: response.user,
+            isAuthenticated: true,
+            isLoading: false,
+            error: null,
+            tradingMode: response.user.trading_mode,
+          });
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "OAuth code exchange failed. Please verify credentials/code.";
+
           const axiosError = error as {
             response?: { data?: { detail?: string } };
           };

@@ -23,15 +23,17 @@ class FyersService(BrokerService):
         super().__init__(trading_mode, account_name)
         self.app_id = app_id
         self.access_token = access_token
-        self.client = fyersModel.FyersModel(
-            client_id=self.app_id, token=self.access_token, is_async=False, log_path=""
-        )
+        self.is_mock = access_token.startswith("mock")
+        if not self.is_mock:
+            self.client = fyersModel.FyersModel(
+                client_id=self.app_id, token=self.access_token, is_async=False, log_path=""
+            )
 
     async def verify_connection(self) -> bool:
         """Verify the Fyers connection by fetching profile."""
+        if self.is_mock:
+            return True
         try:
-            # We must run this in a threadpool if it's synchronous, but fyersModel might block.
-            # For simplicity, assuming fast response.
             response = await asyncio.to_thread(self.client.get_profile)
             if response and response.get('s') == 'ok':
                 return True
@@ -40,6 +42,14 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Cannot connect to Fyers: {e}") from e
 
     async def get_profile(self) -> UserProfile:
+        if self.is_mock:
+            return UserProfile(
+                client_id="MOCK_FY_ID",
+                broker_name="Fyers",
+                trading_mode=self.trading_mode,
+                account_name=self.account_name,
+                funds=None,
+            )
         try:
             response = await asyncio.to_thread(self.client.get_profile)
             if response and response.get('s') == 'ok':
@@ -56,6 +66,8 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve profile: {e}") from e
 
     async def get_funds(self) -> dict[str, Any]:
+        if self.is_mock:
+            return {"availableBalance": 1000000.0, "realisedPNL": 0.0}
         try:
             response = await asyncio.to_thread(self.client.funds)
             if response and response.get('s') == 'ok':
@@ -65,6 +77,16 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve funds: {e}") from e
 
     async def get_holdings(self) -> list[dict[str, Any]]:
+        if self.is_mock:
+            return [
+                {
+                    "symbol": "NSE:RELIANCE-EQ",
+                    "quantity": 10,
+                    "avgPrice": 2450.0,
+                    "marketVal": 24800.0,
+                    "pl": 300.0,
+                }
+            ]
         try:
             response = await asyncio.to_thread(self.client.holdings)
             if response and response.get('s') == 'ok':
@@ -74,6 +96,17 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve holdings: {e}") from e
 
     async def get_positions(self) -> list[dict[str, Any]]:
+        if self.is_mock:
+            return [
+                {
+                    "symbol": "NSE:NIFTY2671624300CE",
+                    "qty": 50,
+                    "avgPrice": 120.0,
+                    "lastPrice": 135.0,
+                    "realized_pl": 0.0,
+                    "unrealized_pl": 750.0,
+                }
+            ]
         try:
             response = await asyncio.to_thread(self.client.positions)
             if response and response.get('s') == 'ok':
@@ -83,6 +116,18 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve positions: {e}") from e
 
     async def get_orderbook(self) -> list[dict[str, Any]]:
+        if self.is_mock:
+            return [
+                {
+                    "orderId": "123456789",
+                    "symbol": "NSE:RELIANCE-EQ",
+                    "qty": 10,
+                    "price": 2450.0,
+                    "type": "LIMIT",
+                    "side": "BUY",
+                    "status": "FILLED",
+                }
+            ]
         try:
             response = await asyncio.to_thread(self.client.orderbook)
             if response and response.get('s') == 'ok':
