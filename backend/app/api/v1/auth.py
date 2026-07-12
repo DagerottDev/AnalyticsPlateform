@@ -284,8 +284,10 @@ async def exchange_code(
                 )
             elif broker == "fyers":
                 # Fyers auth_code exchange
+                # API v3 requires the -100 suffix for the app_id / client_id
+                client_id = request.api_key if request.api_key.endswith("-100") else f"{request.api_key}-100"
                 session = fyersModel.SessionModel(
-                    client_id=request.api_key,
+                    client_id=client_id,
                     secret_key=request.api_secret,
                     redirect_uri=request.redirect_uri,
                     response_type="code",

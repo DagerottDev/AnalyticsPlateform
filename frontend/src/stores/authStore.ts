@@ -35,23 +35,12 @@ export const useAuthStore = create<AuthStore>()(
             tradingMode: response.user.trading_mode,
           });
         } catch (error: unknown) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : "Login failed. Please check your credentials.";
-
-          // Extract axios error message if available
-          const axiosError = error as {
-            response?: { data?: { detail?: string } };
-          };
-          const detail = axiosError?.response?.data?.detail || message;
-
           set({
             token: null,
             user: null,
             isAuthenticated: false,
             isLoading: false,
-            error: detail,
+            error: error,
           });
           throw error;
         }
@@ -70,22 +59,12 @@ export const useAuthStore = create<AuthStore>()(
             tradingMode: response.user.trading_mode,
           });
         } catch (error: unknown) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : "Auto-login failed. Please check your credentials.";
-
-          const axiosError = error as {
-            response?: { data?: { detail?: string } };
-          };
-          const detail = axiosError?.response?.data?.detail || message;
-
           set({
             token: null,
             user: null,
             isAuthenticated: false,
             isLoading: false,
-            error: detail,
+            error: error,
           });
           throw error;
         }
@@ -104,22 +83,12 @@ export const useAuthStore = create<AuthStore>()(
             tradingMode: response.user.trading_mode,
           });
         } catch (error: unknown) {
-          const message =
-            error instanceof Error
-              ? error.message
-              : "OAuth code exchange failed. Please verify credentials/code.";
-
-          const axiosError = error as {
-            response?: { data?: { detail?: string } };
-          };
-          const detail = axiosError?.response?.data?.detail || message;
-
           set({
             token: null,
             user: null,
             isAuthenticated: false,
             isLoading: false,
-            error: detail,
+            error: error,
           });
           throw error;
         }

@@ -14,8 +14,9 @@
  * - Gradient border and glassmorphism styling
  */
 
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import type { TradingMode } from "@/types/auth";
 import { cn } from "@/lib/utils";
 import {
@@ -64,6 +65,52 @@ export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [showApiSecret, setShowApiSecret] = useState(false);
 
+  // Load from localStorage on mount (hydration safe)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedLoginType = localStorage.getItem("oa_login_type");
+      if (savedLoginType) setLoginType(savedLoginType as "totp" | "manual");
+
+      const savedManualMode = localStorage.getItem("oa_manual_mode");
+      if (savedManualMode) setManualMode(savedManualMode as "paste" | "wizard");
+
+      const savedBrokerName = localStorage.getItem("oa_broker_name");
+      if (savedBrokerName) setBrokerName(savedBrokerName as "fyers" | "zerodha");
+
+      setApiKey(localStorage.getItem("oa_api_key") || "");
+      setApiSecret(localStorage.getItem("oa_api_secret") || "");
+      setUserId(localStorage.getItem("oa_user_id") || "");
+      setPassword(localStorage.getItem("oa_password") || "");
+      setTotpSecret(localStorage.getItem("oa_totp_secret") || "");
+      setPin(localStorage.getItem("oa_pin") || "");
+      setAppId(localStorage.getItem("oa_app_id") || "");
+      setAccessToken(localStorage.getItem("oa_access_token") || "");
+      setRedirectUri(localStorage.getItem("oa_redirect_uri") || "http://127.0.0.1:3001");
+      
+      const savedTradingMode = localStorage.getItem("oa_trading_mode");
+      if (savedTradingMode) setTradingMode(savedTradingMode as TradingMode);
+    }
+  }, []);
+
+  // Save to localStorage on change
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("oa_login_type", loginType);
+      localStorage.setItem("oa_manual_mode", manualMode);
+      localStorage.setItem("oa_broker_name", brokerName);
+      localStorage.setItem("oa_api_key", apiKey);
+      localStorage.setItem("oa_api_secret", apiSecret);
+      localStorage.setItem("oa_user_id", userId);
+      localStorage.setItem("oa_password", password);
+      localStorage.setItem("oa_totp_secret", totpSecret);
+      localStorage.setItem("oa_pin", pin);
+      localStorage.setItem("oa_app_id", appId);
+      localStorage.setItem("oa_access_token", accessToken);
+      localStorage.setItem("oa_redirect_uri", redirectUri);
+      localStorage.setItem("oa_trading_mode", tradingMode);
+    }
+  }, [loginType, manualMode, brokerName, apiKey, apiSecret, userId, password, totpSecret, pin, appId, accessToken, redirectUri, tradingMode]);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     clearError();
@@ -99,7 +146,7 @@ export function LoginForm() {
   const getAuthUrl = () => {
     if (brokerName === "fyers") {
       // Fyers authorize url (requires appId, redirect_uri, response_type=code)
-      return `https://api.fyers.in/api/v2/generate-authcode?client_id=${apiKey}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&state=private`;
+      return `https://api.fyers.in/api/v3/generate-authcode?client_id=${apiKey}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&state=private`;
     } else {
       // Zerodha authorize url
       return `https://kite.zerodha.com/connect/login?api_key=${apiKey}&v=3`;
@@ -541,12 +588,7 @@ export function LoginForm() {
           </div>
 
           {/* Error Message */}
-          {error && (
-            <div className="flex items-start gap-2 rounded-lg bg-[var(--color-accent-red)]/10 p-3 text-sm text-[var(--color-accent-red)] animate-shake">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
+          <ApiErrorDisplay error={error} />
 
           {/* Submit Button */}
           <button

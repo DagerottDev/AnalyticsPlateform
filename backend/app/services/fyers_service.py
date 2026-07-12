@@ -21,7 +21,8 @@ class FyersService(BrokerService):
         account_name: str = "Default",
     ):
         super().__init__(trading_mode, account_name)
-        self.app_id = app_id
+        # Fyers API v3 requires the appType (-100) suffix on the client_id
+        self.app_id = app_id if app_id.endswith("-100") else f"{app_id}-100"
         self.access_token = access_token
         self.is_mock = access_token.startswith("mock")
         if not self.is_mock:
