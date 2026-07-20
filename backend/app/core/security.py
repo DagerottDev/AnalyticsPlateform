@@ -1,8 +1,7 @@
 """JWT token creation, verification, and authentication dependencies.
 
 Uses python-jose for JWT operations. Authentication is API-key-based
-through the native broker SDKs (Fyers/Zerodha) — no passwords are stored
-or managed.
+through the native Fyers SDK — no passwords are stored or managed.
 """
 
 from datetime import UTC, datetime, timedelta

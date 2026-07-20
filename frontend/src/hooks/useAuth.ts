@@ -6,7 +6,7 @@
  */
 
 import { useAuthStore } from "@/stores/authStore";
-import type { TradingMode } from "@/types/auth";
+import type { LoginRequest, TradingMode } from "@/types/auth";
 import { useCallback, useEffect, useState } from "react";
 
 /**
@@ -28,56 +28,8 @@ export function useAuth() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = useCallback(
-    async (brokerName: string, appId: string, apiKey: string, accessToken: string, tradingMode: TradingMode) => {
-      await store.login({ broker_name: brokerName, app_id: appId, api_key: apiKey, access_token: accessToken, trading_mode: tradingMode });
-    },
-    [store]
-  );
-
-  const autoLogin = useCallback(
-    async (
-      brokerName: string,
-      userId: string,
-      password: string | undefined,
-      totpSecret: string,
-      apiKey: string,
-      apiSecret: string,
-      tradingMode: TradingMode,
-      pin?: string,
-      redirectUri?: string
-    ) => {
-      await store.autoLogin({
-        broker_name: brokerName,
-        user_id: userId,
-        password,
-        totp_secret: totpSecret,
-        api_key: apiKey,
-        api_secret: apiSecret,
-        pin,
-        redirect_uri: redirectUri,
-        trading_mode: tradingMode,
-      });
-    },
-    [store]
-  );
-
-  const exchangeCode = useCallback(
-    async (
-      brokerName: string,
-      authCode: string,
-      apiKey: string,
-      apiSecret: string,
-      redirectUri: string,
-      tradingMode: TradingMode
-    ) => {
-      await store.exchangeCode({
-        broker_name: brokerName,
-        auth_code: authCode,
-        api_key: apiKey,
-        api_secret: apiSecret,
-        redirect_uri: redirectUri,
-        trading_mode: tradingMode,
-      });
+    async (request: LoginRequest) => {
+      await store.login(request);
     },
     [store]
   );
@@ -99,10 +51,8 @@ export function useAuth() {
 
     // Actions
     login,
-    autoLogin,
-    exchangeCode,
     logout: store.logout,
-    setTradingMode: store.setTradingMode,
+    setTradingMode: store.setTradingMode as (mode: TradingMode) => void,
     clearError: store.clearError,
   };
 }

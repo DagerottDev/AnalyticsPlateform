@@ -7,21 +7,22 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_login_success(
+async def test_login_oauth_success(
     client: AsyncClient,
     mock_broker_service: AsyncMock,
 ) -> None:
-    """Login should return JWT token on successful broker connection."""
+    """Login via OAuth auth_code should return JWT token on successful broker connection."""
     with patch(
-        "app.api.v1.auth.ZerodhaService",
+        "app.api.v1.auth.FyersService",
         return_value=mock_broker_service,
     ):
         response = await client.post(
             "/api/v1/auth/login",
             json={
-                "broker_name": "zerodha",
-                "api_key": "test-api-key",
-                "access_token": "test-access-token",
+                "app_id": "mock-app-id-100",
+                "api_secret": "mock-secret",
+                "redirect_uri": "http://127.0.0.1:3001",
+                "auth_code": "mock",
                 "trading_mode": "paper",
             },
         )
@@ -37,14 +38,48 @@ async def test_login_success(
 
 
 @pytest.mark.asyncio
+async def test_login_totp_success(
+    client: AsyncClient,
+    mock_broker_service: AsyncMock,
+) -> None:
+    """Login via headless TOTP auto-login should return JWT token."""
+    with (
+        patch(
+            "app.api.v1.auth.FyersService",
+            return_value=mock_broker_service,
+        ),
+        patch(
+            "app.api.v1.auth.get_fyers_access_token_headless",
+            return_value="mock_fyers_access_token_12345",
+        ),
+    ):
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={
+                "app_id": "mock-app-id-100",
+                "api_secret": "mock-secret",
+                "client_id": "mock",
+                "totp_secret": "mock-totp-secret",
+                "pin": "1234",
+                "trading_mode": "paper",
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "access_token" in data
+    assert data["user"]["client_id"] == "TEST_CLIENT_001"
+
+
+@pytest.mark.asyncio
 async def test_login_invalid_trading_mode(client: AsyncClient) -> None:
     """Login should reject invalid trading mode values."""
     response = await client.post(
         "/api/v1/auth/login",
         json={
-            "broker_name": "zerodha",
-            "api_key": "test-api-key",
-            "access_token": "test-access-token",
+            "app_id": "mock-app-id-100",
+            "api_secret": "mock-secret",
+            "auth_code": "mock",
             "trading_mode": "invalid",
         },
     )
@@ -52,18 +87,35 @@ async def test_login_invalid_trading_mode(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_unsupported_broker(client: AsyncClient) -> None:
-    """Login should reject requests for an unsupported broker."""
+async def test_login_requires_one_auth_method(client: AsyncClient) -> None:
+    """Login should reject requests with neither auth_code nor TOTP fields."""
     response = await client.post(
         "/api/v1/auth/login",
         json={
-            "broker_name": "unknown-broker",
-            "api_key": "test-api-key",
-            "access_token": "test-access-token",
+            "app_id": "mock-app-id-100",
+            "api_secret": "mock-secret",
             "trading_mode": "paper",
         },
     )
-    assert response.status_code == 400
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_both_auth_methods(client: AsyncClient) -> None:
+    """Login should reject requests providing both auth_code and TOTP fields."""
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "app_id": "mock-app-id-100",
+            "api_secret": "mock-secret",
+            "auth_code": "mock",
+            "client_id": "mock",
+            "totp_secret": "mock-totp-secret",
+            "pin": "1234",
+            "trading_mode": "paper",
+        },
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -141,32 +193,3 @@ async def test_logout_unauthenticated(client: AsyncClient) -> None:
     """Logout should fail without authentication."""
     response = await client.post("/api/v1/auth/logout")
     assert response.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_exchange_code_success(
-    client: AsyncClient,
-    mock_broker_service: AsyncMock,
-) -> None:
-    """Exchange code should exchange Fyers auth code and return JWT token."""
-    with patch(
-        "app.api.v1.auth.FyersService",
-        return_value=mock_broker_service,
-    ):
-        response = await client.post(
-            "/api/v1/auth/exchange-code",
-            json={
-                "broker_name": "fyers",
-                "auth_code": "mock",
-                "api_key": "mock-app-id",
-                "api_secret": "mock-secret",
-                "redirect_uri": "http://127.0.0.1:3001",
-                "trading_mode": "paper",
-            },
-        )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert data["user"]["client_id"] == "TEST_CLIENT_001"
-

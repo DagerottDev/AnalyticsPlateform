@@ -1,3 +1,3 @@
 # Option Analytics Backend
 
-FastAPI backend for Option Analytics Platform with native Fyers/Zerodha broker integration.
+FastAPI backend for Option Analytics Platform with native Fyers broker integration.

@@ -22,31 +22,46 @@ describe("Auth Types", () => {
   it("should define UserProfile interface shape", () => {
     const profile = {
       client_id: "TEST001",
-      broker_name: "Zerodha",
+      broker_name: "Fyers",
       trading_mode: "paper" as const,
       account_name: "Default",
       connected_at: "2024-01-01T00:00:00Z",
     };
 
     expect(profile.client_id).toBe("TEST001");
-    expect(profile.broker_name).toBe("Zerodha");
+    expect(profile.broker_name).toBe("Fyers");
     expect(profile.trading_mode).toBe("paper");
   });
 });
 
 describe("Auth Utilities", () => {
-  it("should format login request correctly", () => {
+  it("should format TOTP login request correctly", () => {
     const request = {
-      broker_name: "zerodha",
-      api_key: "test-key",
-      access_token: "test-token",
+      app_id: "test-app-id-100",
+      api_secret: "test-secret",
+      client_id: "test-client-id",
+      totp_secret: "test-totp-secret",
+      pin: "1234",
       trading_mode: "paper" as const,
     };
 
-    expect(request).toHaveProperty("broker_name");
-    expect(request).toHaveProperty("api_key");
+    expect(request).toHaveProperty("app_id");
+    expect(request).toHaveProperty("client_id");
     expect(request).toHaveProperty("trading_mode");
     expect(request.trading_mode).toMatch(/^(paper|live)$/);
+  });
+
+  it("should format OAuth login request correctly", () => {
+    const request = {
+      app_id: "test-app-id-100",
+      api_secret: "test-secret",
+      auth_code: "test-auth-code",
+      redirect_uri: "http://127.0.0.1:3001",
+      trading_mode: "paper" as const,
+    };
+
+    expect(request).toHaveProperty("auth_code");
+    expect(request).toHaveProperty("redirect_uri");
   });
 
   it("should validate token response shape", () => {

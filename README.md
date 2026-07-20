@@ -1,6 +1,6 @@
 # Option Analytics Platform
 
-A production-grade, responsive web platform for Indian options analytics with native multi-broker support (Fyers, Zerodha). It uses a stateless, single-account session flow ensuring your data routes securely through your connected broker.
+A production-grade, responsive web platform for Indian options analytics with native Fyers broker support. It uses a stateless, single-account session flow ensuring your data routes securely through your connected broker — only one broker session is active at a time, via headless TOTP auto-login or OAuth redirect.
 
 ## Architecture
 
@@ -10,14 +10,14 @@ A production-grade, responsive web platform for Indian options analytics with na
 | Backend | FastAPI, Python 3.12, WebSockets |
 | Analytics | Native TypeScript (Black-Scholes, Greeks, GBM Replay Engine) |
 | Storage | PostgreSQL + TimescaleDB, Redis |
-| Broker | Native SDKs (Fyers API v3, Kite Connect) |
+| Broker | Native SDK (Fyers API v3) |
 | Infra | Docker, GitHub Actions CI/CD |
 
 ## Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
-- Valid API credentials for your preferred broker (e.g. Fyers App ID/Token, Zerodha API Key/Token).
+- A Fyers App ID and Secret Key (for TOTP auto-login or OAuth redirect login).
 
 ### Development
 

@@ -2,13 +2,13 @@
  * Zustand authentication store.
  *
  * Manages auth state with localStorage persistence.
- * Handles login via Broker API keys, logout, and session hydration.
+ * Handles login via the Fyers API, logout, and session hydration.
  */
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { AuthStore, TradingMode } from "@/types/auth";
-import { loginWithBroker, autoLoginWithBroker, exchangeCodeWithBroker, logoutUser } from "@/lib/auth";
+import { loginWithBroker, logoutUser } from "@/lib/auth";
 
 export const useAuthStore = create<AuthStore>()(
   persist(
@@ -26,54 +26,6 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
         try {
           const response = await loginWithBroker(request);
-          set({
-            token: response.access_token,
-            user: response.user,
-            isAuthenticated: true,
-            isLoading: false,
-            error: null,
-            tradingMode: response.user.trading_mode,
-          });
-        } catch (error: unknown) {
-          set({
-            token: null,
-            user: null,
-            isAuthenticated: false,
-            isLoading: false,
-            error: error,
-          });
-          throw error;
-        }
-      },
-
-      autoLogin: async (request) => {
-        set({ isLoading: true, error: null });
-        try {
-          const response = await autoLoginWithBroker(request);
-          set({
-            token: response.access_token,
-            user: response.user,
-            isAuthenticated: true,
-            isLoading: false,
-            error: null,
-            tradingMode: response.user.trading_mode,
-          });
-        } catch (error: unknown) {
-          set({
-            token: null,
-            user: null,
-            isAuthenticated: false,
-            isLoading: false,
-            error: error,
-          });
-          throw error;
-        }
-      },
-
-      exchangeCode: async (request) => {
-        set({ isLoading: true, error: null });
-        try {
-          const response = await exchangeCodeWithBroker(request);
           set({
             token: response.access_token,
             user: response.user,

@@ -104,7 +104,7 @@ def mock_broker_service() -> AsyncMock:
 
 
 @pytest.fixture
-def active_broker_session() -> AsyncGenerator[AsyncMock, None]:
+async def active_broker_session() -> AsyncGenerator[AsyncMock, None]:
     """Register a mock broker session for TEST_CLIENT_001 in the session manager.
 
     Endpoints under /market and /historical look up the caller's broker
@@ -124,6 +124,6 @@ def active_broker_session() -> AsyncGenerator[AsyncMock, None]:
             "exchange": "NFO",
         }
     ]
-    session_manager.set_session("TEST_CLIENT_001", mock)
+    await session_manager.set_session("TEST_CLIENT_001", mock)
     yield mock
-    session_manager._sessions.pop("TEST_CLIENT_001", None)
+    await session_manager.remove_session("TEST_CLIENT_001")

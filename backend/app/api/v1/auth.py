@@ -1,13 +1,17 @@
 """Authentication endpoints.
 
-Handles login via native broker credentials (Fyers or Zerodha), token
-verification, user profile retrieval, and logout. No passwords —
-authentication is delegated to the broker's own API.
+Handles login via Fyers — either the OAuth redirect flow or headless TOTP
+auto-login — plus token verification, user profile retrieval, and logout.
+No passwords are stored; authentication is delegated to Fyers' own APIs,
+and only one broker session is active at a time (see session_manager).
 """
 
+import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fyers_apiv3 import fyersModel
 
 from app.config import Settings, get_settings
 from app.core.exceptions import BrokerAuthError, BrokerConnectionError
@@ -20,30 +24,62 @@ from app.schemas.auth import (
     TokenVerifyRequest,
     TokenVerifyResponse,
     UserProfileResponse,
-    AutoLoginRequest,
-    ExchangeCodeRequest,
 )
+from app.services.fyers_headless import get_fyers_access_token_headless
 from app.services.fyers_service import FyersService
 from app.services.session_manager import session_manager
-from app.services.zerodha_service import ZerodhaService
-from app.services.zerodha_auto_login import generate_zerodha_access_token
-from app.services.fyers_auto_login import generate_fyers_access_token
 
-import asyncio
-from fyers_apiv3 import fyersModel
-from kiteconnect import KiteConnect
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+
+
+async def _resolve_access_token(request: LoginRequest, settings: Settings) -> str:
+    """Resolve a Fyers access_token from whichever auth method was chosen."""
+    if request.auth_code:
+        if request.auth_code.lower() == "mock":
+            return "mock_fyers_access_token_12345"
+
+        # API v3 requires the -100 appType suffix on the client_id
+        client_id = request.app_id if request.app_id.endswith("-100") else f"{request.app_id}-100"
+        session = fyersModel.SessionModel(
+            client_id=client_id,
+            secret_key=request.api_secret,
+            redirect_uri=request.redirect_uri,
+            response_type="code",
+            grant_type="authorization_code",
+        )
+        session.set_token(request.auth_code)
+        response = await asyncio.to_thread(session.generate_token)
+        if response.get("s") != "ok":
+            raise BrokerAuthError(
+                f"Fyers token exchange failed: {response.get('message', 'Unknown error')}"
+            )
+        return str(response["access_token"])
+
+    # Headless TOTP auto-login — request validation guarantees these are set.
+    assert request.client_id and request.totp_secret and request.pin
+    return await get_fyers_access_token_headless(
+        client_id=request.client_id,
+        totp_secret=request.totp_secret,
+        pin=request.pin,
+        app_id=request.app_id,
+        app_secret=request.api_secret,
+        redirect_uri=request.redirect_uri,
+        ttl_seconds=settings.broker_token_cache_ttl_seconds,
+    )
 
 
 @router.post(
     "/login",
     response_model=LoginResponse,
     status_code=status.HTTP_200_OK,
-    summary="Login with Broker Credentials",
+    summary="Login with Fyers",
     description=(
-        "Authenticate using native Fyers or Zerodha credentials. "
-        "Returns a JWT for subsequent requests."
+        "Authenticate with Fyers via OAuth redirect (auth_code) or headless "
+        "TOTP auto-login (client_id + totp_secret + pin). Returns a JWT for "
+        "subsequent requests. Only one broker session is active at a time — "
+        "logging in replaces any existing session."
     ),
     responses={
         401: {"model": AuthErrorResponse, "description": "Invalid credentials"},
@@ -54,15 +90,14 @@ async def login(
     request: LoginRequest,
     settings: Settings = Depends(get_settings),
 ) -> LoginResponse:
-    """Authenticate a user via native broker credentials.
+    """Authenticate with Fyers and establish the single active broker session.
 
-    1. Connects to the requested broker (Fyers or Zerodha) using the given credentials.
-    2. Verifies the credentials by fetching the broker profile.
-    3. Retrieves user profile information.
-    4. Issues a JWT access token.
+    1. Resolves an access_token via OAuth code exchange or headless TOTP login.
+    2. Verifies the token by fetching the Fyers profile.
+    3. Issues a JWT access token and stores the session (replacing any prior one).
 
     Args:
-        request: Login credentials with broker name, API key/app ID, access token, and trading mode.
+        request: Login credentials — either OAuth auth_code or TOTP fields.
         settings: Application settings.
 
     Returns:
@@ -70,37 +105,22 @@ async def login(
     """
     trading_mode = TradingMode(request.trading_mode)
 
-    service: FyersService | ZerodhaService
-    if request.broker_name.lower() == "fyers":
-        service = FyersService(
-            app_id=request.app_id or "",
-            access_token=request.access_token or "",
-            trading_mode=trading_mode,
-        )
-    elif request.broker_name.lower() == "zerodha":
-        service = ZerodhaService(
-            api_key=request.api_key or "",
-            access_token=request.access_token or "",
-            trading_mode=trading_mode,
-        )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported broker",
-        )
+    try:
+        access_token = await _resolve_access_token(request, settings)
+    except BrokerAuthError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
+
+    service = FyersService(
+        app_id=request.app_id,
+        access_token=access_token,
+        trading_mode=trading_mode,
+    )
 
     try:
-        # Verify connection and get profile
         profile = await service.get_profile()
 
-        # Create JWT token
-        token = create_access_token(
-            data=profile.to_jwt_payload(),
-            settings=settings,
-        )
-
-        # Store service in memory session
-        session_manager.set_session(profile.client_id, service)
+        token = create_access_token(data=profile.to_jwt_payload(), settings=settings)
+        await session_manager.set_session(profile.client_id, service)
 
         return LoginResponse(
             access_token=token,
@@ -116,252 +136,12 @@ async def login(
 
     except BrokerAuthError as e:
         await service.close()
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=e.message,
-        ) from e
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
     except BrokerConnectionError as e:
         await service.close()
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=e.message,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=e.message
         ) from e
-
-
-@router.post(
-    "/auto-login",
-    response_model=LoginResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Auto Login with Broker Credentials and TOTP",
-    description="Automate broker login using user ID, password, and TOTP secret.",
-    responses={
-        401: {"model": AuthErrorResponse, "description": "Invalid credentials or TOTP"},
-        503: {"model": AuthErrorResponse, "description": "Broker API unreachable"},
-    },
-)
-async def auto_login(
-    request: AutoLoginRequest,
-    settings: Settings = Depends(get_settings),
-) -> LoginResponse:
-    """Automate the broker login process (supports Zerodha and Fyers)."""
-    trading_mode = TradingMode(request.trading_mode)
-    broker = request.broker_name.lower()
-
-    if broker not in ("zerodha", "fyers"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported broker for auto login",
-        )
-
-    try:
-        if broker == "zerodha":
-            if not request.password:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Zerodha password is required for auto login",
-                )
-            # 1. Automate Zerodha login to get access_token
-            access_token = await generate_zerodha_access_token(
-                user_id=request.user_id,
-                password=request.password,
-                totp_secret=request.totp_secret,
-                api_key=request.api_key,
-                api_secret=request.api_secret,
-            )
-            # 2. Initialize Zerodha service
-            service = ZerodhaService(
-                api_key=request.api_key,
-                access_token=access_token,
-                trading_mode=trading_mode,
-            )
-        else: # fyers
-            if not request.pin:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Fyers security PIN is required for auto login",
-                )
-            # 1. Automate Fyers login to get access_token
-            access_token = await generate_fyers_access_token(
-                user_id=request.user_id,
-                totp_secret=request.totp_secret,
-                pin=request.pin,
-                app_id=request.api_key,
-                api_secret=request.api_secret,
-                redirect_uri=request.redirect_uri or "https://trade.fyers.in/",
-                ttl_seconds=settings.broker_token_cache_ttl_seconds,
-            )
-            # 2. Initialize Fyers service
-            service = FyersService(
-                app_id=request.api_key,
-                access_token=access_token,
-                trading_mode=trading_mode,
-            )
-
-        # Verify connection and get profile
-        profile = await service.get_profile()
-
-        # Create JWT token
-        token = create_access_token(
-            data=profile.to_jwt_payload(),
-            settings=settings,
-        )
-
-        # Store service in memory session
-        session_manager.set_session(profile.client_id, service)
-
-        return LoginResponse(
-            access_token=token,
-            expires_in=settings.jwt_expiry_minutes * 60,
-            user=UserProfileResponse(
-                client_id=profile.client_id,
-                broker_name=profile.broker_name,
-                trading_mode=profile.trading_mode.value,
-                account_name=profile.account_name,
-                connected_at=profile.connected_at,
-            ),
-        )
-
-
-    except BrokerAuthError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
-        ) from e
-    except BrokerConnectionError as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e),
-        ) from e
-
-
-@router.post(
-    "/exchange-code",
-    response_model=LoginResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Exchange Authorization Code for Access Token",
-    description="Exchanges the auth code (Fyers) or request token (Zerodha) for an access token and logs in.",
-    responses={
-        401: {"model": AuthErrorResponse, "description": "Invalid credentials"},
-        503: {"model": AuthErrorResponse, "description": "Broker API unreachable"},
-    },
-)
-async def exchange_code(
-    request: ExchangeCodeRequest,
-    settings: Settings = Depends(get_settings),
-) -> LoginResponse:
-    """Exchange auth code or request token for access token and establish session."""
-    trading_mode = TradingMode(request.trading_mode)
-    broker = request.broker_name.lower()
-
-    # In local dev, fallback immediately to mock token if using mock codes
-    if request.auth_code.lower() == "mock" or "mock" in request.api_key.lower():
-        mock_token = f"mock_{broker}_access_token_12345"
-        if broker == "zerodha":
-            service = ZerodhaService(
-                api_key=request.api_key,
-                access_token=mock_token,
-                trading_mode=trading_mode,
-            )
-        else:
-            service = FyersService(
-                app_id=request.api_key,
-                access_token=mock_token,
-                trading_mode=trading_mode,
-            )
-    else:
-        try:
-            if broker == "zerodha":
-                # Zerodha request_token exchange
-                kite = KiteConnect(api_key=request.api_key)
-                session_data = await asyncio.to_thread(
-                    kite.generate_session, request.auth_code, request.api_secret
-                )
-                access_token = session_data["access_token"]
-                service = ZerodhaService(
-                    api_key=request.api_key,
-                    access_token=access_token,
-                    trading_mode=trading_mode,
-                )
-            elif broker == "fyers":
-                # Fyers auth_code exchange
-                # API v3 requires the -100 suffix for the app_id / client_id
-                client_id = request.api_key if request.api_key.endswith("-100") else f"{request.api_key}-100"
-                session = fyersModel.SessionModel(
-                    client_id=client_id,
-                    secret_key=request.api_secret,
-                    redirect_uri=request.redirect_uri,
-                    response_type="code",
-                    grant_type="authorization_code",
-                )
-                session.set_token(request.auth_code)
-                response = await asyncio.to_thread(session.generate_token)
-                if response.get("s") != "ok":
-                    raise BrokerAuthError(f"Fyers token exchange failed: {response.get('message', 'Unknown error')}")
-                access_token = response["access_token"]
-                service = FyersService(
-                    app_id=request.api_key,
-                    access_token=access_token,
-                    trading_mode=trading_mode,
-                )
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Unsupported broker",
-                )
-        except Exception as e:
-            print(f"Token exchange failed: {e}. Falling back to mock session.")
-            mock_token = f"mock_{broker}_access_token_12345"
-            if broker == "zerodha":
-                service = ZerodhaService(
-                    api_key=request.api_key,
-                    access_token=mock_token,
-                    trading_mode=trading_mode,
-                )
-            else:
-                service = FyersService(
-                    app_id=request.api_key,
-                    access_token=mock_token,
-                    trading_mode=trading_mode,
-                )
-
-    try:
-        # Verify connection and get profile
-        profile = await service.get_profile()
-
-        # Create JWT token
-        token = create_access_token(
-            data=profile.to_jwt_payload(),
-            settings=settings,
-        )
-
-        # Store service in memory session
-        session_manager.set_session(profile.client_id, service)
-
-        return LoginResponse(
-            access_token=token,
-            expires_in=settings.jwt_expiry_minutes * 60,
-            user=UserProfileResponse(
-                client_id=profile.client_id,
-                broker_name=profile.broker_name,
-                trading_mode=profile.trading_mode.value,
-                account_name=profile.account_name,
-                connected_at=profile.connected_at,
-            ),
-        )
-
-    except BrokerAuthError as e:
-        await service.close()
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=e.message,
-        ) from e
-    except BrokerConnectionError as e:
-        await service.close()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=e.message,
-        ) from e
-
 
 
 @router.get(
@@ -386,7 +166,7 @@ async def get_me(
     """
     return UserProfileResponse(
         client_id=current_user["sub"],
-        broker_name=current_user.get("broker", "Unknown"),
+        broker_name=current_user.get("broker", "Fyers"),
         trading_mode=current_user.get("trading_mode", "paper"),
         account_name=current_user.get("account_name", ""),
         connected_at=current_user.get("connected_at", ""),
