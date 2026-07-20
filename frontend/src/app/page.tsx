@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Home Page — Entry point that shows login or redirects to dashboard.
+ * Home Page — Entry point that redirects into the app.
  *
- * Uses the DashboardLayout which handles auth gating internally.
+ * Always lands on /accounts once hydration settles, whether or not a
+ * broker session is connected — the Accounts page is where you connect.
  */
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -12,16 +13,15 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 export default function HomePage() {
-  const { isAuthenticated, hydrated } = useAuth();
+  const { hydrated } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (hydrated && isAuthenticated) {
+    if (hydrated) {
       router.replace("/accounts");
     }
-  }, [hydrated, isAuthenticated, router]);
+  }, [hydrated, router]);
 
-  // DashboardLayout shows LoginForm when not authenticated
   return (
     <DashboardLayout>
       <div />

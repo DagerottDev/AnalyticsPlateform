@@ -9,6 +9,7 @@
  */
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { LoginForm } from "@/components/auth/LoginForm";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDate } from "@/lib/utils";
 import {
@@ -129,7 +130,11 @@ export default function AccountsPage() {
               </div>
             </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="flex justify-center py-8">
+            <LoginForm />
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

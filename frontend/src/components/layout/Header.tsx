@@ -22,7 +22,7 @@ import {
 import { useState } from "react";
 
 export function Header() {
-  const { user, tradingMode, logout, isPaperMode, brokerName } = useAuth();
+  const { user, isAuthenticated, tradingMode, logout, isPaperMode, brokerName } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   return (
@@ -44,26 +44,42 @@ export function Header() {
 
       {/* Center — Trading Mode */}
       <div className="flex items-center gap-3">
-        <div
-          className={cn(
-            "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold",
-            isPaperMode
-              ? "bg-[var(--color-accent-blue)]/15 text-[var(--color-accent-blue)]"
-              : "bg-[var(--color-accent-red)]/15 text-[var(--color-accent-red)]"
-          )}
-        >
-          {isPaperMode ? (
-            <Shield className="h-3 w-3" />
-          ) : (
-            <Zap className="h-3 w-3" />
-          )}
-          {isPaperMode ? "PAPER" : "LIVE"}
-        </div>
+        {isAuthenticated && (
+          <div
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold",
+              isPaperMode
+                ? "bg-[var(--color-accent-blue)]/15 text-[var(--color-accent-blue)]"
+                : "bg-[var(--color-accent-red)]/15 text-[var(--color-accent-red)]"
+            )}
+          >
+            {isPaperMode ? (
+              <Shield className="h-3 w-3" />
+            ) : (
+              <Zap className="h-3 w-3" />
+            )}
+            {isPaperMode ? "PAPER" : "LIVE"}
+          </div>
+        )}
 
         {/* Connection Status */}
-        <div className="flex items-center gap-1.5 text-xs text-[var(--color-accent-green)]">
-          <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent-green)] animate-pulse-glow" />
-          Connected
+        <div
+          className={cn(
+            "flex items-center gap-1.5 text-xs",
+            isAuthenticated
+              ? "text-[var(--color-accent-green)]"
+              : "text-[var(--color-text-muted)]"
+          )}
+        >
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              isAuthenticated
+                ? "bg-[var(--color-accent-green)] animate-pulse-glow"
+                : "bg-[var(--color-text-muted)]"
+            )}
+          />
+          {isAuthenticated ? "Connected" : "Not Connected"}
         </div>
       </div>
 
