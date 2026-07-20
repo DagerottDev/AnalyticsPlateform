@@ -24,6 +24,20 @@ export interface StrategyMetrics {
   winProbability: number;
 }
 
+/**
+ * Time-to-expiry (years) for a leg, derived from its own instrument's
+ * expiry date. Falls back to `fallbackT` when the leg has no instrument/
+ * expiry — this is what lets Calendar/Diagonal spreads (legs with
+ * different expiries) price correctly instead of sharing one strategy-wide T.
+ */
+function deriveLegT(leg: StrategyLeg, fallbackT: number): number {
+  if (!leg.instrument?.expiry) return fallbackT;
+  const expDate = new Date(leg.instrument.expiry);
+  expDate.setHours(15, 30, 0, 0); // NSE close
+  const diffDays = (expDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+  return Math.max(diffDays / 365, 0.0001);
+}
+
 export function calculatePayoffProfile(
   legs: StrategyLeg[],
   spotPrice: number,
@@ -70,8 +84,11 @@ export function calculatePayoffProfile(
       }
       profitAtExpiry += (intrinsic - entryPrice) * q * multiplier;
 
-      // 2. Profit T+0 (BS Value - Premium paid/received)
-      const livePrice = calculateOptionPrice(type, s, K, T, r, leg.iv);
+      // 2. Profit T+0 (BS Value - Premium paid/received), priced off this
+      // leg's own expiry so multi-expiry strategies (Calendar/Diagonal)
+      // aren't all forced onto one shared time-to-expiry.
+      const legT = deriveLegT(leg, T);
+      const livePrice = calculateOptionPrice(type, s, K, legT, r, leg.iv);
       profitT0 += (livePrice - entryPrice) * q * multiplier;
     });
 
@@ -85,12 +102,19 @@ export function calculatePayoffProfile(
   return points;
 }
 
-export function calculateNetGreeks(legs: StrategyLeg[], spotPrice: number, T: number = 0.01, r: number = 0.10): any {
-  const netGreeks = {
-    delta: 0, gamma: 0, theta: 0, vega: 0, rho: 0,
+export interface NetGreeks {
+  netDelta: number;
+  netGamma: number;
+  netTheta: number;
+  netVega: number;
+  netRho: number;
+}
+
+export function calculateNetGreeks(legs: StrategyLeg[], spotPrice: number, T: number = 0.01, r: number = 0.10): NetGreeks {
+  const netGreeks: NetGreeks = {
     netDelta: 0, netGamma: 0, netTheta: 0, netVega: 0, netRho: 0
   };
-  
+
   legs.forEach(leg => {
     if (!leg.instrument || !leg.instrument.strike || !leg.instrument.option_type) return;
     const K = leg.instrument.strike;
@@ -98,19 +122,14 @@ export function calculateNetGreeks(legs: StrategyLeg[], spotPrice: number, T: nu
     const q = leg.quantity;
     const multiplier = leg.action === "Buy" ? 1 : -1;
 
-    const greeks = calculateGreeks(type, spotPrice, K, T, r, leg.iv);
-    netGreeks.delta += greeks.delta * q * multiplier;
-    netGreeks.gamma += greeks.gamma * q * multiplier;
-    netGreeks.theta += greeks.theta * q * multiplier;
-    netGreeks.vega += greeks.vega * q * multiplier;
-    netGreeks.rho += greeks.rho * q * multiplier;
+    const legT = deriveLegT(leg, T);
+    const greeks = calculateGreeks(type, spotPrice, K, legT, r, leg.iv);
+    netGreeks.netDelta += greeks.delta * q * multiplier;
+    netGreeks.netGamma += greeks.gamma * q * multiplier;
+    netGreeks.netTheta += greeks.theta * q * multiplier;
+    netGreeks.netVega += greeks.vega * q * multiplier;
+    netGreeks.netRho += greeks.rho * q * multiplier;
   });
-
-  netGreeks.netDelta = netGreeks.delta;
-  netGreeks.netGamma = netGreeks.gamma;
-  netGreeks.netTheta = netGreeks.theta;
-  netGreeks.netVega = netGreeks.vega;
-  netGreeks.netRho = netGreeks.rho;
 
   return netGreeks;
 }

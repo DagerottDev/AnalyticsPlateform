@@ -5,6 +5,17 @@ export interface Greeks {
   theta: number;
   vega: number;
   rho: number;
+  // Second/third-order Greeks. Vanna/vomma/charm/speed/zomma/ultima are
+  // mathematically identical for CE and PE under Black-Scholes (they're
+  // derivatives of d1/d2, and delta_PE = delta_CE - 1 is a constant
+  // offset, so its higher-order derivatives match the call's exactly).
+  vanna: number;
+  vomma: number;
+  charm: number;
+  speed: number;
+  color: number;
+  zomma: number;
+  ultima: number;
 }
 
 // Standard Normal CDF (using Hasting's approximation)
@@ -16,7 +27,7 @@ function cumulativeNormal(x: number): number {
   const a5 = 1.330274429;
   const L = Math.abs(x);
   const k = 1.0 / (1.0 + 0.2316419 * L);
-  let cnd = 1.0 - 1.0 / Math.sqrt(2 * Math.PI) * Math.exp(-L * L / 2) *
+  const cnd = 1.0 - 1.0 / Math.sqrt(2 * Math.PI) * Math.exp(-L * L / 2) *
     (a1 * k + a2 * Math.pow(k, 2) + a3 * Math.pow(k, 3) + a4 * Math.pow(k, 4) + a5 * Math.pow(k, 5));
   
   if (x < 0) {
@@ -67,8 +78,11 @@ export function calculateGreeks(
   r: number,
   sigma: number
 ): Greeks {
-  const greeks: Greeks = { price: 0, delta: 0, gamma: 0, theta: 0, vega: 0, rho: 0 };
-  
+  const greeks: Greeks = {
+    price: 0, delta: 0, gamma: 0, theta: 0, vega: 0, rho: 0,
+    vanna: 0, vomma: 0, charm: 0, speed: 0, color: 0, zomma: 0, ultima: 0,
+  };
+
   greeks.price = calculateOptionPrice(type, S, K, T, r, sigma);
 
   if (T <= 0 || sigma <= 0) {
@@ -109,6 +123,43 @@ export function calculateGreeks(
   } else {
     greeks.rho = (-K * T * Math.exp(-r * T) * cumulativeNormal(-d2)) / 100;
   }
+
+  // Second/third-order Greeks. Identical for CE/PE under Black-Scholes
+  // (see the Greeks interface comment). Scaling mirrors the first-order
+  // Greeks above: vega/vanna/vomma/ultima are "per 1% vol move" (/100),
+  // theta/charm/color are "per 1 day" (/365), gamma/speed/zomma are raw
+  // (unscaled, matching gamma's own convention).
+  const sqrtT = Math.sqrt(T);
+  const vegaRaw = S * normalPDF(d1) * sqrtT; // unscaled vega (d(price)/d(sigma))
+
+  // Vanna = d(delta)/d(sigma) = d(vega)/d(S)
+  greeks.vanna = (-normalPDF(d1) * (d2 / sigma)) / 100;
+
+  // Vomma (volga) = d(vega)/d(sigma)
+  greeks.vomma = (vegaRaw * ((d1 * d2) / sigma)) / 100;
+
+  // Charm = -d(delta)/d(T) — the minus sign expresses decay as time
+  // passes (T counts down to expiry), matching theta's sign convention.
+  const charmRaw =
+    -normalPDF(d1) * ((2 * r * T - d2 * sigma * sqrtT) / (2 * T * sigma * sqrtT));
+  greeks.charm = charmRaw / 365;
+
+  // Speed = d(gamma)/d(S)
+  greeks.speed = (-greeks.gamma / S) * (d1 / (sigma * sqrtT) + 1);
+
+  // Color = -d(gamma)/d(T), same day-decay sign convention as charm.
+  const colorRaw =
+    (-normalPDF(d1) / (2 * S * T * sigma * sqrtT)) *
+    (2 * r * T + 1 + (d1 * (2 * r * T - d2 * sigma * sqrtT)) / (sigma * sqrtT));
+  greeks.color = -colorRaw / 365;
+
+  // Zomma = d(gamma)/d(sigma)
+  greeks.zomma = (greeks.gamma * (d1 * d2 - 1)) / sigma;
+
+  // Ultima = d(vomma)/d(sigma)
+  const ultimaRaw =
+    (-vegaRaw / (sigma * sigma)) * (d1 * d2 * (1 - d1 * d2) + d1 * d1 + d2 * d2);
+  greeks.ultima = ultimaRaw / 100;
 
   return greeks;
 }

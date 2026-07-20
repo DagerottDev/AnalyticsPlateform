@@ -23,9 +23,9 @@ interface PayoffChartProps {
 export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
   const chartData = useMemo(() => {
     return data.map(d => ({
-      spot: Number(d.spot.toFixed(0)),
-      "PnL at Expiry": Number(d.pnlExpiry.toFixed(2)),
-      "T+Today": Number(d.pnlToday.toFixed(2)),
+      spot: Number(d.strike.toFixed(0)),
+      "PnL at Expiry": Number(d.profitAtExpiry.toFixed(2)),
+      "T+Today": Number(d.profitT0.toFixed(2)),
     }));
   }, [data]);
 

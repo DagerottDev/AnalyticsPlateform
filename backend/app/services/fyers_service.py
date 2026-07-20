@@ -1,6 +1,7 @@
 """Fyers broker service implementation."""
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from fyers_apiv3 import fyersModel
@@ -143,7 +144,57 @@ class FyersService(BrokerService):
     async def get_historical_data(
         self, symbol: str, from_date: str, to_date: str, resolution: str
     ) -> list[dict[str, Any]]:
-        return []
+        """Fetch historical OHLCV candles from Fyers.
+
+        Args:
+            symbol: Exchange-qualified symbol, e.g. "NSE:NIFTY50-INDEX".
+            from_date: "YYYY-MM-DD", start of range (inclusive).
+            to_date: "YYYY-MM-DD", end of range (inclusive).
+            resolution: Candle resolution, e.g. "1" (1-minute) or "D" (daily).
+
+        Returns:
+            Rows shaped for MarketData insertion. Fyers' history endpoint
+            does not return historical open interest, so open_interest is
+            always 0 here (a real limitation of the upstream API, not a stub).
+        """
+        if self.is_mock:
+            return []
+        try:
+            response = await asyncio.to_thread(
+                self.client.history,
+                {
+                    "symbol": symbol,
+                    "resolution": resolution,
+                    "date_format": 1,
+                    "range_from": from_date,
+                    "range_to": to_date,
+                    "cont_flag": 0,
+                },
+            )
+            if response and response.get('s') == 'ok':
+                candles = response.get('candles', [])
+                return [
+                    {
+                        "timestamp": datetime.fromtimestamp(candle[0], tz=UTC),
+                        "open": candle[1],
+                        "high": candle[2],
+                        "low": candle[3],
+                        "close": candle[4],
+                        "volume": int(candle[5]),
+                        "open_interest": 0,
+                    }
+                    for candle in candles
+                ]
+            # 'no_data' is a legitimate "no candles in this range" response
+            # (e.g. a holiday or a range before the symbol's listing date),
+            # not an error.
+            if response and response.get('s') == 'no_data':
+                return []
+            raise BrokerConnectionError(f"Failed to retrieve history for {symbol}: {response}")
+        except BrokerConnectionError:
+            raise
+        except Exception as e:
+            raise BrokerConnectionError(f"Failed to retrieve history for {symbol}: {e}") from e
 
     async def close(self) -> None:
         pass

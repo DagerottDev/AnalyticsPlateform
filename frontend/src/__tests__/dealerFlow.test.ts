@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { 
-  calculateContractGEX, 
-  calculateZeroGamma, 
+import {
+  calculateContractGEX,
+  calculateContractVannaExposure,
+  calculateContractCharmExposure,
+  calculateZeroGamma,
   findGammaWalls,
-  StrikeExposure 
+  StrikeExposure
 } from "../lib/dealerFlow";
 
 describe("Dealer Flow Engine", () => {
@@ -42,5 +44,23 @@ describe("Dealer Flow Engine", () => {
 
     const zg = calculateZeroGamma(profile);
     expect(zg).toBe(22000);
+  });
+
+  it("calculates vanna exposure with the same CE(+)/PE(-) sign convention as GEX", () => {
+    const ceVannaExp = calculateContractVannaExposure(0.001, 1000, 22000, 25, "CE");
+    // 0.001 * 1000 * 25 * 22000 = 550,000
+    expect(ceVannaExp).toBe(550000);
+
+    const peVannaExp = calculateContractVannaExposure(0.001, 1000, 22000, 25, "PE");
+    expect(peVannaExp).toBe(-550000);
+  });
+
+  it("calculates charm exposure with the same CE(+)/PE(-) sign convention as GEX", () => {
+    const ceCharmExp = calculateContractCharmExposure(-0.02, 1000, 25, "CE");
+    // -0.02 * 1000 * 25 = -500
+    expect(ceCharmExp).toBe(-500);
+
+    const peCharmExp = calculateContractCharmExposure(-0.02, 1000, 25, "PE");
+    expect(peCharmExp).toBe(500);
   });
 });

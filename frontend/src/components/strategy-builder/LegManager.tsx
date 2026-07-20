@@ -1,9 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { StrategyLeg } from "@/lib/strategy";
+import {
+  StrategyPresetName,
+  SINGLE_EXPIRY_PRESETS,
+  MULTI_EXPIRY_PRESETS,
+  buildIronCondorLegs,
+  buildStraddleLegs,
+  buildStrangleLegs,
+  buildButterflyLegs,
+  buildCalendarLegs,
+  buildDiagonalLegs,
+} from "@/lib/strategyPresets";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { Instrument } from "@/types/market";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, Layers } from "lucide-react";
 
 interface LegManagerProps {
   legs: StrategyLeg[];
@@ -14,7 +26,10 @@ interface LegManagerProps {
   currentExpiry: string | null;
   onExpiryChange: (expiry: string | null) => void;
   lotSize: number;
+  spot: number;
 }
+
+const ALL_PRESETS: StrategyPresetName[] = [...SINGLE_EXPIRY_PRESETS, ...MULTI_EXPIRY_PRESETS];
 
 export function LegManager({
   legs,
@@ -24,8 +39,46 @@ export function LegManager({
   onSymbolChange,
   currentExpiry,
   onExpiryChange,
-  lotSize
+  lotSize,
+  spot
 }: LegManagerProps) {
+  const [selectedPreset, setSelectedPreset] = useState<StrategyPresetName>("Iron Condor");
+
+  const loadPreset = () => {
+    if (!currentExpiry) return;
+
+    const expiries = Array.from(
+      new Set(availableInstruments.map(i => i.expiry).filter((e): e is string => !!e))
+    ).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+    const nearExpiry = currentExpiry;
+    const nearIdx = expiries.indexOf(nearExpiry);
+    const farExpiry = expiries[nearIdx + 1] || nearExpiry;
+
+    let presetLegs: StrategyLeg[];
+    switch (selectedPreset) {
+      case "Iron Condor":
+        presetLegs = buildIronCondorLegs(availableInstruments, nearExpiry, spot, lotSize);
+        break;
+      case "Straddle":
+        presetLegs = buildStraddleLegs(availableInstruments, nearExpiry, spot, lotSize);
+        break;
+      case "Strangle":
+        presetLegs = buildStrangleLegs(availableInstruments, nearExpiry, spot, lotSize);
+        break;
+      case "Butterfly":
+        presetLegs = buildButterflyLegs(availableInstruments, nearExpiry, spot, lotSize);
+        break;
+      case "Calendar":
+        presetLegs = buildCalendarLegs(availableInstruments, nearExpiry, farExpiry, spot, lotSize);
+        break;
+      case "Diagonal":
+        presetLegs = buildDiagonalLegs(availableInstruments, nearExpiry, farExpiry, spot, lotSize);
+        break;
+    }
+
+    // Drop legs where no matching instrument was found for that strike/expiry.
+    onChange(presetLegs.filter(l => l.instrument !== null));
+  };
 
   const addLeg = () => {
     const newLeg: StrategyLeg = {
@@ -60,6 +113,26 @@ export function LegManager({
           expiry={currentExpiry}
           onExpiryChange={onExpiryChange}
         />
+      </div>
+
+      <div className="flex items-center gap-2 rounded-lg border border-dashed border-[var(--color-border-default)] p-2">
+        <Layers className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
+        <select
+          className="flex-1 bg-[#27272a] text-sm text-[var(--color-text-primary)] rounded p-1.5 outline-none border border-[var(--color-border-subtle)]"
+          value={selectedPreset}
+          onChange={e => setSelectedPreset(e.target.value as StrategyPresetName)}
+        >
+          {ALL_PRESETS.map(name => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+        </select>
+        <button
+          onClick={loadPreset}
+          disabled={!currentExpiry}
+          className="rounded px-3 py-1.5 text-xs font-semibold text-[var(--color-accent-blue)] border border-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)] hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap"
+        >
+          Load Preset
+        </button>
       </div>
 
       <div className="flex flex-col gap-2">

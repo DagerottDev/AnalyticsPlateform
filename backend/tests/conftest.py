@@ -25,7 +25,6 @@ def get_test_settings() -> Settings:
         jwt_secret="test-secret-key-for-testing-only",
         jwt_expiry_minutes=60,
         database_url="postgresql+asyncpg://postgres:postgres@localhost:5432/test_db",
-        redis_url="redis://localhost:6379/1",
         cors_origins="http://localhost:3000",
     )
 

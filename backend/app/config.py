@@ -34,9 +34,6 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/option_analytics"
 
-    # Redis
-    redis_url: str = "redis://localhost:6380/0"
-
     # CORS
     cors_origins: str = "http://localhost:3001"
 

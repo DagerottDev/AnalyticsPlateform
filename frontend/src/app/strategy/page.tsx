@@ -127,8 +127,6 @@ export default function StrategyBuilderPage() {
     return calculateNetGreeks(legs, spotPrice, 0.10);
   }, [legs, spotPrice]);
 
-  const combinedMetrics = { ...profileMetrics, ...netGreeks };
-
   const totalCost = useMemo(() => {
     return legs.reduce((sum, leg) => {
       const sign = leg.action === "Buy" ? 1 : -1;
@@ -156,11 +154,12 @@ export default function StrategyBuilderPage() {
               currentExpiry={expiry}
               onExpiryChange={setExpiry}
               lotSize={lotSize}
+              spot={spotPrice}
             />
           </div>
 
           <div className="lg:col-span-2 flex flex-col gap-6">
-            <StrategyMetrics metrics={combinedMetrics} cost={totalCost} />
+            <StrategyMetrics metrics={profileMetrics} netGreeks={netGreeks} cost={totalCost} />
             <PayoffChart data={payoffData} currentSpot={spotPrice} />
           </div>
 

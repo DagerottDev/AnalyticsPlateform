@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getExpiries } from "@/lib/market";
-import { ChevronDown, RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw, Search } from "lucide-react";
 
 interface InstrumentSelectorProps {
   symbol: string;
@@ -54,6 +54,14 @@ export function InstrumentSelector({
     };
   }, [symbol]); // Deliberately omit expiry/onExpiryChange to only fetch on symbol change
 
+  const [customSymbol, setCustomSymbol] = useState("");
+  const isCustomSymbol = !INDICES.includes(symbol);
+
+  const submitCustomSymbol = () => {
+    const trimmed = customSymbol.trim().toUpperCase();
+    if (trimmed) onSymbolChange(trimmed);
+  };
+
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
       {/* Symbol Selector */}
@@ -72,8 +80,34 @@ export function InstrumentSelector({
                 {idx}
               </option>
             ))}
+            {isCustomSymbol && (
+              <option key={symbol} value={symbol}>
+                {symbol}
+              </option>
+            )}
           </select>
           <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+        </div>
+      </div>
+
+      {/* Custom Stock F&O Symbol Entry */}
+      <div className="relative w-48">
+        <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
+          Or Stock Symbol
+        </label>
+        <div className="relative">
+          <input
+            type="text"
+            value={customSymbol}
+            onChange={(e) => setCustomSymbol(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitCustomSymbol();
+            }}
+            onBlur={submitCustomSymbol}
+            placeholder="e.g. RELIANCE"
+            className="w-full rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-2 pl-8 pr-3 text-sm text-[var(--color-text-primary)] outline-none transition-colors hover:border-[var(--color-border-accent)] focus:border-[var(--color-accent-blue)]"
+          />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
         </div>
       </div>
 

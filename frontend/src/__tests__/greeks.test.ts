@@ -43,3 +43,85 @@ describe("Black-Scholes-Merton Greek Engine", () => {
     expect(iv).toBeLessThan(0.01);
   });
 });
+
+describe("Second/third-order Greeks (finite-difference cross-validation)", () => {
+  // Rather than hardcode reference numbers (easy to get subtly wrong by
+  // hand), each analytic formula is checked against a central finite
+  // difference of the relevant lower-order Greek — a self-verifying
+  // property that holds regardless of the specific S/K/T/r/sigma chosen.
+  const S = 100, K = 95, T = 0.5, r = 0.05, sigma = 0.25;
+  const eps = 1e-4;
+
+  it("vanna and charm are identical for CE and PE", () => {
+    // delta_PE = delta_CE - 1 (a constant offset), so every higher-order
+    // derivative of delta (vanna, charm) must be identical for CE/PE.
+    const ce = calculateGreeks("CE", S, K, T, r, sigma);
+    const pe = calculateGreeks("PE", S, K, T, r, sigma);
+    expect(ce.vanna).toBeCloseTo(pe.vanna, 8);
+    expect(ce.charm).toBeCloseTo(pe.charm, 8);
+    expect(ce.speed).toBeCloseTo(pe.speed, 8);
+    expect(ce.zomma).toBeCloseTo(pe.zomma, 8);
+    expect(ce.vomma).toBeCloseTo(pe.vomma, 8);
+    expect(ce.color).toBeCloseTo(pe.color, 8);
+    expect(ce.ultima).toBeCloseTo(pe.ultima, 8);
+  });
+
+  it("vanna = d(delta)/d(sigma), scaled per 1% vol move", () => {
+    const up = calculateGreeks("CE", S, K, T, r, sigma + eps).delta;
+    const down = calculateGreeks("CE", S, K, T, r, sigma - eps).delta;
+    const fd = (up - down) / (2 * eps) / 100; // /100: per-1%-vol scaling
+    const { vanna } = calculateGreeks("CE", S, K, T, r, sigma);
+    expect(vanna).toBeCloseTo(fd, 4);
+  });
+
+  it("vomma = d(vega)/d(sigma)", () => {
+    // .vega is already /100-scaled, so bumping it directly needs no
+    // further scaling to match .vomma (unlike .delta/.gamma, which are raw).
+    const up = calculateGreeks("CE", S, K, T, r, sigma + eps).vega;
+    const down = calculateGreeks("CE", S, K, T, r, sigma - eps).vega;
+    const fd = (up - down) / (2 * eps);
+    const { vomma } = calculateGreeks("CE", S, K, T, r, sigma);
+    expect(vomma).toBeCloseTo(fd, 4);
+  });
+
+  it("charm = -d(delta)/d(T), scaled per day", () => {
+    const up = calculateGreeks("CE", S, K, T + eps, r, sigma).delta;
+    const down = calculateGreeks("CE", S, K, T - eps, r, sigma).delta;
+    const fd = -((up - down) / (2 * eps)) / 365;
+    const { charm } = calculateGreeks("CE", S, K, T, r, sigma);
+    expect(charm).toBeCloseTo(fd, 4);
+  });
+
+  it("speed = d(gamma)/d(S)", () => {
+    const up = calculateGreeks("CE", S + eps, K, T, r, sigma).gamma;
+    const down = calculateGreeks("CE", S - eps, K, T, r, sigma).gamma;
+    const fd = (up - down) / (2 * eps);
+    const { speed } = calculateGreeks("CE", S, K, T, r, sigma);
+    expect(speed).toBeCloseTo(fd, 4);
+  });
+
+  it("zomma = d(gamma)/d(sigma)", () => {
+    const up = calculateGreeks("CE", S, K, T, r, sigma + eps).gamma;
+    const down = calculateGreeks("CE", S, K, T, r, sigma - eps).gamma;
+    const fd = (up - down) / (2 * eps);
+    const { zomma } = calculateGreeks("CE", S, K, T, r, sigma);
+    expect(zomma).toBeCloseTo(fd, 4);
+  });
+
+  it("color = -d(gamma)/d(T), scaled per day", () => {
+    const up = calculateGreeks("CE", S, K, T + eps, r, sigma).gamma;
+    const down = calculateGreeks("CE", S, K, T - eps, r, sigma).gamma;
+    const fd = -((up - down) / (2 * eps)) / 365;
+    const { color } = calculateGreeks("CE", S, K, T, r, sigma);
+    expect(color).toBeCloseTo(fd, 4);
+  });
+
+  it("ultima = d(vomma)/d(sigma)", () => {
+    // .vomma is already /100-scaled, same reasoning as the vomma test above.
+    const up = calculateGreeks("CE", S, K, T, r, sigma + eps).vomma;
+    const down = calculateGreeks("CE", S, K, T, r, sigma - eps).vomma;
+    const fd = (up - down) / (2 * eps);
+    const { ultima } = calculateGreeks("CE", S, K, T, r, sigma);
+    expect(ultima).toBeCloseTo(fd, 3);
+  });
+});

@@ -92,7 +92,7 @@ export default function DealerFlowPage() {
       // Exposures
       const gex = calculateContractGEX(greeks.gamma, oi, S, lotSize, inst.option_type as "CE"|"PE");
       const vannaExp = calculateContractVannaExposure(greeks.vanna, oi, S, lotSize, inst.option_type as "CE"|"PE");
-      const charmExp = calculateContractCharmExposure(greeks.charm, oi, S, lotSize, inst.option_type as "CE"|"PE");
+      const charmExp = calculateContractCharmExposure(greeks.charm, oi, lotSize, inst.option_type as "CE"|"PE");
 
       if (!strikeMap.has(inst.strike)) {
         strikeMap.set(inst.strike, { ceGex: 0, peGex: 0, ceVanna: 0, peVanna: 0, ceCharm: 0, peCharm: 0 });

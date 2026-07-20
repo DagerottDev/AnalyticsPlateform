@@ -15,7 +15,6 @@ pydantic-settings = "^2.7.0"
 python-jose = {extras = ["cryptography"], version = "^3.3.0"}
 httpx = "^0.28.0"
 fyers-apiv3 = "^3.1.2"
-redis = {extras = ["hiredis"], version = "^5.2.0"}
 sqlalchemy = "^2.0.0"
 asyncpg = "^0.30.0"
 greenlet = "^3.1.0"

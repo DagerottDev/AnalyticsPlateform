@@ -2,15 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
-import { OHLCVData, calculateSMA, calculateBollingerBands, calculateRSI } from "@/lib/indicators";
+import { OHLCVData, calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateSupertrend } from "@/lib/indicators";
 
 interface TradingChartProps {
   data: OHLCVData[];
   liveTick?: { price: number; timestamp: number } | null;
   indicators?: {
     sma?: boolean;
+    ema?: boolean;
     bbands?: boolean;
     rsi?: boolean;
+    supertrend?: boolean;
   };
   symbol?: string;
 }
@@ -23,8 +25,10 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
   
   // Indicator series refs
   const smaSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const emaSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const bbUpperRef = useRef<ISeriesApi<"Line"> | null>(null);
   const bbLowerRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const supertrendSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   
   // RSI Chart refs (separate pane)
   const rsiContainerRef = useRef<HTMLDivElement>(null);
@@ -131,6 +135,21 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       smaSeriesRef.current = null;
     }
 
+    // EMA
+    if (indicators?.ema) {
+      if (!emaSeriesRef.current) {
+        emaSeriesRef.current = chartRef.current.addLineSeries({ color: "#f97316", lineWidth: 2 });
+      }
+      const emaData = calculateEMA(data, 20).map(d => ({
+        time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
+        value: d.value
+      }));
+      emaSeriesRef.current?.setData(emaData);
+    } else if (emaSeriesRef.current) {
+      chartRef.current.removeSeries(emaSeriesRef.current);
+      emaSeriesRef.current = null;
+    }
+
     // Bollinger Bands
     if (indicators?.bbands) {
       if (!bbUpperRef.current) {
@@ -147,7 +166,26 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       bbLowerRef.current = null;
     }
 
-  }, [data, indicators?.sma, indicators?.bbands]);
+    // Supertrend
+    if (indicators?.supertrend) {
+      if (!supertrendSeriesRef.current) {
+        supertrendSeriesRef.current = chartRef.current.addLineSeries({
+          color: "#22c55e",
+          lineWidth: 2,
+          lineStyle: 2,
+        });
+      }
+      const stData = calculateSupertrend(data, 10, 3).map(d => ({
+        time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
+        value: d.value,
+      }));
+      supertrendSeriesRef.current?.setData(stData);
+    } else if (supertrendSeriesRef.current) {
+      chartRef.current.removeSeries(supertrendSeriesRef.current);
+      supertrendSeriesRef.current = null;
+    }
+
+  }, [data, indicators?.sma, indicators?.ema, indicators?.bbands, indicators?.supertrend]);
 
   // RSI Pane Setup
   useEffect(() => {

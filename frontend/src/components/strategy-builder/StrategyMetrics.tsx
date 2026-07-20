@@ -1,17 +1,17 @@
 "use client";
 
-import { StrategyMetrics as MetricsType } from "@/lib/strategy";
+import { StrategyMetrics as MetricsType, NetGreeks } from "@/lib/strategy";
 
 interface StrategyMetricsProps {
   metrics: MetricsType;
+  netGreeks: NetGreeks;
   cost: number;
 }
 
-export function StrategyMetrics({ metrics, cost }: StrategyMetricsProps) {
-  
-  const formatMoney = (val: number) => {
-    if (val === Infinity) return "Unlimited";
-    if (val === -Infinity) return "Unlimited Loss";
+export function StrategyMetrics({ metrics, netGreeks, cost }: StrategyMetricsProps) {
+
+  const formatMoney = (val: number | "Unlimited") => {
+    if (val === "Unlimited") return "Unlimited";
     return val > 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
   };
 
@@ -53,26 +53,26 @@ export function StrategyMetrics({ metrics, cost }: StrategyMetricsProps) {
       <div className="col-span-2 grid grid-cols-4 gap-4 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-sm text-center">
         <div>
           <div className="text-[10px] uppercase font-bold text-[var(--color-text-secondary)]">Net Delta</div>
-          <div className={`mt-2 text-sm font-bold font-mono ${metrics.netDelta > 0 ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-red)]'}`}>
-            {formatGreek(metrics.netDelta)}
+          <div className={`mt-2 text-sm font-bold font-mono ${netGreeks.netDelta > 0 ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-red)]'}`}>
+            {formatGreek(netGreeks.netDelta)}
           </div>
         </div>
         <div>
           <div className="text-[10px] uppercase font-bold text-[var(--color-text-secondary)]">Net Gamma</div>
-          <div className={`mt-2 text-sm font-bold font-mono ${metrics.netGamma > 0 ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-red)]'}`}>
-            {formatGreek(metrics.netGamma)}
+          <div className={`mt-2 text-sm font-bold font-mono ${netGreeks.netGamma > 0 ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-red)]'}`}>
+            {formatGreek(netGreeks.netGamma)}
           </div>
         </div>
         <div>
           <div className="text-[10px] uppercase font-bold text-[var(--color-text-secondary)]">Net Theta</div>
-          <div className={`mt-2 text-sm font-bold font-mono ${metrics.netTheta > 0 ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-red)]'}`}>
-            {formatGreek(metrics.netTheta)}
+          <div className={`mt-2 text-sm font-bold font-mono ${netGreeks.netTheta > 0 ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-red)]'}`}>
+            {formatGreek(netGreeks.netTheta)}
           </div>
         </div>
         <div>
           <div className="text-[10px] uppercase font-bold text-[var(--color-text-secondary)]">Net Vega</div>
-          <div className={`mt-2 text-sm font-bold font-mono ${metrics.netVega > 0 ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-red)]'}`}>
-            {formatGreek(metrics.netVega)}
+          <div className={`mt-2 text-sm font-bold font-mono ${netGreeks.netVega > 0 ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-red)]'}`}>
+            {formatGreek(netGreeks.netVega)}
           </div>
         </div>
       </div>

@@ -19,7 +19,7 @@ export default function ChartsPage() {
   const [historicalData, setHistoricalData] = useState<OHLCVData[]>([]);
   const [loading, setLoading] = useState(false);
   
-  const [indicators, setIndicators] = useState({ sma: false, bbands: false, rsi: false });
+  const [indicators, setIndicators] = useState({ sma: false, ema: false, bbands: false, rsi: false, supertrend: false });
   
   // For Heatmap
   const [instruments, setInstruments] = useState<Instrument[]>([]);
@@ -172,10 +172,16 @@ export default function ChartsPage() {
               <input type="checkbox" checked={indicators.sma} onChange={() => setIndicators(s => ({...s, sma: !s.sma}))} className="accent-[var(--color-accent-blue)]" /> SMA
             </label>
             <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
+              <input type="checkbox" checked={indicators.ema} onChange={() => setIndicators(s => ({...s, ema: !s.ema}))} className="accent-[var(--color-accent-blue)]" /> EMA
+            </label>
+            <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
               <input type="checkbox" checked={indicators.bbands} onChange={() => setIndicators(s => ({...s, bbands: !s.bbands}))} className="accent-[var(--color-accent-blue)]" /> Bollinger
             </label>
             <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
               <input type="checkbox" checked={indicators.rsi} onChange={() => setIndicators(s => ({...s, rsi: !s.rsi}))} className="accent-[var(--color-accent-blue)]" /> RSI
+            </label>
+            <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
+              <input type="checkbox" checked={indicators.supertrend} onChange={() => setIndicators(s => ({...s, supertrend: !s.supertrend}))} className="accent-[var(--color-accent-blue)]" /> Supertrend
             </label>
           </div>
         </div>
