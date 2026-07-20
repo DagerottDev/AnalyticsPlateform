@@ -70,6 +70,44 @@ async def _resolve_access_token(request: LoginRequest, settings: Settings) -> st
     )
 
 
+async def _complete_login(
+    access_token: str, app_id: str, trading_mode: TradingMode, settings: Settings
+) -> LoginResponse:
+    """Verify a resolved Fyers access_token and establish the broker session.
+
+    Shared by both /login and /auto-login once each has independently
+    resolved an access_token via its own auth method.
+    """
+    service = FyersService(app_id=app_id, access_token=access_token, trading_mode=trading_mode)
+
+    try:
+        profile = await service.get_profile()
+
+        token = create_access_token(data=profile.to_jwt_payload(), settings=settings)
+        await session_manager.set_session(profile.client_id, service)
+
+        return LoginResponse(
+            access_token=token,
+            expires_in=settings.jwt_expiry_minutes * 60,
+            user=UserProfileResponse(
+                client_id=profile.client_id,
+                broker_name=profile.broker_name,
+                trading_mode=profile.trading_mode.value,
+                account_name=profile.account_name,
+                connected_at=profile.connected_at,
+            ),
+        )
+
+    except BrokerAuthError as e:
+        await service.close()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
+    except BrokerConnectionError as e:
+        await service.close()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=e.message
+        ) from e
+
+
 @router.post(
     "/login",
     response_model=LoginResponse,
@@ -110,38 +148,63 @@ async def login(
     except BrokerAuthError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
 
-    service = FyersService(
-        app_id=request.app_id,
-        access_token=access_token,
-        trading_mode=trading_mode,
-    )
+    return await _complete_login(access_token, request.app_id, trading_mode, settings)
 
-    try:
-        profile = await service.get_profile()
 
-        token = create_access_token(data=profile.to_jwt_payload(), settings=settings)
-        await session_manager.set_session(profile.client_id, service)
+@router.post(
+    "/auto-login",
+    response_model=LoginResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Silent auto-login using server-configured credentials",
+    description=(
+        "Attempts a headless TOTP login using Fyers credentials configured "
+        "server-side (backend/.env) rather than passed in the request body. "
+        "Used by the frontend to skip the manual login form on startup when "
+        "credentials are available. Returns 503 if none are configured."
+    ),
+    responses={
+        401: {"model": AuthErrorResponse, "description": "Invalid credentials"},
+        503: {
+            "model": AuthErrorResponse,
+            "description": "Auto-login not configured or broker unreachable",
+        },
+    },
+)
+async def auto_login(settings: Settings = Depends(get_settings)) -> LoginResponse:
+    """Authenticate using server-side Fyers credentials, with no request body.
 
-        return LoginResponse(
-            access_token=token,
-            expires_in=settings.jwt_expiry_minutes * 60,
-            user=UserProfileResponse(
-                client_id=profile.client_id,
-                broker_name=profile.broker_name,
-                trading_mode=profile.trading_mode.value,
-                account_name=profile.account_name,
-                connected_at=profile.connected_at,
-            ),
+    Mirrors the TOTP auto-login branch of /login, but sources credentials
+    from Settings instead of the request, so the frontend can attempt this
+    silently before ever showing the login form.
+    """
+    if not settings.has_auto_login_credentials:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Auto-login is not configured on the server.",
         )
 
+    assert settings.fyers_client_id and settings.fyers_totp_secret and settings.fyers_pin
+    assert settings.fyers_app_id and settings.fyers_api_secret
+
+    try:
+        access_token = await get_fyers_access_token_headless(
+            client_id=settings.fyers_client_id,
+            totp_secret=settings.fyers_totp_secret,
+            pin=settings.fyers_pin,
+            app_id=settings.fyers_app_id,
+            app_secret=settings.fyers_api_secret,
+            redirect_uri=settings.fyers_redirect_uri,
+            ttl_seconds=settings.broker_token_cache_ttl_seconds,
+        )
     except BrokerAuthError as e:
-        await service.close()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
-    except BrokerConnectionError as e:
-        await service.close()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=e.message
-        ) from e
+
+    return await _complete_login(
+        access_token,
+        settings.fyers_app_id,
+        TradingMode(settings.fyers_trading_mode),
+        settings,
+    )
 
 
 @router.get(

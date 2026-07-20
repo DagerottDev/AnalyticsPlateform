@@ -56,7 +56,7 @@ describe("Auth Utilities", () => {
       app_id: "test-app-id-100",
       api_secret: "test-secret",
       auth_code: "test-auth-code",
-      redirect_uri: "http://127.0.0.1:3001",
+      redirect_uri: "http://127.0.0.1:3000",
       trading_mode: "paper" as const,
     };
 

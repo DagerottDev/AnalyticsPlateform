@@ -75,7 +75,7 @@ export interface AuthActions {
   logout: () => void;
   setTradingMode: (mode: TradingMode) => void;
   clearError: () => void;
-  hydrate: () => void;
+  hydrate: () => Promise<void>;
 }
 
 /** Combined auth store type */

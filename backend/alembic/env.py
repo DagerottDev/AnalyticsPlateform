@@ -19,7 +19,9 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 from app.db.base import Base  # noqa
-from app.config import settings
+from app.config import get_settings
+
+settings = get_settings()
 
 target_metadata = Base.metadata
 

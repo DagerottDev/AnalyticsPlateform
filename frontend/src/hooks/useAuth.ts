@@ -21,10 +21,16 @@ export function useAuth() {
   const store = useAuthStore();
   const [hydrated, setHydrated] = useState(false);
 
-  // Hydrate from localStorage on mount
+  // Restore session from localStorage, or silently attempt a server-side
+  // auto-login, before revealing the login form.
   useEffect(() => {
-    store.hydrate();
-    setHydrated(true);
+    let cancelled = false;
+    store.hydrate().finally(() => {
+      if (!cancelled) setHydrated(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = useCallback(

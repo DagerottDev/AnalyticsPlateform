@@ -8,7 +8,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { AuthStore, TradingMode } from "@/types/auth";
-import { loginWithBroker, logoutUser } from "@/lib/auth";
+import { autoLoginBroker, loginWithBroker, logoutUser } from "@/lib/auth";
 
 export const useAuthStore = create<AuthStore>()(
   persist(
@@ -66,11 +66,30 @@ export const useAuthStore = create<AuthStore>()(
         set({ error: null });
       },
 
-      hydrate: () => {
-        // Triggered on app mount to restore session from localStorage
+      hydrate: async () => {
+        // Triggered on app mount. If a session is already persisted in
+        // localStorage, restore it. Otherwise, silently try a server-side
+        // auto-login (backend/.env credentials) before ever showing the
+        // login form — falls back to the form if that isn't configured
+        // or fails.
         const state = get();
         if (state.token && state.user) {
           set({ isAuthenticated: true });
+          return;
+        }
+
+        try {
+          const response = await autoLoginBroker();
+          set({
+            token: response.access_token,
+            user: response.user,
+            isAuthenticated: true,
+            error: null,
+            tradingMode: response.user.trading_mode,
+          });
+        } catch {
+          // No server-side credentials configured, or auto-login failed —
+          // fall back to the manual login form.
         }
       },
     }),

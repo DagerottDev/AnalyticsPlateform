@@ -3,7 +3,11 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from httpx import AsyncClient
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+
+from app.config import get_settings
+from tests.conftest import get_test_settings
 
 
 @pytest.mark.asyncio
@@ -21,7 +25,7 @@ async def test_login_oauth_success(
             json={
                 "app_id": "mock-app-id-100",
                 "api_secret": "mock-secret",
-                "redirect_uri": "http://127.0.0.1:3001",
+                "redirect_uri": "http://127.0.0.1:3000",
                 "auth_code": "mock",
                 "trading_mode": "paper",
             },
@@ -64,6 +68,50 @@ async def test_login_totp_success(
                 "trading_mode": "paper",
             },
         )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "access_token" in data
+    assert data["user"]["client_id"] == "TEST_CLIENT_001"
+
+
+@pytest.mark.asyncio
+async def test_auto_login_not_configured(client: AsyncClient) -> None:
+    """Auto-login should 503 when no server-side Fyers credentials are set."""
+    response = await client.post("/api/v1/auth/auto-login")
+    assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_auto_login_success(
+    app: FastAPI,
+    mock_broker_service: AsyncMock,
+) -> None:
+    """Auto-login should return a JWT using server-configured credentials."""
+    auto_login_settings = get_test_settings().model_copy(
+        update={
+            "fyers_app_id": "mock-app-id-100",
+            "fyers_api_secret": "mock-secret",
+            "fyers_client_id": "mock-client",
+            "fyers_totp_secret": "mock-totp-secret",
+            "fyers_pin": "1234",
+        }
+    )
+    app.dependency_overrides[get_settings] = lambda: auto_login_settings
+
+    try:
+        with (
+            patch("app.api.v1.auth.FyersService", return_value=mock_broker_service),
+            patch(
+                "app.api.v1.auth.get_fyers_access_token_headless",
+                return_value="mock_fyers_access_token_12345",
+            ),
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                response = await ac.post("/api/v1/auth/auto-login")
+    finally:
+        app.dependency_overrides[get_settings] = lambda: get_test_settings()
 
     assert response.status_code == 200
     data = response.json()

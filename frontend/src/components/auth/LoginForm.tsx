@@ -29,8 +29,10 @@ import {
   EyeOff,
   KeyRound,
   Loader2,
+  Lock,
   Shield,
   ShieldCheck,
+  User,
   Zap,
 } from "lucide-react";
 
@@ -51,10 +53,11 @@ export function LoginForm() {
 
   // OAuth wizard fields
   const [authCode, setAuthCode] = useState("");
-  const [redirectUri, setRedirectUri] = useState("http://127.0.0.1:3001");
+  const [redirectUri, setRedirectUri] = useState("http://127.0.0.1:3000");
 
   // Toggles for masking secrets
   const [showApiSecret, setShowApiSecret] = useState(false);
+  const [showTotpSecret, setShowTotpSecret] = useState(false);
 
   // Load from localStorage on mount (hydration safe)
   useEffect(() => {
@@ -67,7 +70,7 @@ export function LoginForm() {
       setClientId(localStorage.getItem("fy_client_id") || "");
       setTotpSecret(localStorage.getItem("fy_totp_secret") || "");
       setPin(localStorage.getItem("fy_pin") || "");
-      setRedirectUri(localStorage.getItem("fy_redirect_uri") || "http://127.0.0.1:3001");
+      setRedirectUri(localStorage.getItem("fy_redirect_uri") || "http://127.0.0.1:3000");
 
       const savedTradingMode = localStorage.getItem("fy_trading_mode");
       if (savedTradingMode) setTradingMode(savedTradingMode as TradingMode);
@@ -177,81 +180,70 @@ export function LoginForm() {
             </button>
           </div>
 
-          {/* App ID */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
-              Fyers App ID
-            </label>
-            <input
-              type="text"
-              value={appId}
-              onChange={(e) => setAppId(e.target.value)}
-              placeholder="e.g. XXXXXXXXX-100"
-              required
-              className="focus-ring w-full"
-            />
-          </div>
-
-          {/* API Secret */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
-              Fyers Secret Key
-            </label>
-            <div className="relative">
-              <input
-                type={showApiSecret ? "text" : "password"}
-                value={apiSecret}
-                onChange={(e) => setApiSecret(e.target.value)}
-                placeholder="Enter Fyers Secret Key"
-                required
-                className="focus-ring w-full pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowApiSecret(!showApiSecret)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-              >
-                {showApiSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-
           {/* TOTP AUTO-LOGIN FIELDS */}
           {loginType === "totp" && (
             <div className="space-y-4 animate-fade-in">
               {/* Client ID */}
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  <User className="h-3.5 w-3.5" />
                   Fyers Client ID
                 </label>
                 <input
                   type="text"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
-                  placeholder="Enter Fyers Client ID"
+                  placeholder="e.g. YR02352"
                   required
                   className="focus-ring w-full"
                 />
               </div>
 
-              {/* TOTP Secret */}
+              {/* App ID */}
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
-                  TOTP Secret (2FA Key)
+                  <KeyRound className="h-3.5 w-3.5" />
+                  Fyers App ID
                 </label>
                 <input
                   type="text"
-                  value={totpSecret}
-                  onChange={(e) => setTotpSecret(e.target.value)}
-                  placeholder="Enter TOTP setup secret"
+                  value={appId}
+                  onChange={(e) => setAppId(e.target.value)}
+                  placeholder="e.g. XXXXXXXXX-100"
                   required
                   className="focus-ring w-full"
                 />
+              </div>
+
+              {/* API Secret */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  <Lock className="h-3.5 w-3.5" />
+                  Fyers Secret Key
+                </label>
+                <div className="relative">
+                  <input
+                    type={showApiSecret ? "text" : "password"}
+                    value={apiSecret}
+                    onChange={(e) => setApiSecret(e.target.value)}
+                    placeholder="Enter Fyers Secret Key"
+                    required
+                    className="focus-ring w-full pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiSecret(!showApiSecret)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                  >
+                    {showApiSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               {/* Security PIN */}
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  <Shield className="h-3.5 w-3.5" />
                   Fyers Security PIN
                 </label>
                 <input
@@ -264,12 +256,78 @@ export function LoginForm() {
                   className="focus-ring w-full font-mono text-center tracking-widest text-lg"
                 />
               </div>
+
+              {/* TOTP Secret */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  TOTP Secret (2FA Key)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showTotpSecret ? "text" : "password"}
+                    value={totpSecret}
+                    onChange={(e) => setTotpSecret(e.target.value)}
+                    placeholder="Enter your 32-character TOTP secret key"
+                    required
+                    className="focus-ring w-full pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTotpSecret(!showTotpSecret)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                  >
+                    {showTotpSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
           {/* OAUTH WIZARD FIELDS */}
           {loginType === "oauth" && (
             <div className="space-y-4 animate-fade-in">
+              {/* App ID */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  <KeyRound className="h-3.5 w-3.5" />
+                  Fyers App ID
+                </label>
+                <input
+                  type="text"
+                  value={appId}
+                  onChange={(e) => setAppId(e.target.value)}
+                  placeholder="e.g. XXXXXXXXX-100"
+                  required
+                  className="focus-ring w-full"
+                />
+              </div>
+
+              {/* API Secret */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  <Lock className="h-3.5 w-3.5" />
+                  Fyers Secret Key
+                </label>
+                <div className="relative">
+                  <input
+                    type={showApiSecret ? "text" : "password"}
+                    value={apiSecret}
+                    onChange={(e) => setApiSecret(e.target.value)}
+                    placeholder="Enter Fyers Secret Key"
+                    required
+                    className="focus-ring w-full pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiSecret(!showApiSecret)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                  >
+                    {showApiSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
               {/* Redirect URI */}
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">

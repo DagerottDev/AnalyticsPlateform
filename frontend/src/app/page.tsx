@@ -17,7 +17,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (hydrated && isAuthenticated) {
-      router.replace("/dashboard");
+      router.replace("/accounts");
     }
   }, [hydrated, isAuthenticated, router]);
 

@@ -6,7 +6,7 @@ from fyers_apiv3 import fyersModel
 # Replace these with your Fyers App credentials if they differ
 APP_ID = "NI1WBOCXZQ-100"
 API_SECRET = "TZC7VJE10V"
-REDIRECT_URI = "http://127.0.0.1:3001"
+REDIRECT_URI = "http://127.0.0.1:3000"
 
 def generate_manual_token():
     print("=== Fyers Manual Token Generator ===")

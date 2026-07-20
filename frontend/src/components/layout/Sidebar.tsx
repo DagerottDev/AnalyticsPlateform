@@ -11,19 +11,18 @@ import { cn } from "@/lib/utils";
 import {
   BarChart3,
   Blocks,
-  Briefcase,
   Boxes,
-  Calculator,
+  Briefcase,
   CandlestickChart,
-  Gauge,
+  CircleUserRound,
   History,
   LayoutDashboard,
   LineChart,
   Settings,
-  TrendingUp,
   Waves,
   Zap,
 } from "lucide-react";
+import { useRouter, usePathname } from "next/navigation";
 import { useState } from "react";
 
 interface NavItem {
@@ -44,6 +43,7 @@ const navigation: NavGroup[] = [
     title: "Overview",
     items: [
       { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
+      { icon: CircleUserRound, label: "Accounts", href: "/accounts" },
       { icon: CandlestickChart, label: "Option Chain", href: "/chain" },
     ],
   },
@@ -68,7 +68,8 @@ const navigation: NavGroup[] = [
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
-  const [activeHref, setActiveHref] = useState("/dashboard");
+  const router = useRouter();
+  const pathname = usePathname();
 
   return (
     <aside
@@ -98,12 +99,12 @@ export function Sidebar() {
             <ul className="space-y-0.5">
               {group.items.map((item) => {
                 const Icon = item.icon;
-                const isActive = activeHref === item.href;
+                const isActive = pathname === item.href;
 
                 return (
                   <li key={item.href}>
                     <button
-                      onClick={() => !item.disabled && setActiveHref(item.href)}
+                      onClick={() => !item.disabled && router.push(item.href)}
                       disabled={item.disabled}
                       title={collapsed ? item.label : undefined}
                       className={cn(

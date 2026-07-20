@@ -26,7 +26,7 @@ class LoginRequest(BaseModel):
     app_id: str = Field(..., description="Fyers App ID, e.g. 'XXXXXXXXX-100'")
     api_secret: str = Field(..., description="Fyers App Secret Key")
     redirect_uri: str = Field(
-        default="http://127.0.0.1:3001",
+        default="http://127.0.0.1:3000",
         description="Redirect URI registered in the Fyers developer dashboard",
     )
     trading_mode: str = Field(

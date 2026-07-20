@@ -92,7 +92,7 @@ async def get_fyers_access_token_headless(
     pin: str,
     app_id: str,
     app_secret: str,
-    redirect_uri: str = "http://127.0.0.1:3001",
+    redirect_uri: str = "http://127.0.0.1:3000",
     ttl_seconds: int = 82800,
 ) -> str:
     """Return a fresh Fyers API v3 access token via fully automated headless login.
