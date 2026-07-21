@@ -29,7 +29,6 @@ interface NavItem {
   icon: React.ElementType;
   label: string;
   href: string;
-  badge?: string;
   disabled?: boolean;
 }
 
@@ -50,18 +49,18 @@ const navigation: NavGroup[] = [
   {
     title: "Analytics",
     items: [
-      { icon: LineChart, label: "Charts", href: "/charts", disabled: false, badge: "M5" },
-      { icon: Waves, label: "Volatility", href: "/volatility", disabled: false, badge: "M6" },
-      { icon: BarChart3, label: "Dealer Flow", href: "/dealer-flow", disabled: false, badge: "M7" },
+      { icon: LineChart, label: "Charts", href: "/charts" },
+      { icon: Waves, label: "Volatility", href: "/volatility" },
+      { icon: BarChart3, label: "Dealer Flow", href: "/dealer-flow" },
     ],
   },
   {
     title: "Trading",
     items: [
-      { icon: Zap, label: "Alerts", href: "/alerts", disabled: false, badge: "M9" },
-      { icon: Briefcase, label: "Positions", href: "/positions", disabled: true, badge: "M11" },
-      { icon: History, label: "Replay Mode", href: "/replay", disabled: false, badge: "M10" },
-      { icon: Blocks, label: "Strategy Builder", href: "/strategy", disabled: false, badge: "M8" },
+      { icon: Zap, label: "Alerts", href: "/alerts" },
+      { icon: Briefcase, label: "Positions", href: "/positions", disabled: true },
+      { icon: History, label: "Replay Mode", href: "/replay" },
+      { icon: Blocks, label: "Strategy Builder", href: "/strategy" },
     ],
   },
 ];
@@ -123,16 +122,7 @@ export function Sidebar() {
                           isActive && "text-[var(--color-accent-blue)]"
                         )}
                       />
-                      {!collapsed && (
-                        <>
-                          <span className="flex-1 text-left">{item.label}</span>
-                          {item.badge && (
-                            <span className="rounded bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
-                              {item.badge}
-                            </span>
-                          )}
-                        </>
-                      )}
+                      {!collapsed && <span className="flex-1 text-left">{item.label}</span>}
                     </button>
                   </li>
                 );

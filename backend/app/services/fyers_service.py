@@ -1,6 +1,7 @@
 """Fyers broker service implementation."""
 
 import asyncio
+import time
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -10,9 +11,26 @@ from app.core.exceptions import BrokerAuthError, BrokerConnectionError
 from app.models.user import TradingMode, UserProfile
 from app.services.broker_base import BrokerService
 
+# Fyers' option-chain endpoint expects exchange-qualified underlying symbols,
+# not the plain index names the UI uses.
+_INDEX_SYMBOL_MAP = {
+    "NIFTY": "NSE:NIFTY50-INDEX",
+    "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
+    "FINNIFTY": "NSE:FINNIFTY-INDEX",
+    "MIDCPNIFTY": "NSE:MIDCPNIFTY-INDEX",
+}
+
 
 class FyersService(BrokerService):
     """Service for interacting with Fyers API."""
+
+    # Fyers' optionchain endpoint returns one expiry's chain per call (plus
+    # the full expiry list every time) — these bound how many expiries/strikes
+    # get_instruments fetches so it stays fast and doesn't hammer rate limits
+    # on symbols with many months of listed expiries.
+    _MAX_EXPIRIES_FETCHED = 6
+    _DEFAULT_STRIKE_COUNT = 20
+    _INSTRUMENTS_CACHE_TTL_SECONDS = 30
 
     def __init__(
         self,
@@ -30,6 +48,10 @@ class FyersService(BrokerService):
             self.client = fyersModel.FyersModel(
                 client_id=self.app_id, token=self.access_token, is_async=False, log_path=""
             )
+        # symbol -> (fetched_at_monotonic, instruments). The chain and
+        # expiries endpoints are both called back-to-back for the same
+        # symbol on page load, so this avoids doubling the Fyers API calls.
+        self._instruments_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
     async def verify_connection(self) -> bool:
         """Verify the Fyers connection by fetching profile."""
@@ -138,8 +160,94 @@ class FyersService(BrokerService):
         except Exception as e:
             raise BrokerConnectionError(f"Failed to retrieve orderbook: {e}") from e
 
+    @staticmethod
+    def _to_fyers_symbol(symbol: str) -> str:
+        """Map a UI symbol (NIFTY, RELIANCE, ...) to Fyers' option-chain
+        underlying format — indices use their exchange INDEX symbol,
+        everything else is treated as an NSE equity."""
+        upper = symbol.upper()
+        return _INDEX_SYMBOL_MAP.get(upper, f"NSE:{upper}-EQ")
+
+    async def _fetch_option_chain(
+        self, symbol: str, strikecount: int, expiry_timestamp: str = ""
+    ) -> dict[str, Any]:
+        """Call Fyers' optionchain endpoint for one expiry (or the nearest,
+        if expiry_timestamp is empty). Every response includes `expiryData`
+        — the full list of available expiries — regardless of which
+        expiry's chain was requested."""
+        response = await asyncio.to_thread(
+            self.client.optionchain,
+            {
+                "symbol": self._to_fyers_symbol(symbol),
+                "strikecount": strikecount,
+                "timestamp": expiry_timestamp,
+            },
+        )
+        if not response or response.get("s") != "ok":
+            raise BrokerConnectionError(f"Fyers option chain request failed: {response}")
+        return cast(dict[str, Any], response.get("data", {}))
+
     async def get_instruments(self, symbol: str) -> list[dict[str, Any]]:
-        return []
+        """Fetch option contracts for a symbol across its near-term expiries.
+
+        Fyers' optionchain endpoint returns one expiry's chain per call, so
+        this makes one cheap call to discover expiries (`expiryData`) via
+        `_fetch_option_chain`, then one call per near-term expiry to build a
+        flat instrument list — the shape the frontend expects (all expiries
+        merged, filtered client-side by the selected one).
+        """
+        if self.is_mock:
+            return []
+
+        cache_key = symbol.upper()
+        cached = self._instruments_cache.get(cache_key)
+        if cached and (time.monotonic() - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
+            return cached[1]
+
+        try:
+            first = await self._fetch_option_chain(symbol, strikecount=1)
+        except Exception as e:
+            raise BrokerConnectionError(f"Failed to fetch option chain expiries: {e}") from e
+
+        is_index = symbol.upper() in _INDEX_SYMBOL_MAP
+        instruments: list[dict[str, Any]] = []
+
+        for entry in first.get("expiryData", [])[: self._MAX_EXPIRIES_FETCHED]:
+            timestamp = str(entry.get("expiry") or "")
+            if not timestamp:
+                continue
+            try:
+                expiry_label = datetime.fromtimestamp(int(timestamp), tz=UTC).strftime("%d-%b-%Y")
+            except (ValueError, OSError):
+                continue
+
+            try:
+                chain = await self._fetch_option_chain(
+                    symbol, strikecount=self._DEFAULT_STRIKE_COUNT, expiry_timestamp=timestamp
+                )
+            except Exception:
+                # Skip an expiry Fyers fails to return rather than failing
+                # the whole request over one bad expiry.
+                continue
+
+            for row in chain.get("optionsChain", []):
+                option_type = row.get("option_type")
+                if option_type not in ("CE", "PE"):
+                    continue  # The underlying/index row has option_type "".
+                instruments.append(
+                    {
+                        "trading_symbol": row["symbol"],
+                        "symbol": symbol.upper(),
+                        "instrument_type": "OPTIDX" if is_index else "OPTSTK",
+                        "expiry": expiry_label,
+                        "strike": row.get("strike_price"),
+                        "option_type": option_type,
+                        "exchange": "NFO",
+                    }
+                )
+
+        self._instruments_cache[cache_key] = (time.monotonic(), instruments)
+        return instruments
 
     async def get_historical_data(
         self, symbol: str, from_date: str, to_date: str, resolution: str

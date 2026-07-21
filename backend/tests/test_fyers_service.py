@@ -1,5 +1,6 @@
 """Tests for FyersService's real (non-stub) broker API integrations."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -86,3 +87,127 @@ async def test_mock_session_get_historical_data_returns_empty_list() -> None:
     )
     rows = await service.get_historical_data("NSE:NIFTY50-INDEX", "2023-11-15", "2023-11-15", "1")
     assert rows == []
+
+
+def _expiry_discovery_response(*expiries: tuple[str, str]) -> dict[str, Any]:
+    return {
+        "s": "ok",
+        "data": {"expiryData": [{"date": date, "expiry": ts} for date, ts in expiries]},
+    }
+
+
+def _chain_response(*rows: dict[str, Any]) -> dict[str, Any]:
+    return {"s": "ok", "data": {"optionsChain": list(rows)}}
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_parses_option_chain_across_expiries() -> None:
+    """A successful multi-expiry response is flattened into CE/PE instruments,
+    skipping the underlying/index row (empty option_type)."""
+    service = _make_service()
+    near_expiry = ("10-Jul-2025", "1752105000")
+    far_expiry = ("17-Jul-2025", "1752709800")
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            _expiry_discovery_response(near_expiry, far_expiry),
+            _chain_response(
+                {"symbol": "NSE:NIFTY50-INDEX", "option_type": "", "strike_price": -1},
+                {"symbol": "NSE:NIFTY25071017500CE", "option_type": "CE", "strike_price": 17500},
+                {"symbol": "NSE:NIFTY25071017500PE", "option_type": "PE", "strike_price": 17500},
+            ),
+            _chain_response(
+                {"symbol": "NSE:NIFTY25071717500CE", "option_type": "CE", "strike_price": 17500},
+                {"symbol": "NSE:NIFTY25071717500PE", "option_type": "PE", "strike_price": 17500},
+            ),
+        ]
+    )
+
+    instruments = await service.get_instruments("NIFTY")
+
+    assert len(instruments) == 4
+    assert {i["expiry"] for i in instruments} == {"09-Jul-2025", "16-Jul-2025"}
+    assert all(i["exchange"] == "NFO" and i["instrument_type"] == "OPTIDX" for i in instruments)
+    assert all(i["option_type"] in ("CE", "PE") for i in instruments)
+
+    discovery_call = service.client.optionchain.call_args_list[0].args[0]
+    assert discovery_call == {"symbol": "NSE:NIFTY50-INDEX", "strikecount": 1, "timestamp": ""}
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_maps_equity_symbols_to_nse_eq() -> None:
+    """Non-index symbols are treated as NSE equities, not exchange indices."""
+    service = _make_service()
+    reliance_row = {"symbol": "NSE:RELIANCE25073000CE", "option_type": "CE", "strike_price": 3000}
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            _expiry_discovery_response(("31-Jul-2025", "1753905000")),
+            _chain_response(reliance_row),
+        ]
+    )
+
+    instruments = await service.get_instruments("reliance")
+
+    assert instruments[0]["instrument_type"] == "OPTSTK"
+    discovery_call = service.client.optionchain.call_args_list[0].args[0]
+    assert discovery_call["symbol"] == "NSE:RELIANCE-EQ"
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_raises_when_expiry_discovery_fails() -> None:
+    """A Fyers error on the initial (expiry-discovery) call surfaces, rather
+    than silently returning an empty instrument list."""
+    service = _make_service()
+    service.client.optionchain = MagicMock(return_value={"s": "error", "message": "Invalid symbol"})
+
+    with pytest.raises(BrokerConnectionError):
+        await service.get_instruments("NIFTY")
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_skips_an_expiry_that_fails() -> None:
+    """One bad expiry's chain call doesn't fail the whole request."""
+    service = _make_service()
+    near_expiry = ("10-Jul-2025", "1752105000")
+    far_expiry = ("17-Jul-2025", "1752709800")
+    far_row = {"symbol": "NSE:NIFTY25071717500CE", "option_type": "CE", "strike_price": 17500}
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            _expiry_discovery_response(near_expiry, far_expiry),
+            {"s": "error", "message": "temporary issue"},
+            _chain_response(far_row),
+        ]
+    )
+
+    instruments = await service.get_instruments("NIFTY")
+
+    assert len(instruments) == 1
+    assert instruments[0]["expiry"] == "16-Jul-2025"
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_caches_within_ttl() -> None:
+    """Back-to-back calls for the same symbol (expiries + instruments on
+    page load) don't double the number of Fyers API calls."""
+    service = _make_service()
+    near_row = {"symbol": "NSE:NIFTY25071017500CE", "option_type": "CE", "strike_price": 17500}
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            _expiry_discovery_response(("10-Jul-2025", "1752105000")),
+            _chain_response(near_row),
+        ]
+    )
+
+    first = await service.get_instruments("NIFTY")
+    second = await service.get_instruments("NIFTY")
+
+    assert first == second
+    assert service.client.optionchain.call_count == 2  # not 4
+
+
+@pytest.mark.asyncio
+async def test_mock_session_get_instruments_returns_empty_list() -> None:
+    """Paper/mock sessions never hit the network — get_instruments short-circuits to []."""
+    service = FyersService(
+        app_id="TESTAPP-100", access_token="mock_token", trading_mode=TradingMode.PAPER
+    )
+    assert await service.get_instruments("NIFTY") == []

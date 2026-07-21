@@ -18,6 +18,7 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
+import { SAVED_LOGIN_KEYS } from "@/lib/auth";
 import type { TradingMode } from "@/types/auth";
 import { cn } from "@/lib/utils";
 import {
@@ -62,17 +63,17 @@ export function LoginForm() {
   // Load from localStorage on mount (hydration safe)
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const savedLoginType = localStorage.getItem("fy_login_type");
+      const savedLoginType = localStorage.getItem(SAVED_LOGIN_KEYS.loginType);
       if (savedLoginType) setLoginType(savedLoginType as "totp" | "oauth");
 
-      setAppId(localStorage.getItem("fy_app_id") || "");
-      setApiSecret(localStorage.getItem("fy_api_secret") || "");
-      setClientId(localStorage.getItem("fy_client_id") || "");
-      setTotpSecret(localStorage.getItem("fy_totp_secret") || "");
-      setPin(localStorage.getItem("fy_pin") || "");
-      setRedirectUri(localStorage.getItem("fy_redirect_uri") || "http://127.0.0.1:3000");
+      setAppId(localStorage.getItem(SAVED_LOGIN_KEYS.appId) || "");
+      setApiSecret(localStorage.getItem(SAVED_LOGIN_KEYS.apiSecret) || "");
+      setClientId(localStorage.getItem(SAVED_LOGIN_KEYS.clientId) || "");
+      setTotpSecret(localStorage.getItem(SAVED_LOGIN_KEYS.totpSecret) || "");
+      setPin(localStorage.getItem(SAVED_LOGIN_KEYS.pin) || "");
+      setRedirectUri(localStorage.getItem(SAVED_LOGIN_KEYS.redirectUri) || "http://127.0.0.1:3000");
 
-      const savedTradingMode = localStorage.getItem("fy_trading_mode");
+      const savedTradingMode = localStorage.getItem(SAVED_LOGIN_KEYS.tradingMode);
       if (savedTradingMode) setTradingMode(savedTradingMode as TradingMode);
     }
   }, []);
@@ -80,14 +81,14 @@ export function LoginForm() {
   // Save to localStorage on change
   useEffect(() => {
     if (typeof window !== "undefined") {
-      localStorage.setItem("fy_login_type", loginType);
-      localStorage.setItem("fy_app_id", appId);
-      localStorage.setItem("fy_api_secret", apiSecret);
-      localStorage.setItem("fy_client_id", clientId);
-      localStorage.setItem("fy_totp_secret", totpSecret);
-      localStorage.setItem("fy_pin", pin);
-      localStorage.setItem("fy_redirect_uri", redirectUri);
-      localStorage.setItem("fy_trading_mode", tradingMode);
+      localStorage.setItem(SAVED_LOGIN_KEYS.loginType, loginType);
+      localStorage.setItem(SAVED_LOGIN_KEYS.appId, appId);
+      localStorage.setItem(SAVED_LOGIN_KEYS.apiSecret, apiSecret);
+      localStorage.setItem(SAVED_LOGIN_KEYS.clientId, clientId);
+      localStorage.setItem(SAVED_LOGIN_KEYS.totpSecret, totpSecret);
+      localStorage.setItem(SAVED_LOGIN_KEYS.pin, pin);
+      localStorage.setItem(SAVED_LOGIN_KEYS.redirectUri, redirectUri);
+      localStorage.setItem(SAVED_LOGIN_KEYS.tradingMode, tradingMode);
     }
   }, [loginType, appId, apiSecret, clientId, totpSecret, pin, redirectUri, tradingMode]);
 
