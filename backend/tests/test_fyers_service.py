@@ -1,13 +1,14 @@
 """Tests for FyersService's real (non-stub) broker API integrations."""
 
+import asyncio
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.core.exceptions import BrokerConnectionError
 from app.models.user import TradingMode
-from app.services.fyers_service import FyersService
+from app.services.fyers_service import FyersService, from_fyers_ws_symbol, to_fyers_ws_symbol
 
 
 def _make_service() -> FyersService:
@@ -202,6 +203,101 @@ async def test_get_instruments_caches_within_ttl() -> None:
 
     assert first == second
     assert service.client.optionchain.call_count == 2  # not 4
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_deduplicates_concurrent_calls_for_same_symbol() -> None:
+    """Two callers requesting the same symbol at the same time (e.g. the
+    /instruments and /expiries endpoints firing together on page load) share
+    one fetch instead of each independently bursting calls at Fyers."""
+    service = _make_service()
+    near_row = {"symbol": "NSE:NIFTY25071017500CE", "option_type": "CE", "strike_price": 17500}
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            _expiry_discovery_response(("10-Jul-2025", "1752105000")),
+            _chain_response(near_row),
+        ]
+    )
+
+    first, second = await asyncio.gather(
+        service.get_instruments("NIFTY"), service.get_instruments("NIFTY")
+    )
+
+    assert first == second
+    assert service.client.optionchain.call_count == 2  # not 4 — no duplicate fetch
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_retries_on_rate_limit_then_succeeds() -> None:
+    """A transient 429 from Fyers is retried with backoff rather than
+    failing the whole request."""
+    service = _make_service()
+    near_row = {"symbol": "NSE:NIFTY25071017500CE", "option_type": "CE", "strike_price": 17500}
+    rate_limited = {"s": "error", "code": 429, "message": "request limit reached"}
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            rate_limited,
+            _expiry_discovery_response(("10-Jul-2025", "1752105000")),
+            _chain_response(near_row),
+        ]
+    )
+
+    with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()):
+        instruments = await service.get_instruments("NIFTY")
+
+    assert len(instruments) == 1
+    assert service.client.optionchain.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_gives_up_after_max_retries_on_persistent_rate_limit() -> None:
+    """A persistent 429 (not just a one-off blip) still surfaces as an
+    error after exhausting retries, rather than retrying forever."""
+    service = _make_service()
+    service.client.optionchain = MagicMock(
+        return_value={"s": "error", "code": 429, "message": "request limit reached"}
+    )
+
+    with (
+        patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()),
+        pytest.raises(BrokerConnectionError),
+    ):
+        await service.get_instruments("NIFTY")
+
+    assert service.client.optionchain.call_count == FyersService._MAX_FETCH_RETRIES
+
+
+def test_to_fyers_ws_symbol_maps_bare_index_alias() -> None:
+    """A bare underlying alias (what the UI subscribes for the underlying's
+    own price) must be exchange-qualified before reaching Fyers — a bare
+    'NIFTY' is rejected by Fyers' websocket subscribe with 'Please provide
+    a valid symbol'."""
+    assert to_fyers_ws_symbol("NIFTY") == "NSE:NIFTY50-INDEX"
+    assert to_fyers_ws_symbol("nifty") == "NSE:NIFTY50-INDEX"
+
+
+def test_to_fyers_ws_symbol_maps_bare_equity_alias() -> None:
+    assert to_fyers_ws_symbol("RELIANCE") == "NSE:RELIANCE-EQ"
+
+
+def test_to_fyers_ws_symbol_passes_through_already_qualified_trading_symbols() -> None:
+    """An option contract's trading_symbol is already exchange-qualified —
+    re-mapping it would double-prefix it into something invalid."""
+    assert to_fyers_ws_symbol("NSE:NIFTY2681823200PE") == "NSE:NIFTY2681823200PE"
+
+
+def test_from_fyers_ws_symbol_reverses_index_alias() -> None:
+    assert from_fyers_ws_symbol("NSE:NIFTY50-INDEX") == "NIFTY"
+
+
+def test_from_fyers_ws_symbol_reverses_equity_alias() -> None:
+    assert from_fyers_ws_symbol("NSE:RELIANCE-EQ") == "RELIANCE"
+
+
+def test_from_fyers_ws_symbol_passes_through_option_trading_symbols() -> None:
+    """An option contract tick's symbol is exactly what the frontend
+    subscribed with (its trading_symbol) — it must not be rewritten."""
+    assert from_fyers_ws_symbol("NSE:NIFTY2681823200PE") == "NSE:NIFTY2681823200PE"
 
 
 @pytest.mark.asyncio

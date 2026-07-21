@@ -1,46 +1,14 @@
 import { AlertCircle, Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { formatApiError } from "@/lib/apiError";
 
 interface ApiErrorDisplayProps {
   error: unknown;
   className?: string;
 }
 
-/**
- * Extracts a detailed, readable string from any error object,
- * ensuring no information is swallowed (e.g. backend tracebacks or validation errors).
- */
-export function formatApiError(error: unknown): string {
-  if (!error) return "";
-  
-  if (typeof error === "string") return error;
-
-  // Handle Axios errors or similar structures
-  const anyErr = error as any;
-  let errorString = "";
-
-  if (anyErr.response) {
-    // The request was made and the server responded with a status code
-    // that falls out of the range of 2xx
-    errorString += `Status: ${anyErr.response.status}\n`;
-    if (anyErr.response.data) {
-      if (typeof anyErr.response.data === "object") {
-        errorString += `Data: ${JSON.stringify(anyErr.response.data, null, 2)}`;
-      } else {
-        errorString += `Data: ${anyErr.response.data}`;
-      }
-    }
-  } else if (anyErr.request) {
-    // The request was made but no response was received
-    errorString += `Network Error: No response received. ${anyErr.message || ""}`;
-  } else {
-    // Something happened in setting up the request that triggered an Error
-    errorString += anyErr.message || "Unknown error occurred";
-  }
-
-  return errorString;
-}
+export { formatApiError };
 
 export function ApiErrorDisplay({ error, className }: ApiErrorDisplayProps) {
   const [copied, setCopied] = useState(false);

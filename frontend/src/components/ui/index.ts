@@ -9,3 +9,4 @@ export { LoadingState } from "./LoadingState";
 export { PageContainer } from "./PageContainer";
 export { SectionHeader, Eyebrow } from "./SectionHeader";
 export { ApiErrorDisplay } from "./ApiErrorDisplay";
+export { Switch } from "./Switch";

@@ -10,11 +10,14 @@ import { apiClient } from "@/lib/api";
 import { OHLCVData } from "@/lib/indicators";
 import { Instrument } from "@/types/market";
 import { getInstruments } from "@/lib/market";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { formatApiError } from "@/lib/apiError";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 
 export default function ChartsPage() {
   const [symbol, setSymbol] = useState<string>("NIFTY");
@@ -22,6 +25,8 @@ export default function ChartsPage() {
   
   const [historicalData, setHistoricalData] = useState<OHLCVData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [chartError, setChartError] = useState<string | null>(null);
+  const showMockDataOnFailure = useSettingsStore((s) => s.showMockDataOnFailure);
   
   const [indicators, setIndicators] = useState({ sma: false, ema: false, bbands: false, rsi: false, supertrend: false });
   
@@ -60,6 +65,7 @@ export default function ChartsPage() {
 
     async function fetchHistorical() {
       setLoading(true);
+      setChartError(null);
       try {
         // Fetch historical data from backend
         // Defaulting to base symbol for the main chart
@@ -83,14 +89,22 @@ export default function ChartsPage() {
               volume: item.volume
             }));
             setHistoricalData(formatted);
-          } else {
-             // Mock data if backend empty
+          } else if (showMockDataOnFailure) {
              generateMockData();
+          } else {
+            setHistoricalData([]);
+            setChartError("No historical data returned for this symbol.");
           }
         }
       } catch (err) {
         console.error("Failed to fetch historical data", err);
-        if (isMounted) generateMockData();
+        if (!isMounted) return;
+        if (showMockDataOnFailure) {
+          generateMockData();
+        } else {
+          setHistoricalData([]);
+          setChartError(formatApiError(err) || "Failed to load historical data.");
+        }
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -125,7 +139,7 @@ export default function ChartsPage() {
     fetchHistorical();
 
     return () => { isMounted = false; };
-  }, [symbol]);
+  }, [symbol, showMockDataOnFailure]);
 
   // Heatmap Data Preparation
   const heatmapData = useMemo(() => {
@@ -194,6 +208,11 @@ export default function ChartsPage() {
             {loading ? (
               <Card>
                 <LoadingState size="lg" label="Loading chart data..." />
+              </Card>
+            ) : chartError ? (
+              <Card className="flex flex-col gap-3">
+                <EmptyState title="Failed to load chart data" />
+                <ApiErrorDisplay error={chartError} />
               </Card>
             ) : (
               <TradingChart

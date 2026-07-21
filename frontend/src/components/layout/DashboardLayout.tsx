@@ -11,6 +11,7 @@
 import { useAuth } from "@/hooks/useAuth";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
+import { ApiErrorLogPanel } from "./ApiErrorLogPanel";
 import { Loader2 } from "lucide-react";
 
 interface DashboardLayoutProps {
@@ -41,6 +42,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           {children}
         </main>
       </div>
+      <ApiErrorLogPanel />
     </div>
   );
 }

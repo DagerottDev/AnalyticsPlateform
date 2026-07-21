@@ -1,4 +1,6 @@
 import axios from "axios";
+import { useApiErrorLogStore } from "@/stores/apiErrorLogStore";
+import { formatApiError } from "@/lib/apiError";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_URL_WITH_VERSION = API_BASE_URL.endsWith("/api/v1") 
@@ -31,6 +33,23 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Log every failed request so it can be reviewed/copied from the API error
+// log panel, regardless of whether the calling page shows its own inline error.
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const method = (error?.config?.method || "GET").toUpperCase();
+    const url = error?.config?.url || "unknown";
+    const status: number | null = error?.response?.status ?? null;
+    const message =
+      error?.response?.data?.detail || error?.response?.data?.message || error?.message || "Request failed";
+
+    useApiErrorLogStore.getState().logError({ method, url, status, message, detail: formatApiError(error) });
+
     return Promise.reject(error);
   }
 );

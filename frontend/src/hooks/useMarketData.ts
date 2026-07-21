@@ -1,11 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getWebSocket } from "@/lib/websocket";
-import { MarketTick, TickData } from "@/types/market";
+import { MarketTick } from "@/types/market";
 import { useAuth } from "@/hooks/useAuth";
 import { useReplayStore } from "@/stores/replayStore";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export function useMarketData(symbols: string[]) {
   const { user } = useAuth();
@@ -25,7 +22,7 @@ export function useMarketData(symbols: string[]) {
 
     if (!user?.client_id) return;
 
-    const ws = getWebSocket(API_BASE_URL, "internal_dev_key");
+    const ws = getWebSocket();
     
     const handleTick = (tick: MarketTick) => {
       setTicks((prev) => ({
