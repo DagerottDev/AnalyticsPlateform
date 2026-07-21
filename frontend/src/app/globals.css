@@ -31,6 +31,37 @@
   --color-profit: #26a69a;
   --color-loss: #ef5350;
 
+  /* Status — reserved for state (connection/alerts), never reused as a series
+     color. Fixed values, not derived from the accent scale on purpose. */
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-serious: #ec835a;
+  --color-status-critical: #d03b3b;
+
+  /* Fixed categorical order for multi-series charts (indicator lines, etc.) —
+     always assigned 1st -> 4th in this order, never picked ad hoc per chart. */
+  --color-cat-1: var(--color-accent-blue);
+  --color-cat-2: var(--color-accent-orange);
+  --color-cat-3: var(--color-accent-purple);
+  --color-cat-4: var(--color-accent-cyan);
+
+  /* Sequential ramp (single hue, light->dark magnitude) for heatmaps/surfaces */
+  --color-sequential-1: #1c5866;
+  --color-sequential-2: #0e839a;
+  --color-sequential-3: #00a6c4;
+  --color-sequential-4: #1ecbe8;
+  --color-sequential-5: #a0eefa;
+
+  /* Chart chrome pulls from the same tokens as the rest of the UI, not a
+     separate ad hoc zinc scale. */
+  --color-chart-grid: var(--color-border-subtle);
+  --color-chart-axis-text: var(--color-text-secondary);
+  --color-chart-tooltip-bg: var(--color-bg-elevated);
+  --color-chart-tooltip-border: var(--color-border-default);
+
+  /* Input surface — replaces ad hoc raw hex (#18181b/#27272a) used per-file */
+  --color-bg-input: #1a1e29;
+
   /* Gradients */
   --gradient-brand: linear-gradient(135deg, #2962ff 0%, #00bcd4 50%, #ab47bc 100%);
   --gradient-brand-subtle: linear-gradient(135deg, rgba(41, 98, 255, 0.15) 0%, rgba(0, 188, 212, 0.15) 50%, rgba(171, 71, 188, 0.15) 100%);
@@ -187,6 +218,24 @@ body {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(42, 46, 62, 0.8);
+}
+
+/* ─── Panel (flat surface) ──────────────────────────────────
+   The default card treatment — crisp, no blur. Reserve
+   .glass/.glass-strong/.gradient-border for hero moments only
+   (welcome banner, login form, connected-account card). */
+.panel {
+  background-color: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+}
+
+/* ─── Tabular numerals ──────────────────────────────────────
+   Apply anywhere numeric/price data renders so digits align
+   in columns — a small but essential trading-terminal detail. */
+.tnum {
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 /* ─── Gradient Border ───────────────────────────────────── */

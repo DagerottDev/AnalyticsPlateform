@@ -15,6 +15,11 @@ import {
 } from "@/lib/strategyPresets";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { Instrument } from "@/types/market";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Select";
+import { Input } from "@/components/ui/Input";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Trash2, Plus, Layers } from "lucide-react";
 
 interface LegManagerProps {
@@ -101,11 +106,11 @@ export function LegManager({
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-sm">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b border-[var(--color-border-subtle)] pb-4">
+    <Card className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4 border-b border-[var(--color-border-subtle)] pb-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Strategy Legs</h3>
-          <p className="text-[10px] text-[var(--color-text-muted)] mt-1">Lot Size: {lotSize}</p>
+          <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Lot Size: {lotSize}</p>
         </div>
         <InstrumentSelector
           symbol={underlyingSymbol}
@@ -116,45 +121,39 @@ export function LegManager({
       </div>
 
       <div className="flex items-center gap-2 rounded-lg border border-dashed border-[var(--color-border-default)] p-2">
-        <Layers className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
-        <select
-          className="flex-1 bg-[#27272a] text-sm text-[var(--color-text-primary)] rounded p-1.5 outline-none border border-[var(--color-border-subtle)]"
+        <Layers className="h-4 w-4 shrink-0 text-[var(--color-text-muted)]" />
+        <Select
+          className="flex-1"
           value={selectedPreset}
           onChange={e => setSelectedPreset(e.target.value as StrategyPresetName)}
         >
           {ALL_PRESETS.map(name => (
             <option key={name} value={name}>{name}</option>
           ))}
-        </select>
-        <button
-          onClick={loadPreset}
-          disabled={!currentExpiry}
-          className="rounded px-3 py-1.5 text-xs font-semibold text-[var(--color-accent-blue)] border border-[var(--color-accent-blue)] hover:bg-[var(--color-accent-blue)] hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap"
-        >
+        </Select>
+        <Button variant="outline" size="sm" onClick={loadPreset} disabled={!currentExpiry} className="whitespace-nowrap">
           Load Preset
-        </button>
+        </Button>
       </div>
 
       <div className="flex flex-col gap-2">
-        {legs.map((leg, index) => (
-          <div key={leg.id} className="grid grid-cols-12 gap-2 items-center rounded bg-[#18181b] p-2 border border-[var(--color-border-subtle)]">
+        {legs.map((leg) => (
+          <div key={leg.id} className="grid grid-cols-12 items-center gap-2 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-bg-hover)] p-2">
             <div className="col-span-12 md:col-span-2">
-              <select 
-                className="w-full bg-[#27272a] text-sm text-[var(--color-text-primary)] rounded p-1.5 outline-none border border-[var(--color-border-subtle)]"
+              <Select
                 value={leg.action}
                 onChange={e => updateLeg(leg.id, { action: e.target.value as "Buy" | "Sell" })}
               >
                 <option value="Buy">Buy</option>
                 <option value="Sell">Sell</option>
-              </select>
+              </Select>
             </div>
-            
+
             <div className="col-span-12 md:col-span-3">
-               <input 
+               <Input
                  type="number"
                  step={lotSize}
                  min={lotSize}
-                 className="w-full bg-[#27272a] text-sm text-[var(--color-text-primary)] rounded p-1.5 outline-none border border-[var(--color-border-subtle)]"
                  value={leg.quantity}
                  onChange={e => updateLeg(leg.id, { quantity: Number(e.target.value) })}
                  placeholder="Qty"
@@ -162,8 +161,7 @@ export function LegManager({
             </div>
 
             <div className="col-span-12 md:col-span-4">
-              <select
-                className="w-full bg-[#27272a] text-sm text-[var(--color-text-primary)] rounded p-1.5 outline-none border border-[var(--color-border-subtle)]"
+              <Select
                 value={leg.instrument?.trading_symbol || ""}
                 onChange={e => {
                   const inst = availableInstruments.find(i => i.trading_symbol === e.target.value);
@@ -176,44 +174,39 @@ export function LegManager({
                     {i.strike} {i.option_type}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div className="col-span-10 md:col-span-2">
-               <input 
+               <Input
                  type="number"
                  step="0.05"
-                 className="w-full bg-[#27272a] text-sm text-[var(--color-text-primary)] rounded p-1.5 outline-none border border-[var(--color-border-subtle)]"
                  value={leg.entryPrice}
                  onChange={e => updateLeg(leg.id, { entryPrice: Number(e.target.value) })}
                  placeholder="Price"
                />
             </div>
 
-            <div className="col-span-2 md:col-span-1 flex justify-end">
-              <button 
-                onClick={() => removeLeg(leg.id)}
-                className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-accent-red)] transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+            <div className="col-span-2 flex justify-end md:col-span-1">
+              <Button variant="icon" onClick={() => removeLeg(leg.id)} aria-label="Remove leg">
+                <Trash2 className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         ))}
 
         {legs.length === 0 && (
-          <div className="text-center py-4 text-sm text-[var(--color-text-muted)]">
-            No legs added. Add a leg to start building your strategy.
-          </div>
+          <EmptyState
+            className="py-4"
+            title="No legs added."
+            description="Add a leg to start building your strategy."
+          />
         )}
       </div>
 
-      <button 
-        onClick={addLeg}
-        className="mt-2 flex items-center justify-center gap-2 w-full rounded border border-dashed border-[var(--color-border-default)] py-2 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-accent-blue)] hover:text-[var(--color-accent-blue)] transition-colors"
-      >
-        <Plus className="w-4 h-4" /> Add Leg
-      </button>
-    </div>
+      <Button variant="outline" onClick={addLeg} className="mt-2 w-full border-dashed">
+        <Plus className="h-4 w-4" /> Add Leg
+      </Button>
+    </Card>
   );
 }

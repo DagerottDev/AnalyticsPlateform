@@ -3,6 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { OHLCVData, calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateSupertrend } from "@/lib/indicators";
+import { ChartLegend } from "./ChartLegend";
+
+// lightweight-charts renders to <canvas>, which cannot resolve CSS var() —
+// these hex literals mirror the design tokens in globals.css (documented in
+// docs/DESIGN_SYSTEM.md). Indicator lines are assigned in one fixed
+// categorical order (1st SMA, 2nd EMA, 3rd Bollinger, 4th Supertrend), never
+// picked ad hoc per chart.
+const COLOR_GRID = "#1e222d"; // --color-border-subtle
+const COLOR_BORDER = "#2a2e3e"; // --color-border-default
+const COLOR_AXIS_TEXT = "#787b86"; // --color-text-secondary
+const COLOR_PROFIT = "#26a69a"; // --color-profit
+const COLOR_LOSS = "#ef5350"; // --color-loss
+const COLOR_CAT_1 = "#2962ff"; // --color-cat-1 (blue)
+const COLOR_CAT_2 = "#ff9800"; // --color-cat-2 (orange)
+const COLOR_CAT_3 = "#ab47bc"; // --color-cat-3 (purple)
+const COLOR_CAT_4 = "#00bcd4"; // --color-cat-4 (cyan)
 
 interface TradingChartProps {
   data: OHLCVData[];
@@ -42,11 +58,11 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { color: "transparent" },
-        textColor: "#a1a1aa", // zinc-400
+        textColor: COLOR_AXIS_TEXT,
       },
       grid: {
-        vertLines: { color: "#27272a" }, // zinc-800
-        horzLines: { color: "#27272a" },
+        vertLines: { color: COLOR_GRID },
+        horzLines: { color: COLOR_GRID },
       },
       crosshair: {
         mode: 1, // Normal mode
@@ -54,26 +70,26 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
-        borderColor: "#3f3f46", // zinc-700
+        borderColor: COLOR_BORDER,
       },
       rightPriceScale: {
-        borderColor: "#3f3f46",
+        borderColor: COLOR_BORDER,
       },
       autoSize: true,
     });
 
     // Candlestick Series
     const candleSeries = chart.addCandlestickSeries({
-      upColor: "#22c55e", // green-500
-      downColor: "#ef4444", // red-500
+      upColor: COLOR_PROFIT,
+      downColor: COLOR_LOSS,
       borderVisible: false,
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
+      wickUpColor: COLOR_PROFIT,
+      wickDownColor: COLOR_LOSS,
     });
 
     // Volume Series
     const volumeSeries = chart.addHistogramSeries({
-      color: "#3f3f46", // default volume color
+      color: COLOR_BORDER, // default volume color
       priceFormat: { type: "volume" },
       priceScaleId: "", // set as an overlay by setting a blank priceScaleId
     });
@@ -111,7 +127,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     const volumeData = data.map(d => ({
       time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
       value: d.volume || 0,
-      color: d.close >= d.open ? "rgba(34, 197, 94, 0.3)" : "rgba(239, 68, 68, 0.3)"
+      color: d.close >= d.open ? `${COLOR_PROFIT}4D` : `${COLOR_LOSS}4D` // ~30% opacity
     }));
     const uniqueVol = Array.from(new Map(volumeData.map(item => [item.time, item])).values())
       .sort((a, b) => (a.time as number) - (b.time as number));
@@ -123,7 +139,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     // SMA
     if (indicators?.sma) {
       if (!smaSeriesRef.current) {
-        smaSeriesRef.current = chartRef.current.addLineSeries({ color: "#eab308", lineWidth: 2 });
+        smaSeriesRef.current = chartRef.current.addLineSeries({ color: COLOR_CAT_1, lineWidth: 2 });
       }
       const smaData = calculateSMA(data, 20).map(d => ({
         time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
@@ -138,7 +154,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     // EMA
     if (indicators?.ema) {
       if (!emaSeriesRef.current) {
-        emaSeriesRef.current = chartRef.current.addLineSeries({ color: "#f97316", lineWidth: 2 });
+        emaSeriesRef.current = chartRef.current.addLineSeries({ color: COLOR_CAT_2, lineWidth: 2 });
       }
       const emaData = calculateEMA(data, 20).map(d => ({
         time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
@@ -153,8 +169,8 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     // Bollinger Bands
     if (indicators?.bbands) {
       if (!bbUpperRef.current) {
-        bbUpperRef.current = chartRef.current.addLineSeries({ color: "rgba(56, 189, 248, 0.5)", lineWidth: 1 });
-        bbLowerRef.current = chartRef.current.addLineSeries({ color: "rgba(56, 189, 248, 0.5)", lineWidth: 1 });
+        bbUpperRef.current = chartRef.current.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
+        bbLowerRef.current = chartRef.current.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
       }
       const bbData = calculateBollingerBands(data, 20, 2);
       bbUpperRef.current?.setData(bbData.map(d => ({ time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time, value: d.upper })));
@@ -170,7 +186,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     if (indicators?.supertrend) {
       if (!supertrendSeriesRef.current) {
         supertrendSeriesRef.current = chartRef.current.addLineSeries({
-          color: "#22c55e",
+          color: COLOR_CAT_4,
           lineWidth: 2,
           lineStyle: 2,
         });
@@ -193,19 +209,20 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       if (!rsiChartRef.current) {
         rsiChartRef.current = createChart(rsiContainerRef.current, {
           height: 150,
-          layout: { background: { color: "transparent" }, textColor: "#a1a1aa" },
-          grid: { vertLines: { color: "#27272a" }, horzLines: { color: "#27272a" } },
+          layout: { background: { color: "transparent" }, textColor: COLOR_AXIS_TEXT },
+          grid: { vertLines: { color: COLOR_GRID }, horzLines: { color: COLOR_GRID } },
           timeScale: { visible: false },
-          rightPriceScale: { borderColor: "#3f3f46" },
+          rightPriceScale: { borderColor: COLOR_BORDER },
           autoSize: true,
         });
-        
-        rsiSeriesRef.current = rsiChartRef.current.addLineSeries({ color: "#a855f7", lineWidth: 2 });
-        
-        // Add 70 / 30 lines using a very thin series or baseline
-        const upperLine = rsiChartRef.current.addLineSeries({ color: "rgba(239, 68, 68, 0.5)", lineWidth: 1, lineStyle: 2 });
-        const lowerLine = rsiChartRef.current.addLineSeries({ color: "rgba(34, 197, 94, 0.5)", lineWidth: 1, lineStyle: 2 });
-        
+
+        rsiSeriesRef.current = rsiChartRef.current.addLineSeries({ color: COLOR_CAT_1, lineWidth: 2 });
+
+        // 70 / 30 overbought/oversold threshold lines — status-like, not
+        // categorical, so they use the profit/loss pair rather than a cat slot.
+        rsiChartRef.current.addLineSeries({ color: `${COLOR_LOSS}80`, lineWidth: 1, lineStyle: 2 });
+        rsiChartRef.current.addLineSeries({ color: `${COLOR_PROFIT}80`, lineWidth: 1, lineStyle: 2 });
+
         // Sync timeframe with main chart
         if (chartRef.current) {
           chartRef.current.timeScale().subscribeVisibleTimeRangeChange((range) => {
@@ -253,13 +270,21 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     }
   }, [liveTick]); // Deliberately omit data to avoid full redraws on ticks
 
+  const legendItems = [
+    indicators?.sma && { label: "SMA (20)", color: COLOR_CAT_1 },
+    indicators?.ema && { label: "EMA (20)", color: COLOR_CAT_2 },
+    indicators?.bbands && { label: "Bollinger Bands", color: COLOR_CAT_3 },
+    indicators?.supertrend && { label: "Supertrend", color: COLOR_CAT_4 },
+  ].filter((item): item is { label: string; color: string } => Boolean(item));
+
   return (
-    <div className="flex w-full flex-col gap-1 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 shadow-xl">
+    <div className="panel flex w-full flex-col gap-1 p-2">
       {symbol && <div className="px-2 pt-2 text-sm font-bold text-[var(--color-text-bright)]">{symbol} <span className="font-normal text-[var(--color-text-muted)] text-xs ml-2">1m Timeframe</span></div>}
+      <ChartLegend items={legendItems} />
       <div ref={chartContainerRef} className="h-[400px] w-full" />
       {indicators?.rsi && (
         <div className="relative mt-2 border-t border-[var(--color-border-default)]">
-          <div className="absolute left-2 top-2 z-10 text-xs font-medium text-[#a855f7]">RSI (14)</div>
+          <div className="absolute left-2 top-2 z-10 text-xs font-medium" style={{ color: COLOR_CAT_1 }}>RSI (14)</div>
           <div ref={rsiContainerRef} className="h-[150px] w-full" />
         </div>
       )}

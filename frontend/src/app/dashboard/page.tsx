@@ -11,13 +11,16 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { useAlertStore } from "@/stores/alertStore";
 import { useMarketData } from "@/hooks/useMarketData";
-import { formatDate, formatINR } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { useRouter } from "next/navigation";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { StatTile } from "@/components/ui/StatTile";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { Eyebrow } from "@/components/ui/SectionHeader";
 import {
-  Activity,
   BarChart3,
   CandlestickChart,
-  Gauge,
   LineChart,
   TrendingUp,
   Waves,
@@ -26,7 +29,6 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   BellRing,
-  Workflow
 } from "lucide-react";
 
 /** Interactive Module Directory Card */
@@ -47,9 +49,9 @@ function ModuleCard({
 }) {
   const router = useRouter();
   return (
-    <div
+    <Card
       onClick={() => router.push(route)}
-      className="glass group cursor-pointer rounded-xl p-5 transition-all duration-300 hover:scale-[1.02] hover:border-[var(--color-border-accent)] hover:shadow-2xl"
+      className="group cursor-pointer p-5 transition-all duration-300 hover:border-[var(--color-border-accent)] hover:shadow-[var(--shadow-elevation-2)]"
     >
       <div className="flex items-start justify-between">
         <div
@@ -62,7 +64,7 @@ function ModuleCard({
           Launch <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
         </div>
       </div>
-      
+
       <div className="mt-4">
         <h3 className="text-base font-bold text-[var(--color-text-bright)]">
           {title}
@@ -73,14 +75,14 @@ function ModuleCard({
       </div>
 
       {metric && (
-        <div className="mt-4 flex items-center justify-between border-t border-[var(--color-border-default)] pt-3 text-[11px]">
-          <span className="text-[var(--color-text-muted)] font-medium">Status / Active Info:</span>
+        <div className="mt-4 flex items-center justify-between border-t border-[var(--color-border-subtle)] pt-3 text-[11px]">
+          <span className="font-medium text-[var(--color-text-muted)]">Status / Active Info:</span>
           <span className="font-semibold" style={{ color }}>
             {metric}
           </span>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -100,33 +102,25 @@ function IndexTickerCard({
 }) {
   const isUp = change >= 0;
   return (
-    <div className="glass rounded-xl p-4 transition-all duration-200 hover:shadow-md">
-      <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
+    <Card>
+      <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
         {label}
       </p>
       {loading ? (
-        <div className="mt-2 h-8 w-24 animate-pulse rounded bg-[var(--color-bg-surface-hover)]" />
+        <div className="mt-2 h-8 w-24 animate-pulse rounded bg-[var(--color-bg-hover)]" />
       ) : (
         <div className="mt-2 flex items-baseline justify-between">
-          <p className="text-2xl font-black tracking-tight text-[var(--color-text-bright)]">
+          <p className="tnum text-2xl font-black tracking-tight text-[var(--color-text-bright)]">
             ₹{price}
           </p>
-          <div
-            className={`flex items-center gap-0.5 text-xs font-bold px-2 py-0.5 rounded-full ${
-              isUp 
-                ? "bg-green-500/10 text-green-400" 
-                : "bg-red-500/10 text-red-400"
-            }`}
-          >
+          <Badge tone={isUp ? "profit" : "loss"} className="tnum px-2 py-0.5 text-xs">
             {isUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-            <span>
-              {isUp ? "+" : ""}
-              {changePercent.toFixed(2)}%
-            </span>
-          </div>
+            {isUp ? "+" : ""}
+            {changePercent.toFixed(2)}%
+          </Badge>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -147,47 +141,43 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
-      <div className="mx-auto max-w-6xl space-y-6 animate-fade-in pb-12">
+      <PageContainer>
         {/* Welcome Banner */}
-        <div className="gradient-border rounded-xl shadow-xl">
-          <div className="glass-strong rounded-xl p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xl font-black text-[var(--color-text-bright)] tracking-tight">
-                    Welcome back, {user?.client_id || "Trader"}
-                  </h2>
-                  <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    tradingMode === "paper" 
-                      ? "bg-amber-500/15 text-amber-400" 
-                      : "bg-blue-500/15 text-blue-400"
-                  }`}>
-                    {tradingMode === "paper" ? "📝 Paper Mode" : "⚡ Live Market"}
-                  </span>
-                </div>
-                <p className="mt-1.5 text-sm text-[var(--color-text-secondary)]">
-                  Connected to <span className="font-bold text-[var(--color-text-primary)]">{user?.broker_name || "Mock Broker"}</span>
+        <Card variant="glass">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-black tracking-tight text-[var(--color-text-bright)]">
+                  Welcome back, {user?.client_id || "Trader"}
+                </h2>
+                <Badge tone={tradingMode === "paper" ? "blue" : "loss"}>
+                  {tradingMode === "paper" ? "Paper Mode" : "Live Market"}
+                </Badge>
+              </div>
+              <p className="mt-1.5 text-sm text-[var(--color-text-secondary)]">
+                Connected to{" "}
+                <span className="font-bold text-[var(--color-text-primary)]">
+                  {user?.broker_name || "Mock Broker"}
+                </span>
+              </p>
+              {user?.connected_at && (
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                  Active Session:{" "}
+                  <span className="tnum font-mono">{formatDate(user.connected_at)}</span>
                 </p>
-                {user?.connected_at && (
-                  <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                    Active Session: <span className="font-mono">{formatDate(user.connected_at)}</span>
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 rounded-lg bg-[var(--color-bg-surface)] px-3 py-1.5 border border-[var(--color-border-default)]">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
-                  </span>
-                  <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                    Live Feed Active
-                  </span>
-                </div>
-              </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-status-good)] opacity-75" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-status-good)]" />
+              </span>
+              <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
+                Live Feed Active
+              </span>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* Real-time Tickers & Quick Stats */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -205,41 +195,15 @@ export default function DashboardPage() {
             changePercent={bankNiftyTick ? bankNiftyTick.change_percent : 0}
             loading={!bankNiftyTick}
           />
-
-          <div className="glass rounded-xl p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
-                Active Alerts
-              </p>
-              <p className="mt-2 text-2xl font-black text-[var(--color-text-bright)]">
-                {activeAlertsCount}
-              </p>
-            </div>
-            <div className="rounded-xl bg-orange-500/10 p-2 border border-orange-500/20">
-              <BellRing className="h-6 w-6 text-orange-400" />
-            </div>
-          </div>
-
-          <div className="glass rounded-xl p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
-                Triggered Today
-              </p>
-              <p className="mt-2 text-2xl font-black text-[var(--color-text-bright)]">
-                {triggeredAlertsCount}
-              </p>
-            </div>
-            <div className="rounded-xl bg-red-500/10 p-2 border border-red-500/20">
-              <Zap className="h-6 w-6 text-red-400" />
-            </div>
-          </div>
+          <StatTile label="Active Alerts" value={activeAlertsCount} icon={BellRing} />
+          <StatTile label="Triggered Today" value={triggeredAlertsCount} icon={Zap} tone="loss" />
         </div>
 
         {/* Interactive Analytics Tools */}
         <div>
-          <h3 className="mb-4 text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)] border-b border-[var(--color-border-default)] pb-2">
+          <Eyebrow className="mb-4 border-b border-[var(--color-border-default)] pb-2">
             Option Analytics Cockpit
-          </h3>
+          </Eyebrow>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <ModuleCard
               icon={CandlestickChart}
@@ -291,7 +255,7 @@ export default function DashboardPage() {
             />
           </div>
         </div>
-      </div>
+      </PageContainer>
     </DashboardLayout>
   );
 }

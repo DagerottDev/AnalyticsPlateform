@@ -14,6 +14,7 @@ import {
   ReferenceLine
 } from "recharts";
 import { PayoffPoint } from "@/lib/strategy";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 interface PayoffChartProps {
   data: PayoffPoint[];
@@ -31,8 +32,8 @@ export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
 
   if (!chartData || chartData.length === 0) {
     return (
-      <div className="flex h-[400px] items-center justify-center rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-sm text-[var(--color-text-muted)]">
-        Add strategy legs to view payoff profile.
+      <div className="panel flex h-[400px] items-center justify-center">
+        <EmptyState title="Add strategy legs to view payoff profile." />
       </div>
     );
   }
@@ -55,63 +56,63 @@ export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
   const off = gradientOffset();
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-xl">
+    <div className="panel flex flex-col gap-2">
       <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Payoff Profile</h3>
       <div className="h-[400px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <defs>
               <linearGradient id="splitColor" x1="0" y1="0" x2="0" y2="1">
-                <stop offset={off} stopColor="#22c55e" stopOpacity={0.2} />
-                <stop offset={off} stopColor="#ef4444" stopOpacity={0.2} />
+                <stop offset={off} stopColor="var(--color-profit)" stopOpacity={0.2} />
+                <stop offset={off} stopColor="var(--color-loss)" stopOpacity={0.2} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-            <XAxis 
-              dataKey="spot" 
-              type="number" 
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
+            <XAxis
+              dataKey="spot"
+              type="number"
               domain={['dataMin', 'dataMax']}
-              stroke="#a1a1aa" 
-              fontSize={11} 
+              stroke="var(--color-chart-axis-text)"
+              fontSize={11}
             />
-            <YAxis 
-              stroke="#a1a1aa" 
-              fontSize={11} 
+            <YAxis
+              stroke="var(--color-chart-axis-text)"
+              fontSize={11}
               domain={[-limit, limit]}
               tickFormatter={(value) => value > 1000 ? `${(value/1000).toFixed(1)}k` : value}
             />
-            <Tooltip 
-              cursor={{ stroke: '#52525b', strokeWidth: 1, strokeDasharray: '3 3' }}
-              contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '8px', fontSize: '12px', color: '#e4e4e7' }}
-              itemStyle={{ color: '#e4e4e7' }}
+            <Tooltip
+              cursor={{ stroke: 'var(--color-border-accent)', strokeWidth: 1, strokeDasharray: '3 3' }}
+              contentStyle={{ backgroundColor: 'var(--color-chart-tooltip-bg)', borderColor: 'var(--color-chart-tooltip-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text-primary)' }}
+              itemStyle={{ color: 'var(--color-text-primary)' }}
               labelFormatter={(label) => `Spot: ${label}`}
             />
             <Legend wrapperStyle={{ fontSize: '12px' }} />
-            
-            <ReferenceLine y={0} stroke="#52525b" strokeWidth={2} />
-            
+
+            <ReferenceLine y={0} stroke="var(--color-border-accent)" strokeWidth={2} />
+
             {currentSpot > 0 && (
-               <ReferenceLine 
-                 x={currentSpot} 
-                 stroke="#3b82f6" 
-                 strokeDasharray="3 3" 
-                 label={{ position: 'insideTopLeft', value: 'Spot', fill: '#3b82f6', fontSize: 11 }} 
+               <ReferenceLine
+                 x={currentSpot}
+                 stroke="var(--color-accent-blue)"
+                 strokeDasharray="3 3"
+                 label={{ position: 'insideTopLeft', value: 'Spot', fill: 'var(--color-accent-blue)', fontSize: 11 }}
                />
             )}
 
-            <Area 
-              type="linear" 
-              dataKey="PnL at Expiry" 
-              stroke="#e4e4e7" 
+            <Area
+              type="linear"
+              dataKey="PnL at Expiry"
+              stroke="var(--color-text-bright)"
               strokeWidth={2}
-              fill="url(#splitColor)" 
+              fill="url(#splitColor)"
               isAnimationActive={false}
             />
-            
-            <Line 
-              type="monotone" 
-              dataKey="T+Today" 
-              stroke="#a855f7" 
+
+            <Line
+              type="monotone"
+              dataKey="T+Today"
+              stroke="var(--color-cat-1)"
               strokeWidth={2}
               strokeDasharray="5 5"
               dot={false}

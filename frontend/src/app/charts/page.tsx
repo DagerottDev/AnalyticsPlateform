@@ -10,7 +10,11 @@ import { apiClient } from "@/lib/api";
 import { OHLCVData } from "@/lib/indicators";
 import { Instrument } from "@/types/market";
 import { getInstruments } from "@/lib/market";
-import { Loader2 } from "lucide-react";
+import { Card } from "@/components/ui/Card";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export default function ChartsPage() {
   const [symbol, setSymbol] = useState<string>("NIFTY");
@@ -151,11 +155,8 @@ export default function ChartsPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col gap-6 p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text-bright)]">Advanced Charting</h1>
-          <p className="text-sm text-[var(--color-text-muted)]">Historical OHLCV, live overlays, and heatmaps.</p>
-        </div>
+      <PageContainer>
+        <SectionHeader title="Advanced Charting" description="Historical OHLCV, live overlays, and heatmaps." />
 
         {/* Controls */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -165,8 +166,8 @@ export default function ChartsPage() {
             expiry={expiry}
             onExpiryChange={setExpiry}
           />
-          
-          <div className="flex items-center gap-2 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 shadow-sm">
+
+          <Card className="flex items-center gap-2 p-2">
             <span className="px-2 text-xs font-semibold text-[var(--color-text-secondary)]">Indicators:</span>
             <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
               <input type="checkbox" checked={indicators.sma} onChange={() => setIndicators(s => ({...s, sma: !s.sma}))} className="accent-[var(--color-accent-blue)]" /> SMA
@@ -183,23 +184,23 @@ export default function ChartsPage() {
             <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
               <input type="checkbox" checked={indicators.supertrend} onChange={() => setIndicators(s => ({...s, supertrend: !s.supertrend}))} className="accent-[var(--color-accent-blue)]" /> Supertrend
             </label>
-          </div>
+          </Card>
         </div>
 
         {/* Main Chart Area */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          
+
           <div className="col-span-1 lg:col-span-2">
             {loading ? (
-              <div className="flex h-[400px] items-center justify-center rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-                <Loader2 className="h-8 w-8 animate-spin text-[var(--color-accent-blue)]" />
-              </div>
+              <Card>
+                <LoadingState size="lg" label="Loading chart data..." />
+              </Card>
             ) : (
-              <TradingChart 
-                data={historicalData} 
-                liveTick={liveChartTick} 
-                indicators={indicators} 
-                symbol={symbol} 
+              <TradingChart
+                data={historicalData}
+                liveTick={liveChartTick}
+                indicators={indicators}
+                symbol={symbol}
               />
             )}
           </div>
@@ -210,15 +211,14 @@ export default function ChartsPage() {
                  <Heatmap data={heatmapData} title={`Open Interest Heatmap (${expiry})`} type="oi" />
               </div>
             ) : (
-              <div className="flex h-full items-center justify-center rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-sm text-[var(--color-text-muted)] p-6 text-center">
-                Select an expiry date to view the strike-level heatmaps for this instrument.
-              </div>
+              <Card className="flex h-full items-center justify-center">
+                <EmptyState title="Select an expiry date to view the strike-level heatmaps for this instrument." />
+              </Card>
             )}
           </div>
-          
-        </div>
 
-      </div>
+        </div>
+      </PageContainer>
     </DashboardLayout>
   );
 }

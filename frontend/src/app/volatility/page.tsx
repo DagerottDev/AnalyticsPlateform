@@ -8,7 +8,10 @@ import { getInstruments } from "@/lib/market";
 import { getHistoricalVolatility, getVolatilityMetrics, VolatilityHistoricalData, VolatilityMetrics } from "@/lib/volatility";
 import { calculateImpliedVolatility } from "@/lib/greeks";
 import { Instrument } from "@/types/market";
-import { Loader2 } from "lucide-react";
+import { Card } from "@/components/ui/Card";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { LoadingState } from "@/components/ui/LoadingState";
 
 // Components
 import { IVSmileChart } from "@/components/volatility/IVSmileChart";
@@ -177,11 +180,11 @@ export default function VolatilityPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col gap-6 p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text-bright)]">Volatility Analytics</h1>
-          <p className="text-sm text-[var(--color-text-muted)]">IV Rank, Skew, Term Structure, and Historical Surface.</p>
-        </div>
+      <PageContainer>
+        <SectionHeader
+          title="Volatility Analytics"
+          description="IV Rank, Skew, Term Structure, and Historical Surface."
+        />
 
         {/* Top Controls & Metrics */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
@@ -192,30 +195,30 @@ export default function VolatilityPage() {
               expiry={expiry}
               onExpiryChange={setExpiry}
             />
-            
+
             {/* Metrics Cards */}
             {loadingHist ? (
-              <div className="flex h-32 items-center justify-center rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-                <Loader2 className="h-6 w-6 animate-spin text-[var(--color-accent-blue)]" />
-              </div>
+              <Card>
+                <LoadingState size="sm" />
+              </Card>
             ) : metrics ? (
-              <div className="flex flex-col gap-3 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-sm">
-                <div className="flex justify-between items-center border-b border-[var(--color-border-subtle)] pb-2">
+              <Card className="flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] pb-2">
                   <span className="text-sm font-medium text-[var(--color-text-secondary)]">Current IV</span>
-                  <span className="font-mono text-lg font-bold text-[var(--color-accent-blue)]">{(metrics.current_iv * 100).toFixed(1)}%</span>
+                  <span className="tnum font-mono text-lg font-bold text-[var(--color-accent-blue)]">{(metrics.current_iv * 100).toFixed(1)}%</span>
                 </div>
-                <div className="flex justify-between items-center border-b border-[var(--color-border-subtle)] pb-2">
+                <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] pb-2">
                   <span className="text-sm font-medium text-[var(--color-text-secondary)]">IV Rank (IVR)</span>
-                  <span className="font-mono text-lg font-bold text-[var(--color-accent-purple)]">{metrics.iv_rank.toFixed(1)}</span>
+                  <span className="tnum font-mono text-lg font-bold text-[var(--color-accent-purple)]">{metrics.iv_rank.toFixed(1)}</span>
                 </div>
-                <div className="flex justify-between items-center">
+                <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-[var(--color-text-secondary)]">IV Percentile</span>
-                  <span className="font-mono text-lg font-bold text-[var(--color-text-bright)]">{metrics.iv_percentile.toFixed(1)}%</span>
+                  <span className="tnum font-mono text-lg font-bold text-[var(--color-text-bright)]">{metrics.iv_percentile.toFixed(1)}%</span>
                 </div>
-                <div className="text-[10px] text-center text-[var(--color-text-muted)] mt-1">
+                <div className="mt-1 text-center text-[10px] text-[var(--color-text-muted)]">
                   Based on 1Y historical data ({metrics.data_points} days)
                 </div>
-              </div>
+              </Card>
             ) : null}
           </div>
 
@@ -234,8 +237,7 @@ export default function VolatilityPage() {
         <div>
           <IVSurfaceHeatmap data={surfaceData} />
         </div>
-
-      </div>
+      </PageContainer>
     </DashboardLayout>
   );
 }

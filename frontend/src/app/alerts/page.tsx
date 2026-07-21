@@ -6,17 +6,23 @@ import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { getInstruments } from "@/lib/market";
 import { Instrument } from "@/types/market";
 import { useAlertStore, AlertMetric, AlertOperator } from "@/stores/alertStore";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Select";
+import { Input } from "@/components/ui/Input";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageContainer } from "@/components/ui/PageContainer";
 import { Bell, Trash2, CheckCircle2, Clock, Plus } from "lucide-react";
 
 export default function AlertsPage() {
-  const { alerts, addAlert, removeAlert, updateAlertStatus, clearTriggered } = useAlertStore();
-  
+  const { alerts, addAlert, removeAlert, clearTriggered } = useAlertStore();
+
   // Form State
   const [symbol, setSymbol] = useState<string>("NIFTY");
   const [expiry, setExpiry] = useState<string | null>(null);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [selectedInstrumentToken, setSelectedInstrumentToken] = useState<string>("");
-  
+
   const [metric, setMetric] = useState<AlertMetric>("Price");
   const [operator, setOperator] = useState<AlertOperator>(">");
   const [threshold, setThreshold] = useState<string>("");
@@ -44,10 +50,10 @@ export default function AlertsPage() {
 
   const handleAddAlert = () => {
     if (!threshold) return;
-    
+
     // If it's a price alert, we can attach it to the underlying or a specific option
     let targetInst: Instrument | undefined;
-    
+
     if (metric === "Price" && !selectedInstrumentToken) {
       // Find underlying instrument object (mock it if not in list, usually we only get options back)
       targetInst = {
@@ -80,19 +86,22 @@ export default function AlertsPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col gap-6 p-6 max-w-6xl mx-auto">
+      <PageContainer>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text-bright)]">Alerts Dashboard</h1>
-          <p className="text-sm text-[var(--color-text-muted)]">Set conditional triggers for Price, IV, and Greeks. <span className="text-[var(--color-accent-blue)]">Alerts run in the background while this application is open.</span></p>
+          <h1 className="text-xl font-black tracking-tight text-[var(--color-text-bright)]">Alerts Dashboard</h1>
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            Set conditional triggers for Price, IV, and Greeks.{" "}
+            <span className="text-[var(--color-accent-blue)]">Alerts run in the background while this application is open.</span>
+          </p>
         </div>
 
         {/* Create Alert Form */}
-        <div className="flex flex-col gap-4 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-6 shadow-sm">
-          <h3 className="text-sm font-bold text-[var(--color-text-bright)] flex items-center gap-2">
-            <Bell className="w-4 h-4 text-[var(--color-accent-blue)]" /> Create New Alert
+        <Card className="flex flex-col gap-4">
+          <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
+            <Bell className="h-4 w-4 text-[var(--color-accent-blue)]" /> Create New Alert
           </h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
             <div className="md:col-span-3">
                <InstrumentSelector
                  symbol={symbol}
@@ -101,28 +110,20 @@ export default function AlertsPage() {
                  onExpiryChange={setExpiry}
                />
             </div>
-            
+
             <div className="md:col-span-3">
-               <select 
-                 className="w-full h-10 bg-[#18181b] text-sm text-[var(--color-text-primary)] rounded-md px-3 outline-none border border-[var(--color-border-subtle)]"
-                 value={selectedInstrumentToken}
-                 onChange={e => setSelectedInstrumentToken(e.target.value)}
-               >
+               <Select value={selectedInstrumentToken} onChange={e => setSelectedInstrumentToken(e.target.value)}>
                  <option value="">{symbol} (Underlying)</option>
                  {instruments.filter(i => i.expiry === expiry).map(i => (
                    <option key={i.trading_symbol} value={i.trading_symbol}>
                      {i.strike} {i.option_type}
                    </option>
                  ))}
-               </select>
+               </Select>
             </div>
 
             <div className="md:col-span-2">
-               <select 
-                 className="w-full h-10 bg-[#18181b] text-sm text-[var(--color-text-primary)] rounded-md px-3 outline-none border border-[var(--color-border-subtle)]"
-                 value={metric}
-                 onChange={e => setMetric(e.target.value as AlertMetric)}
-               >
+               <Select value={metric} onChange={e => setMetric(e.target.value as AlertMetric)}>
                  <option value="Price">Price</option>
                  <option value="IV">IV (%)</option>
                  <option value="Delta">Delta</option>
@@ -131,26 +132,21 @@ export default function AlertsPage() {
                  <option value="Vega">Vega</option>
                  <option value="Call GEX">Call GEX</option>
                  <option value="Put GEX">Put GEX</option>
-               </select>
+               </Select>
             </div>
 
             <div className="md:col-span-1">
-               <select 
-                 className="w-full h-10 bg-[#18181b] text-sm text-[var(--color-text-primary)] rounded-md px-2 outline-none border border-[var(--color-border-subtle)]"
-                 value={operator}
-                 onChange={e => setOperator(e.target.value as AlertOperator)}
-               >
+               <Select value={operator} onChange={e => setOperator(e.target.value as AlertOperator)}>
                  <option value=">">&gt;</option>
                  <option value="<">&lt;</option>
                  <option value=">=">&gt;=</option>
                  <option value="<=">&lt;=</option>
-               </select>
+               </Select>
             </div>
 
             <div className="md:col-span-2">
-               <input 
+               <Input
                  type="number"
-                 className="w-full h-10 bg-[#18181b] text-sm text-[var(--color-text-primary)] rounded-md px-3 outline-none border border-[var(--color-border-subtle)]"
                  value={threshold}
                  onChange={e => setThreshold(e.target.value)}
                  placeholder="Threshold"
@@ -158,50 +154,48 @@ export default function AlertsPage() {
             </div>
 
             <div className="md:col-span-1">
-               <button 
-                 onClick={handleAddAlert}
-                 disabled={!threshold}
-                 className="w-full h-10 flex items-center justify-center bg-[var(--color-accent-blue)] text-white rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-               >
-                 <Plus className="w-5 h-5" />
-               </button>
+               <Button onClick={handleAddAlert} disabled={!threshold} className="h-10 w-full">
+                 <Plus className="h-5 w-5" />
+               </Button>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* Active Alerts List */}
-        <div className="flex flex-col gap-4 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-6 shadow-sm">
-          <h3 className="text-sm font-bold text-[var(--color-text-bright)] flex items-center gap-2">
-            <Clock className="w-4 h-4 text-[var(--color-text-secondary)]" /> Active Alerts
+        <Card className="flex flex-col gap-4">
+          <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
+            <Clock className="h-4 w-4 text-[var(--color-text-secondary)]" /> Active Alerts
           </h3>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-[var(--color-text-secondary)]">
-              <thead className="bg-[#18181b] text-xs uppercase text-[var(--color-text-muted)]">
+              <thead className="bg-[var(--color-bg-hover)] text-xs uppercase text-[var(--color-text-muted)]">
                 <tr>
-                  <th className="px-4 py-3 rounded-tl-lg">Instrument</th>
+                  <th className="rounded-tl-lg px-4 py-3">Instrument</th>
                   <th className="px-4 py-3">Condition</th>
                   <th className="px-4 py-3">Created</th>
-                  <th className="px-4 py-3 rounded-tr-lg">Action</th>
+                  <th className="rounded-tr-lg px-4 py-3">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {activeAlerts.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center">No active alerts.</td>
+                    <td colSpan={4}>
+                      <EmptyState title="No active alerts." />
+                    </td>
                   </tr>
                 ) : (
                   activeAlerts.map(alert => (
-                    <tr key={alert.id} className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[#18181b]/50">
+                    <tr key={alert.id} className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[var(--color-bg-hover)]">
                       <td className="px-4 py-3 font-medium text-[var(--color-text-bright)]">{alert.instrument.trading_symbol}</td>
-                      <td className="px-4 py-3">
+                      <td className="tnum px-4 py-3">
                         <span className="text-[var(--color-accent-blue)]">{alert.metric}</span> {alert.operator} <span className="font-mono">{alert.threshold}</span>
                       </td>
-                      <td className="px-4 py-3 text-xs">{new Date(alert.createdAt).toLocaleString()}</td>
+                      <td className="tnum px-4 py-3 text-xs">{new Date(alert.createdAt).toLocaleString()}</td>
                       <td className="px-4 py-3">
-                        <button onClick={() => removeAlert(alert.id)} className="text-[var(--color-text-muted)] hover:text-[var(--color-accent-red)] transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <Button variant="icon" onClick={() => removeAlert(alert.id)} aria-label="Remove alert">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </td>
                     </tr>
                   ))
@@ -209,43 +203,45 @@ export default function AlertsPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
 
         {/* Triggered Alerts History */}
-        <div className="flex flex-col gap-4 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-6 shadow-sm">
+        <Card className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-[var(--color-text-bright)] flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-[var(--color-accent-green)]" /> Triggered History
+            <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
+              <CheckCircle2 className="h-4 w-4 text-[var(--color-status-good)]" /> Triggered History
             </h3>
             {triggeredAlerts.length > 0 && (
-              <button onClick={clearTriggered} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">
+              <Button variant="ghost" size="sm" onClick={clearTriggered}>
                 Clear History
-              </button>
+              </Button>
             )}
           </div>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-[var(--color-text-secondary)]">
-              <thead className="bg-[#18181b] text-xs uppercase text-[var(--color-text-muted)]">
+              <thead className="bg-[var(--color-bg-hover)] text-xs uppercase text-[var(--color-text-muted)]">
                 <tr>
-                  <th className="px-4 py-3 rounded-tl-lg">Instrument</th>
+                  <th className="rounded-tl-lg px-4 py-3">Instrument</th>
                   <th className="px-4 py-3">Condition</th>
-                  <th className="px-4 py-3">Triggered At</th>
+                  <th className="rounded-tr-lg px-4 py-3">Triggered At</th>
                 </tr>
               </thead>
               <tbody>
                 {triggeredAlerts.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-4 py-8 text-center">No triggered alerts history.</td>
+                    <td colSpan={3}>
+                      <EmptyState title="No triggered alerts history." />
+                    </td>
                   </tr>
                 ) : (
                   triggeredAlerts.map(alert => (
-                    <tr key={alert.id} className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[#18181b]/50">
+                    <tr key={alert.id} className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[var(--color-bg-hover)]">
                       <td className="px-4 py-3 font-medium text-[var(--color-text-bright)]">{alert.instrument.trading_symbol}</td>
-                      <td className="px-4 py-3 opacity-75">
+                      <td className="tnum px-4 py-3 opacity-75">
                         {alert.metric} {alert.operator} {alert.threshold}
                       </td>
-                      <td className="px-4 py-3 text-xs text-[var(--color-accent-green)]">
+                      <td className="tnum px-4 py-3 text-xs text-[var(--color-status-good)]">
                         {alert.triggeredAt ? new Date(alert.triggeredAt).toLocaleString() : "-"}
                       </td>
                     </tr>
@@ -254,9 +250,8 @@ export default function AlertsPage() {
               </tbody>
             </table>
           </div>
-        </div>
-
-      </div>
+        </Card>
+      </PageContainer>
     </DashboardLayout>
   );
 }

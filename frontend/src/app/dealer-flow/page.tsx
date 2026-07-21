@@ -16,6 +16,9 @@ import {
   StrikeExposure
 } from "@/lib/dealerFlow";
 import { Instrument } from "@/types/market";
+import { StatTile } from "@/components/ui/StatTile";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 
 // Components
 import { GEXProfileChart } from "@/components/dealer-flow/GEXProfileChart";
@@ -135,11 +138,11 @@ export default function DealerFlowPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col gap-6 p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text-bright)]">Dealer Flow</h1>
-          <p className="text-sm text-[var(--color-text-muted)]">Gamma Exposure (GEX), Zero Gamma, and Sticky Walls.</p>
-        </div>
+      <PageContainer>
+        <SectionHeader
+          title="Dealer Flow"
+          description="Gamma Exposure (GEX), Zero Gamma, and Sticky Walls."
+        />
 
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <InstrumentSelector
@@ -152,40 +155,15 @@ export default function DealerFlowPage() {
 
         {/* Metrics Overview */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-          <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-sm text-center">
-            <div className="text-xs font-medium text-[var(--color-text-secondary)]">Total Net GEX</div>
-            <div className={`mt-1 text-xl font-bold ${netGex > 0 ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-red)]'}`}>
-              {(netGex / 1000000000).toFixed(2)}B
-            </div>
-          </div>
-          
-          <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-sm text-center">
-            <div className="text-xs font-medium text-[var(--color-text-secondary)]">Zero Gamma</div>
-            <div className="mt-1 text-xl font-bold font-mono text-[var(--color-text-bright)]">
-              {zeroGamma || "-"}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-sm text-center">
-            <div className="text-xs font-medium text-[var(--color-text-secondary)]">Call Wall</div>
-            <div className="mt-1 text-xl font-bold font-mono text-[var(--color-accent-green)]">
-              {callWall || "-"}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-sm text-center">
-            <div className="text-xs font-medium text-[var(--color-text-secondary)]">Put Wall</div>
-            <div className="mt-1 text-xl font-bold font-mono text-[var(--color-accent-red)]">
-              {putWall || "-"}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-sm text-center">
-            <div className="text-xs font-medium text-[var(--color-text-secondary)]">P/C Gamma Ratio</div>
-            <div className="mt-1 text-xl font-bold font-mono text-[var(--color-text-bright)]">
-              {pcGammaRatio.toFixed(2)}
-            </div>
-          </div>
+          <StatTile
+            label="Total Net GEX"
+            value={`${(netGex / 1000000000).toFixed(2)}B`}
+            tone={netGex > 0 ? "profit" : "loss"}
+          />
+          <StatTile label="Zero Gamma" value={zeroGamma || "-"} />
+          <StatTile label="Call Wall" value={callWall || "-"} tone="profit" />
+          <StatTile label="Put Wall" value={putWall || "-"} tone="loss" />
+          <StatTile label="P/C Gamma Ratio" value={pcGammaRatio.toFixed(2)} />
         </div>
 
         {/* Charts */}
@@ -193,7 +171,7 @@ export default function DealerFlowPage() {
           <div className="col-span-1 lg:col-span-3">
             <GEXProfileChart data={exposures.gex} spotPrice={S} />
           </div>
-          
+
           <div className="col-span-1 lg:col-span-1">
              <ExposureChart title="Vanna Exposure (Δ Delta / 1% Δ IV)" data={exposures.vanna} spotPrice={S} />
           </div>
@@ -202,8 +180,7 @@ export default function DealerFlowPage() {
              <ExposureChart title="Charm Exposure (Δ Delta / 1 Day Decay)" data={exposures.charm} spotPrice={S} />
           </div>
         </div>
-
-      </div>
+      </PageContainer>
     </DashboardLayout>
   );
 }

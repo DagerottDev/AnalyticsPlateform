@@ -5,8 +5,11 @@ import { Instrument } from "@/types/market";
 import { getInstruments } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
 import { cn, formatINR } from "@/lib/utils";
-import { Loader2, Settings2 } from "lucide-react";
+import { Settings2 } from "lucide-react";
 import { calculateImpliedVolatility, calculateGreeks, Greeks } from "@/lib/greeks";
+import { Button } from "@/components/ui/Button";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 interface OptionChainProps {
   symbol: string;
@@ -123,40 +126,37 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-        <Loader2 className="h-8 w-8 animate-spin text-[var(--color-accent-blue)]" />
+      <div className="panel">
+        <LoadingState size="lg" label="Loading option chain..." />
       </div>
     );
   }
 
   if (strikes.length === 0) {
     return (
-      <div className="flex h-64 items-center justify-center rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-text-muted)]">
-        No contracts found for selected expiry.
+      <div className="panel">
+        <EmptyState title="No contracts found for selected expiry." />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] overflow-hidden shadow-lg">
+    <div className="panel flex flex-col overflow-hidden p-0">
       <div className="flex items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-4 py-3">
         <div className="flex items-center gap-4">
           <span className="text-sm font-medium text-[var(--color-text-secondary)]">
-            Underlying ({symbol}): <span className="font-bold text-[var(--color-text-bright)]">{formatINR(S)}</span>
+            Underlying ({symbol}): <span className="tnum font-bold text-[var(--color-text-bright)]">{formatINR(S)}</span>
           </span>
           <span className="text-sm font-medium text-[var(--color-text-secondary)]">
-            DTE: <span className="font-bold text-[var(--color-text-bright)]">{(T * 365).toFixed(1)} days</span>
+            DTE: <span className="tnum font-bold text-[var(--color-text-bright)]">{(T * 365).toFixed(1)} days</span>
           </span>
         </div>
-        <button
-          onClick={() => setShowGreeks(!showGreeks)}
-          className="flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-        >
+        <Button variant="outline" size="sm" onClick={() => setShowGreeks(!showGreeks)}>
           <Settings2 className="h-4 w-4" />
           {showGreeks ? "Hide Greeks" : "Show Greeks"}
-        </button>
+        </Button>
       </div>
-      
+
       {error && (
         <div className="bg-[var(--color-accent-orange)]/10 px-4 py-2 text-xs font-medium text-[var(--color-accent-orange)]">
           {error}
@@ -167,9 +167,9 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
           {/* Table Header */}
           <thead className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]">
             <tr>
-              <th colSpan={showGreeks ? 9 : 4} className="border-b border-r border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-accent-green)]">CALLS</th>
+              <th colSpan={showGreeks ? 9 : 4} className="border-b border-r border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-profit)]">CALLS</th>
               <th className="border-b border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-text-primary)]">STRIKE</th>
-              <th colSpan={showGreeks ? 9 : 4} className="border-b border-l border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-accent-red)]">PUTS</th>
+              <th colSpan={showGreeks ? 9 : 4} className="border-b border-l border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-loss)]">PUTS</th>
             </tr>
             <tr className="border-b border-[var(--color-border-default)]">
               {showGreeks && (
@@ -205,7 +205,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
           </thead>
           
           {/* Table Body */}
-          <tbody className="divide-y divide-[var(--color-border-subtle)] text-[var(--color-text-primary)] font-mono">
+          <tbody className="tnum divide-y divide-[var(--color-border-subtle)] font-mono text-[var(--color-text-primary)]">
             {strikes.map((row) => {
               const ceTick = row.CE ? getTick(row.CE.trading_symbol) : null;
               const peTick = row.PE ? getTick(row.PE.trading_symbol) : null;
@@ -245,7 +245,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                       <td className={cn("px-3 py-2 text-[var(--color-text-muted)]", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
                         {ceGreeks ? ceGreeks.gamma.toFixed(4) : "-"}
                       </td>
-                      <td className={cn("px-3 py-2 font-medium", ceIsITM ? "bg-[var(--color-accent-yellow)]/5 text-[var(--color-accent-green)]" : "text-[var(--color-text-secondary)]")}>
+                      <td className={cn("px-3 py-2 font-medium", ceIsITM ? "bg-[var(--color-accent-yellow)]/5 text-[var(--color-profit)]" : "text-[var(--color-text-secondary)]")}>
                         {ceGreeks ? ceGreeks.delta.toFixed(2) : "-"}
                       </td>
                       <td className={cn("px-3 py-2 font-medium", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
@@ -291,7 +291,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                       <td className={cn("px-3 py-2 font-medium", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
                         {peIV > 0 ? (peIV * 100).toFixed(1) : "-"}
                       </td>
-                      <td className={cn("px-3 py-2 font-medium", peIsITM ? "bg-[var(--color-accent-yellow)]/5 text-[var(--color-accent-red)]" : "text-[var(--color-text-secondary)]")}>
+                      <td className={cn("px-3 py-2 font-medium", peIsITM ? "bg-[var(--color-accent-yellow)]/5 text-[var(--color-loss)]" : "text-[var(--color-text-secondary)]")}>
                         {peGreeks ? peGreeks.delta.toFixed(2) : "-"}
                       </td>
                       <td className={cn("px-3 py-2 text-[var(--color-text-muted)]", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>

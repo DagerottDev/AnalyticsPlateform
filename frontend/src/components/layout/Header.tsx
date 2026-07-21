@@ -9,6 +9,8 @@
 
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import {
   Activity,
   Bell,
@@ -45,21 +47,10 @@ export function Header() {
       {/* Center — Trading Mode */}
       <div className="flex items-center gap-3">
         {isAuthenticated && (
-          <div
-            className={cn(
-              "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold",
-              isPaperMode
-                ? "bg-[var(--color-accent-blue)]/15 text-[var(--color-accent-blue)]"
-                : "bg-[var(--color-accent-red)]/15 text-[var(--color-accent-red)]"
-            )}
-          >
-            {isPaperMode ? (
-              <Shield className="h-3 w-3" />
-            ) : (
-              <Zap className="h-3 w-3" />
-            )}
+          <Badge tone={isPaperMode ? "blue" : "loss"} className="px-3 py-1 text-xs">
+            {isPaperMode ? <Shield className="h-3 w-3" /> : <Zap className="h-3 w-3" />}
             {isPaperMode ? "PAPER" : "LIVE"}
-          </div>
+          </Badge>
         )}
 
         {/* Connection Status */}
@@ -67,7 +58,7 @@ export function Header() {
           className={cn(
             "flex items-center gap-1.5 text-xs",
             isAuthenticated
-              ? "text-[var(--color-accent-green)]"
+              ? "text-[var(--color-status-good)]"
               : "text-[var(--color-text-muted)]"
           )}
         >
@@ -75,7 +66,7 @@ export function Header() {
             className={cn(
               "h-1.5 w-1.5 rounded-full",
               isAuthenticated
-                ? "bg-[var(--color-accent-green)] animate-pulse-glow"
+                ? "bg-[var(--color-status-good)] animate-pulse-glow"
                 : "bg-[var(--color-text-muted)]"
             )}
           />
@@ -85,21 +76,13 @@ export function Header() {
 
       {/* Right — Actions */}
       <div className="flex items-center gap-2">
-        {/* Notifications */}
-        <button
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
-          aria-label="Notifications"
-        >
+        <Button variant="icon" aria-label="Notifications">
           <Bell className="h-4 w-4" />
-        </button>
+        </Button>
 
-        {/* Settings */}
-        <button
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
-          aria-label="Settings"
-        >
+        <Button variant="icon" aria-label="Settings">
           <Settings className="h-4 w-4" />
-        </button>
+        </Button>
 
         {/* User Menu */}
         <div className="relative">

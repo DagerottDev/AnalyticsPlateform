@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 interface IVSurfaceHeatmapProps {
   data: {
@@ -8,6 +9,31 @@ interface IVSurfaceHeatmapProps {
     strike: number;
     iv: number;
   }[];
+}
+
+// Sequential ramp (single hue, light -> dark magnitude), validated with the
+// dataviz skill's ordinal check against the app's dark chart surface — see
+// docs/DESIGN_SYSTEM.md. Never a rainbow: one hue only for magnitude data.
+const SEQUENTIAL_RAMP = ["#1c5866", "#0e839a", "#00a6c4", "#1ecbe8", "#a0eefa"];
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function interpolateRamp(ramp: string[], t: number): string {
+  const clamped = Math.min(Math.max(t, 0), 1);
+  const segments = ramp.length - 1;
+  const pos = clamped * segments;
+  const idx = Math.min(Math.floor(pos), segments - 1);
+  const localT = pos - idx;
+
+  const [r1, g1, b1] = hexToRgb(ramp[idx]);
+  const [r2, g2, b2] = hexToRgb(ramp[idx + 1]);
+  const r = Math.round(r1 + (r2 - r1) * localT);
+  const g = Math.round(g1 + (g2 - g1) * localT);
+  const b = Math.round(b1 + (b2 - b1) * localT);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 export function IVSurfaceHeatmap({ data }: IVSurfaceHeatmapProps) {
@@ -45,44 +71,41 @@ export function IVSurfaceHeatmap({ data }: IVSurfaceHeatmapProps) {
 
   if (expirations.length === 0) {
     return (
-      <div className="flex h-[300px] items-center justify-center rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-sm text-[var(--color-text-muted)]">
-        No data available for IV Surface.
+      <div className="panel flex h-[300px] items-center justify-center">
+        <EmptyState title="No data available for IV Surface." />
       </div>
     );
   }
 
-  // Helper to map IV to a color gradient (Cold Blue to Hot Red)
+  // Map IV to the sequential ramp; missing data gets a neutral placeholder.
+  const getRatio = (iv: number) => (maxIV > minIV ? (iv - minIV) / (maxIV - minIV) : 0.5);
   const getColor = (iv: number) => {
-    if (iv === 0) return "rgba(39, 39, 42, 0.5)"; // bg-zinc-800 missing data
-    
-    // Normalize between 0 and 1
-    const ratio = maxIV > minIV ? (iv - minIV) / (maxIV - minIV) : 0.5;
-    
-    // HSL: Blue (240) to Red (0)
-    const hue = (1 - ratio) * 240; 
-    return `hsl(${hue}, 80%, 50%)`;
+    if (iv === 0) return "var(--color-bg-hover)";
+    return interpolateRamp(SEQUENTIAL_RAMP, getRatio(iv));
   };
+  // The top of the ramp is light enough that white text loses contrast.
+  const getTextColor = (iv: number) => (iv > 0 && getRatio(iv) > 0.6 ? "var(--color-bg-primary)" : "rgba(255, 255, 255, 0.9)");
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-xl overflow-x-auto">
-      <h3 className="text-sm font-bold text-[var(--color-text-bright)] mb-2">IV Surface (Strike vs Expiry)</h3>
-      
+    <div className="panel flex flex-col gap-2 overflow-x-auto">
+      <h3 className="mb-2 text-sm font-bold text-[var(--color-text-bright)]">IV Surface (Strike vs Expiry)</h3>
+
       <div className="flex w-max min-w-full">
         {/* Y-Axis: Strikes */}
         <div className="flex flex-col justify-end pt-[28px]">
           {strikes.map(strike => (
-            <div key={strike} className="h-6 flex items-center pr-2 text-xs font-mono text-[var(--color-text-secondary)] text-right w-16">
+            <div key={strike} className="tnum flex h-6 w-16 items-center pr-2 text-right text-xs font-mono text-[var(--color-text-secondary)]">
               {strike}
             </div>
           ))}
         </div>
-        
+
         {/* Grid Data */}
-        <div className="flex flex-col flex-1">
+        <div className="flex flex-1 flex-col">
           {/* X-Axis: Expirations */}
           <div className="flex h-[28px]">
             {expirations.map(exp => (
-              <div key={exp} className="flex-1 flex items-center justify-center text-[10px] font-mono text-[var(--color-text-secondary)] px-1 truncate w-16">
+              <div key={exp} className="flex w-16 flex-1 items-center justify-center truncate px-1 text-[10px] font-mono text-[var(--color-text-secondary)]">
                 {exp}
               </div>
             ))}
@@ -94,10 +117,10 @@ export function IVSurfaceHeatmap({ data }: IVSurfaceHeatmapProps) {
               {expirations.map(exp => {
                 const iv = gridData[exp][strike];
                 return (
-                  <div 
-                    key={`${exp}-${strike}`} 
-                    className="flex-1 m-[1px] rounded-[2px] flex items-center justify-center text-[9px] text-white/90 font-mono transition-transform hover:scale-110 cursor-pointer w-16"
-                    style={{ backgroundColor: getColor(iv) }}
+                  <div
+                    key={`${exp}-${strike}`}
+                    className="tnum m-[1px] flex w-16 flex-1 cursor-pointer items-center justify-center rounded-[2px] font-mono text-[9px] transition-transform hover:scale-110"
+                    style={{ backgroundColor: getColor(iv), color: getTextColor(iv) }}
                     title={`Expiry: ${exp}\nStrike: ${strike}\nIV: ${(iv * 100).toFixed(1)}%`}
                   >
                     {iv > 0 ? (iv * 100).toFixed(0) : "-"}
@@ -110,9 +133,12 @@ export function IVSurfaceHeatmap({ data }: IVSurfaceHeatmapProps) {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center justify-center gap-2 mt-4 text-[10px] text-[var(--color-text-muted)]">
+      <div className="mt-4 flex items-center justify-center gap-2 text-[10px] text-[var(--color-text-muted)]">
         <span>Low IV ({(minIV * 100).toFixed(1)}%)</span>
-        <div className="w-32 h-2 rounded-full bg-gradient-to-r from-blue-500 via-green-500 to-red-500"></div>
+        <div
+          className="h-2 w-32 rounded-full"
+          style={{ background: `linear-gradient(to right, ${SEQUENTIAL_RAMP.join(", ")})` }}
+        />
         <span>High IV ({(maxIV * 100).toFixed(1)}%)</span>
       </div>
     </div>

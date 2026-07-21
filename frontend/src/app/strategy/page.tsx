@@ -13,6 +13,8 @@ import {
 } from "@/lib/strategy";
 import { getLotSize } from "@/lib/dealerFlow";
 import { Instrument } from "@/types/market";
+import { PageContainer } from "@/components/ui/PageContainer";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 
 // Components
 import { LegManager } from "@/components/strategy-builder/LegManager";
@@ -136,16 +138,16 @@ export default function StrategyBuilderPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col gap-6 p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text-bright)]">Strategy Builder</h1>
-          <p className="text-sm text-[var(--color-text-muted)]">Construct multi-leg strategies and visualize risk profiles.</p>
-        </div>
+      <PageContainer>
+        <SectionHeader
+          title="Strategy Builder"
+          description="Construct multi-leg strategies and visualize risk profiles."
+        />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          <div className="lg:col-span-1 flex flex-col gap-6">
-            <LegManager 
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+
+          <div className="flex flex-col gap-6 lg:col-span-1">
+            <LegManager
               legs={legs}
               onChange={setLegs}
               availableInstruments={instruments}
@@ -158,14 +160,13 @@ export default function StrategyBuilderPage() {
             />
           </div>
 
-          <div className="lg:col-span-2 flex flex-col gap-6">
+          <div className="flex flex-col gap-6 lg:col-span-2">
             <StrategyMetrics metrics={profileMetrics} netGreeks={netGreeks} cost={totalCost} />
             <PayoffChart data={payoffData} currentSpot={spotPrice} />
           </div>
 
         </div>
-
-      </div>
+      </PageContainer>
     </DashboardLayout>
   );
 }

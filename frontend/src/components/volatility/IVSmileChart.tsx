@@ -11,6 +11,7 @@ import {
   Legend,
   ResponsiveContainer
 } from "recharts";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 interface IVSmileChartProps {
   data: {
@@ -33,56 +34,56 @@ export function IVSmileChart({ data }: IVSmileChartProps) {
 
   if (!chartData || chartData.length === 0) {
     return (
-      <div className="flex h-[300px] items-center justify-center rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-sm text-[var(--color-text-muted)]">
-        No IV data available. Ensure market is open or mock ticks are flowing.
+      <div className="panel flex h-[300px] items-center justify-center">
+        <EmptyState title="No IV data available. Ensure market is open or mock ticks are flowing." />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-xl">
+    <div className="panel flex flex-col gap-2">
       <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Volatility Smile</h3>
       <div className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-            <XAxis 
-              dataKey="strike" 
-              stroke="#a1a1aa" 
-              fontSize={12} 
-              tickLine={false} 
-              axisLine={{ stroke: '#3f3f46' }} 
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" vertical={false} />
+            <XAxis
+              dataKey="strike"
+              stroke="var(--color-chart-axis-text)"
+              fontSize={12}
+              tickLine={false}
+              axisLine={{ stroke: 'var(--color-chart-grid)' }}
               domain={['dataMin', 'dataMax']}
               type="number"
             />
-            <YAxis 
-              stroke="#a1a1aa" 
-              fontSize={12} 
-              tickLine={false} 
-              axisLine={{ stroke: '#3f3f46' }}
+            <YAxis
+              stroke="var(--color-chart-axis-text)"
+              fontSize={12}
+              tickLine={false}
+              axisLine={{ stroke: 'var(--color-chart-grid)' }}
               tickFormatter={(value) => `${value}%`}
             />
-            <Tooltip 
-              contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '8px', fontSize: '12px', color: '#e4e4e7' }}
-              itemStyle={{ color: '#e4e4e7' }}
+            <Tooltip
+              contentStyle={{ backgroundColor: 'var(--color-chart-tooltip-bg)', borderColor: 'var(--color-chart-tooltip-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text-primary)' }}
+              itemStyle={{ color: 'var(--color-text-primary)' }}
               labelFormatter={(label) => `Strike: ${label}`}
             />
             <Legend wrapperStyle={{ fontSize: '12px' }} />
-            <Line 
-              type="monotone" 
-              dataKey="Call IV" 
-              stroke="#22c55e" 
-              strokeWidth={2} 
-              dot={{ r: 3, fill: "#22c55e", strokeWidth: 0 }} 
-              activeDot={{ r: 5 }} 
+            <Line
+              type="monotone"
+              dataKey="Call IV"
+              stroke="var(--color-profit)"
+              strokeWidth={2}
+              dot={{ r: 3, fill: "var(--color-profit)", strokeWidth: 0 }}
+              activeDot={{ r: 5 }}
               connectNulls
             />
-            <Line 
-              type="monotone" 
-              dataKey="Put IV" 
-              stroke="#ef4444" 
-              strokeWidth={2} 
-              dot={{ r: 3, fill: "#ef4444", strokeWidth: 0 }} 
+            <Line
+              type="monotone"
+              dataKey="Put IV"
+              stroke="var(--color-loss)"
+              strokeWidth={2}
+              dot={{ r: 3, fill: "var(--color-loss)", strokeWidth: 0 }}
               activeDot={{ r: 5 }}
               connectNulls
             />

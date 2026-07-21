@@ -3,6 +3,16 @@
 import { useEffect, useRef } from "react";
 import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { VolatilityHistoricalData } from "@/lib/volatility";
+import { ChartLegend } from "@/components/charts/ChartLegend";
+
+// lightweight-charts renders to <canvas>, which cannot resolve CSS var() —
+// these hex literals mirror the design tokens in globals.css. Fixed
+// categorical order: 1st series = blue, 2nd = orange.
+const COLOR_GRID = "#1e222d"; // --color-border-subtle
+const COLOR_BORDER = "#2a2e3e"; // --color-border-default
+const COLOR_AXIS_TEXT = "#787b86"; // --color-text-secondary
+const COLOR_CAT_1 = "#2962ff"; // --color-cat-1 (blue) — Implied Volatility
+const COLOR_CAT_2 = "#ff9800"; // --color-cat-2 (orange) — Realized Volatility
 
 interface HistoricalVolChartProps {
   data: VolatilityHistoricalData[];
@@ -20,33 +30,33 @@ export function HistoricalVolChart({ data }: HistoricalVolChartProps) {
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { color: "transparent" },
-        textColor: "#a1a1aa", // zinc-400
+        textColor: COLOR_AXIS_TEXT,
       },
       grid: {
-        vertLines: { color: "#27272a" }, // zinc-800
-        horzLines: { color: "#27272a" },
+        vertLines: { color: COLOR_GRID },
+        horzLines: { color: COLOR_GRID },
       },
       crosshair: {
         mode: 1, // Normal mode
       },
       timeScale: {
         timeVisible: false,
-        borderColor: "#3f3f46", // zinc-700
+        borderColor: COLOR_BORDER,
       },
       rightPriceScale: {
-        borderColor: "#3f3f46",
+        borderColor: COLOR_BORDER,
       },
       autoSize: true,
     });
 
     const ivSeries = chart.addLineSeries({
-      color: "#a855f7", // purple
+      color: COLOR_CAT_1,
       lineWidth: 2,
       title: "Implied Volatility",
     });
 
     const rvSeries = chart.addLineSeries({
-      color: "#f97316", // orange
+      color: COLOR_CAT_2,
       lineWidth: 2,
       title: "Realized Volatility",
     });
@@ -81,13 +91,19 @@ export function HistoricalVolChart({ data }: HistoricalVolChartProps) {
 
     ivSeriesRef.current.setData(uniqueIvData);
     rvSeriesRef.current.setData(uniqueRvData);
-    
+
     chartRef.current.timeScale().fitContent();
   }, [data]);
 
   return (
-    <div className="flex w-full flex-col gap-2 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-xl">
+    <div className="panel flex w-full flex-col gap-2">
       <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Historical IV vs RV (1 Year)</h3>
+      <ChartLegend
+        items={[
+          { label: "Implied Volatility", color: COLOR_CAT_1 },
+          { label: "Realized Volatility", color: COLOR_CAT_2 },
+        ]}
+      />
       <div ref={chartContainerRef} className="h-[300px] w-full" />
     </div>
   );
