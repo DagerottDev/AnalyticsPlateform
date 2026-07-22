@@ -20,6 +20,7 @@ export const useAuthStore = create<AuthStore>()(
       isLoading: false,
       error: null,
       tradingMode: "paper" as TradingMode,
+      sessionLive: true,
 
       // ─── Actions ───────────────────────────────────────
       login: async (request) => {
@@ -33,6 +34,7 @@ export const useAuthStore = create<AuthStore>()(
             isLoading: false,
             error: null,
             tradingMode: response.user.trading_mode,
+            sessionLive: true,
           });
         } catch (error: unknown) {
           set({
@@ -55,7 +57,12 @@ export const useAuthStore = create<AuthStore>()(
           isAuthenticated: false,
           isLoading: false,
           error: null,
+          sessionLive: true,
         });
+      },
+
+      setSessionLive: (live) => {
+        set({ sessionLive: live });
       },
 
       setTradingMode: (mode: TradingMode) => {
@@ -96,6 +103,7 @@ export const useAuthStore = create<AuthStore>()(
                 isAuthenticated: true,
                 error: null,
                 tradingMode: response.user.trading_mode,
+                sessionLive: true,
               });
             })
             .catch(() => {
@@ -112,6 +120,7 @@ export const useAuthStore = create<AuthStore>()(
             isAuthenticated: true,
             error: null,
             tradingMode: response.user.trading_mode,
+            sessionLive: true,
           });
         } catch {
           // No server-side credentials configured, or auto-login failed —

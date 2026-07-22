@@ -280,8 +280,8 @@ export default function DashboardPage() {
             />
             <ModuleCard
               icon={PlayCircle}
-              title="Simulation Playback"
-              description="Replay historical trading sessions modeled on Geometric Brownian Motion (GBM) with dynamic speed controls."
+              title="Session Replay"
+              description="Replay real historical trading sessions from the broker's OHLCV data with dynamic speed controls."
               metric="Replay Engine Active"
               route="/replay"
               color="var(--color-accent-orange)"

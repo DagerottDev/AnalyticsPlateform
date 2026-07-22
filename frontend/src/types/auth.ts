@@ -67,6 +67,15 @@ export interface AuthState {
   isLoading: boolean;
   error: unknown | null;
   tradingMode: TradingMode;
+  /**
+   * Whether the backend broker session backing this token is actually
+   * still alive. Starts true (optimistic) and is flipped false by the API
+   * client when a request comes back 401 "Active broker session not
+   * found" and silent recovery fails — e.g. after a backend restart wipes
+   * its in-memory session. Distinct from `isAuthenticated`, which only
+   * reflects whether we have a persisted token/user at all.
+   */
+  sessionLive: boolean;
 }
 
 /** Auth store actions */
@@ -77,6 +86,7 @@ export interface AuthActions {
   updateAccountName: (name: string) => void;
   clearError: () => void;
   hydrate: () => Promise<void>;
+  setSessionLive: (live: boolean) => void;
 }
 
 /** Combined auth store type */

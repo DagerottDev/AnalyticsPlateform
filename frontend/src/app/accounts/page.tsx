@@ -63,7 +63,7 @@ function InfoRow({
 }
 
 export default function AccountsPage() {
-  const { user, tradingMode, setTradingMode, updateAccountName, logout, isPaperMode, brokerName, login, isLoading, error, clearError } = useAuth();
+  const { user, tradingMode, setTradingMode, updateAccountName, logout, isPaperMode, brokerName, login, isLoading, error, clearError, sessionLive } = useAuth();
   const canRelogin = hasSavedTotpCredentials();
 
   const [isEditingName, setIsEditingName] = useState(false);
@@ -159,13 +159,23 @@ export default function AccountsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 rounded-full bg-[var(--color-status-good)]/10 px-3 py-1 text-xs font-semibold text-[var(--color-status-good)]">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-status-good)] opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-status-good)]" />
-                </span>
-                Connected
-              </div>
+              {sessionLive ? (
+                <div className="flex items-center gap-1.5 rounded-full bg-[var(--color-status-good)]/10 px-3 py-1 text-xs font-semibold text-[var(--color-status-good)]">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-status-good)] opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-status-good)]" />
+                  </span>
+                  Connected
+                </div>
+              ) : (
+                <div
+                  className="flex items-center gap-1.5 rounded-full bg-[var(--color-status-serious)]/10 px-3 py-1 text-xs font-semibold text-[var(--color-status-serious)]"
+                  title="The backend broker session was lost (e.g. a server restart) — use Relogin (TOTP) below to reconnect."
+                >
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-status-serious)]" />
+                  Session Lost
+                </div>
+              )}
             </div>
 
             {/* Details */}

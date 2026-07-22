@@ -6,13 +6,15 @@ import { Play, Pause, Square, FastForward } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 
 export function ReplayController() {
-  const { 
-    isActive, 
-    isPlaying, 
-    setIsPlaying, 
-    speedMultiplier, 
-    setSpeedMultiplier, 
+  const {
+    isActive,
+    isPlaying,
+    setIsPlaying,
+    speedMultiplier,
+    setSpeedMultiplier,
     progressPercentage,
+    symbol,
+    sessionDate,
     reset
   } = useReplayStore();
 
@@ -36,12 +38,15 @@ export function ReplayController() {
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/95 backdrop-blur-md p-4 shadow-2xl shadow-black/50 min-w-[300px]">
       <div className="flex items-center justify-between text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-widest">
-        <span>Replay Mode</span>
+        <span>
+          {symbol || "Replay"}
+          {sessionDate && <span className="ml-1.5 font-normal normal-case text-[var(--color-text-muted)]">{sessionDate}</span>}
+        </span>
         <span className="text-[var(--color-accent-blue)]">{speedMultiplier}x Speed</span>
       </div>
 
-      <div className="w-full h-2 bg-[#18181b] rounded-full overflow-hidden mt-1">
-        <div 
+      <div className="w-full h-2 bg-[var(--color-bg-hover)] rounded-full overflow-hidden mt-1">
+        <div
           className="h-full bg-[var(--color-accent-blue)] transition-all duration-300 ease-linear"
           style={{ width: `${progressPercentage}%` }}
         />

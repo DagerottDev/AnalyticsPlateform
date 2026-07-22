@@ -26,7 +26,7 @@ export interface MarketTick {
   change_percent: number;
 }
 
-/** A simulated tick produced by the Replay engine. */
+/** A tick produced by the Replay engine, driven by real historical candles. */
 export interface TickData {
   instrument_token?: number;
   trading_symbol: string;

@@ -77,6 +77,32 @@ async def get_quotes(
     return {"quotes": []}
 
 
+@router.get("/history")
+async def get_history(
+    symbol: str = Query(..., description="UI symbol (e.g. NIFTY) or Fyers-qualified symbol"),
+    range_from: str = Query(..., description="Start date, YYYY-MM-DD"),
+    range_to: str = Query(..., description="End date, YYYY-MM-DD"),
+    resolution: str = Query("1", description="Candle resolution, e.g. '1', '5', 'D'"),
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Fetch real historical OHLCV candles directly from the broker.
+
+    Unlike /historical/ohlcv, this pulls live from Fyers rather than the
+    backfilled DB table — used by Replay Mode so a session can be replayed
+    from real market data without requiring a prior backfill job.
+    """
+    service = session_manager.get_session(current_user["sub"])
+    if not service:
+        raise HTTPException(status_code=401, detail="Active broker session not found")
+
+    fyers_symbol = to_fyers_ws_symbol(symbol)
+    try:
+        candles = await service.get_historical_data(fyers_symbol, range_from, range_to, resolution)
+        return {"candles": candles}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @router.websocket("/ws")
 async def market_ws(websocket: WebSocket, token: str = Query(...)) -> None:
     """Proxies live Fyers ticks to the browser.

@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useReplayStore } from "@/stores/replayStore";
-import { generateSessionTicks, startPlayback, stopPlayback } from "@/lib/replayEngine";
-import { getInstruments } from "@/lib/market";
+import { buildReplaySession, startPlayback, stopPlayback } from "@/lib/replayEngine";
+import { getInstruments, getHistoricalCandles } from "@/lib/market";
+import { formatApiError } from "@/lib/apiError";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
@@ -12,34 +13,59 @@ import { Input } from "@/components/ui/Input";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { History, PlayCircle, Settings2, AlertTriangle } from "lucide-react";
 
+function yesterday(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function ReplayPage() {
-  const { isActive, setIsActive, setIsPlaying, setSymbol, reset } = useReplayStore();
+  const {
+    isActive,
+    setIsActive,
+    setIsPlaying,
+    setSymbol,
+    setSessionDate: setStoreSessionDate,
+    reset,
+  } = useReplayStore();
 
   const [targetSymbol, setTargetSymbol] = useState("NIFTY");
-  const [startPrice, setStartPrice] = useState("22000");
-  const [volatility, setVolatility] = useState("15"); // 15% IV
+  const [sessionDate, setSessionDate] = useState(yesterday());
+  const [resolution, setResolution] = useState("1");
+  const [volatility, setVolatility] = useState("15"); // used to price options off the real spot path
   const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleStart = async () => {
     setIsGenerating(true);
+    setError(null);
     try {
-      // 1. Fetch the real instruments list so we have valid strikes to simulate
-      const data = await getInstruments(targetSymbol);
-      if (!data || data.instruments.length === 0) {
-        alert("Failed to fetch instruments for symbol.");
+      // 1. Fetch the real instruments list so we have valid strikes to price
+      const [instrumentData, candles] = await Promise.all([
+        getInstruments(targetSymbol),
+        getHistoricalCandles(targetSymbol, sessionDate, sessionDate, resolution),
+      ]);
+
+      if (!instrumentData || instrumentData.instruments.length === 0) {
+        setError("Failed to fetch instruments for symbol.");
+        return;
+      }
+      if (!candles || candles.length === 0) {
+        setError("No historical data returned for this date (market may have been closed).");
         return;
       }
 
-      // 2. Generate the entire day's simulation mathematically
-      const { allTicks } = generateSessionTicks(
+      // 2. Build the tick-by-tick session from real historical candles
+      const { allTicks } = buildReplaySession(
         targetSymbol,
-        Number(startPrice),
-        Number(volatility) / 100, // convert to decimal
-        data.instruments
+        candles,
+        instrumentData.instruments,
+        Number(volatility) / 100
       );
 
       // 3. Setup Store and Start
       setSymbol(targetSymbol);
+      setStoreSessionDate(sessionDate);
       setIsActive(true);
       setIsPlaying(true);
 
@@ -48,10 +74,9 @@ export default function ReplayPage() {
         setIsActive(false);
         reset();
       });
-
     } catch (err) {
       console.error(err);
-      alert("Error starting replay.");
+      setError(formatApiError(err) || "Error starting replay.");
     } finally {
       setIsGenerating(false);
     }
@@ -70,7 +95,7 @@ export default function ReplayPage() {
             <History className="h-6 w-6 text-[var(--color-accent-blue)]" /> Replay Mode
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-            Simulate a trading session to test your strategies and observe Dealer Flow shifting in real-time.
+            Replay a real historical trading session to test your strategies and observe Dealer Flow shifting over time.
           </p>
         </div>
 
@@ -80,14 +105,14 @@ export default function ReplayPage() {
               <PlayCircle className="h-8 w-8 text-[var(--color-accent-blue)]" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-[var(--color-text-bright)]">Simulation Active</h2>
+              <h2 className="text-xl font-bold text-[var(--color-text-bright)]">Replay Active</h2>
               <p className="mx-auto mt-2 max-w-md text-[var(--color-text-secondary)]">
-                A mathematical simulation is currently feeding live ticks to all dashboards.
+                Real historical ticks for {sessionDate} are currently feeding all dashboards.
                 Use the sidebar to navigate to the <b>Option Chain</b> or <b>Dealer Flow</b> to watch the market move.
               </p>
             </div>
             <Button variant="outline" onClick={handleStop} className="mt-4 hover:text-[var(--color-loss)]">
-              Stop Simulation
+              Stop Replay
             </Button>
           </Card>
         ) : (
@@ -108,16 +133,26 @@ export default function ReplayPage() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-sm text-[var(--color-text-muted)]">Starting Price</label>
+                <label className="text-sm text-[var(--color-text-muted)]">Session Date</label>
                 <Input
-                  type="number"
-                  value={startPrice}
-                  onChange={e => setStartPrice(e.target.value)}
+                  type="date"
+                  value={sessionDate}
+                  max={yesterday()}
+                  onChange={e => setSessionDate(e.target.value)}
                 />
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-sm text-[var(--color-text-muted)]">Base Volatility (IV %)</label>
+                <label className="text-sm text-[var(--color-text-muted)]">Candle Resolution</label>
+                <Select value={resolution} onChange={e => setResolution(e.target.value)}>
+                  <option value="1">1 Minute</option>
+                  <option value="5">5 Minute</option>
+                  <option value="15">15 Minute</option>
+                </Select>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-sm text-[var(--color-text-muted)]">Model Volatility (IV %)</label>
                 <Input
                   type="number"
                   value={volatility}
@@ -129,16 +164,22 @@ export default function ReplayPage() {
             <div className="flex gap-3 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-hover)] p-4 text-sm text-[var(--color-text-secondary)]">
               <AlertTriangle className="h-5 w-5 shrink-0 text-[var(--color-status-warning)]" />
               <p>
-                This mode will disconnect your live broker WebSocket feed and inject thousands of mathematically simulated
-                ticks (using Geometric Brownian Motion) to test platform stability and analytic responsiveness.
+                This mode will disconnect your live broker WebSocket feed and instead replay real historical candles
+                for the chosen date. The underlying price path is real broker data; option prices are derived from
+                that real spot using Black-Scholes (the same pricing engine used elsewhere in this app) at the
+                volatility above, since the broker does not expose historical tick data per option contract.
                 <br /><br />
-                <b>All dashboards will render this simulated data until stopped.</b>
+                <b>All dashboards will render this replayed session until stopped.</b>
               </p>
             </div>
 
+            {error && (
+              <p className="text-sm text-[var(--color-loss)]">{error}</p>
+            )}
+
             <Button onClick={handleStart} disabled={isGenerating} size="md" className="mt-2 h-12 w-full">
               <PlayCircle className="h-5 w-5" />
-              {isGenerating ? "Generating Simulation..." : "Start Simulation"}
+              {isGenerating ? "Loading Historical Data..." : "Start Replay"}
             </Button>
           </Card>
         )}

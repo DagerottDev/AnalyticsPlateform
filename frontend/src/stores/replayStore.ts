@@ -12,13 +12,15 @@ interface ReplayState {
   progressPercentage: number;
   currentTicks: ReplayTickMap;
   symbol: string;
-  
+  sessionDate: string;
+
   setIsActive: (active: boolean) => void;
   setIsPlaying: (playing: boolean) => void;
   setSpeedMultiplier: (speed: number) => void;
   setProgressPercentage: (percent: number) => void;
   setCurrentTicks: (ticks: ReplayTickMap) => void;
   setSymbol: (sym: string) => void;
+  setSessionDate: (date: string) => void;
   reset: () => void;
 }
 
@@ -29,19 +31,22 @@ export const useReplayStore = create<ReplayState>((set) => ({
   progressPercentage: 0,
   currentTicks: {},
   symbol: "",
-  
+  sessionDate: "",
+
   setIsActive: (active) => set({ isActive: active }),
   setIsPlaying: (playing) => set({ isPlaying: playing }),
   setSpeedMultiplier: (speed) => set({ speedMultiplier: speed }),
   setProgressPercentage: (percent) => set({ progressPercentage: percent }),
   setCurrentTicks: (ticks) => set({ currentTicks: ticks }),
   setSymbol: (sym) => set({ symbol: sym }),
-  reset: () => set({ 
-    isActive: false, 
-    isPlaying: false, 
-    speedMultiplier: 1, 
-    progressPercentage: 0, 
+  setSessionDate: (date) => set({ sessionDate: date }),
+  reset: () => set({
+    isActive: false,
+    isPlaying: false,
+    speedMultiplier: 1,
+    progressPercentage: 0,
     currentTicks: {},
-    symbol: "" 
+    symbol: "",
+    sessionDate: ""
   }),
 }));

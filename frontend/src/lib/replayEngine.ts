@@ -1,86 +1,84 @@
 import { useReplayStore } from "@/stores/replayStore";
+import { HistoricalCandle } from "@/lib/market";
 import { Instrument, TickData } from "@/types/market";
 import { calculateOptionPrice } from "./greeks";
 
-let playbackInterval: any = null;
+let playbackInterval: ReturnType<typeof setTimeout> | null = null;
 let currentStep = 0;
 
-export function generateRandomWalk(startPrice: number, volatility: number, steps: number): number[] {
-  const path: number[] = [startPrice];
-  const dt = 1 / steps;
-  const drift = 0.0;
+const RISK_FREE_RATE = 0.10;
 
-  for (let i = 1; i < steps; i++) {
-    const prev = path[i - 1];
-    
-    const u1 = Math.random();
-    const u2 = Math.random();
-    const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-
-    const exponent = (drift - 0.5 * volatility * volatility) * dt + volatility * Math.sqrt(dt) * z;
-    const nextPrice = prev * Math.exp(exponent);
-    path.push(parseFloat(nextPrice.toFixed(2)));
-  }
-  return path;
+/** Time-to-expiry (years) for an instrument at a given point in real time. */
+function timeToExpiry(expiry: string | null, atMs: number): number {
+  if (!expiry) return 0.0001;
+  const expDate = new Date(expiry);
+  expDate.setHours(15, 30, 0, 0); // NSE close
+  const diffDays = (expDate.getTime() - atMs) / (1000 * 60 * 60 * 24);
+  return Math.max(diffDays / 365, 0.0001);
 }
 
-export function generateSessionTicks(
+/**
+ * Builds a real-data replay session: the underlying's ticks come straight
+ * from the broker's historical candles for the chosen date; each option
+ * instrument's tick is priced off that real spot with Black-Scholes (the
+ * same pricing engine used by the Strategy Builder/Greeks pages), since
+ * Fyers doesn't expose historical tick data per option contract.
+ */
+export function buildReplaySession(
   symbol: string,
-  startPrice: number,
-  volatility: number,
-  instruments: Instrument[]
-): { allTicks: any[] } {
-  const steps = 375;
-  const spotPath = generateRandomWalk(startPrice, volatility, steps);
-  const allTicks: any[] = [];
+  candles: HistoricalCandle[],
+  instruments: Instrument[],
+  volatility: number
+): { allTicks: Record<string, TickData>[] } {
+  if (candles.length === 0) return { allTicks: [] };
 
-  for (let t = 0; t < steps; t++) {
-    const spot = spotPath[t];
+  const startPrice = candles[0].close;
+  const startMs = new Date(candles[0].timestamp).getTime();
+  const allTicks: Record<string, TickData>[] = [];
+
+  candles.forEach((candle) => {
+    const spot = candle.close;
+    const atMs = new Date(candle.timestamp).getTime();
     const stepTicks: Record<string, TickData> = {};
 
     const spotChange = spot - startPrice;
-    const spotChangePercent = (spotChange / startPrice) * 100;
+    const spotChangePercent = startPrice !== 0 ? (spotChange / startPrice) * 100 : 0;
     stepTicks[symbol] = {
       trading_symbol: symbol,
       last_price: spot,
-      volume: 100000 + t * 500,
-      open_interest: 0,
-      timestamp: Date.now(),
+      volume: candle.volume,
+      open_interest: candle.open_interest,
+      timestamp: atMs,
       change: parseFloat(spotChange.toFixed(2)),
       change_percent: parseFloat(spotChangePercent.toFixed(2)),
     };
 
-    instruments.forEach(inst => {
+    instruments.forEach((inst) => {
       if (!inst.strike || !inst.option_type || !inst.expiry) return;
       const K = inst.strike;
       const type = inst.option_type as "CE" | "PE";
-      
-      const daysLeft = Math.max(7 - t / 375, 0.001);
-      const T_years = daysLeft / 365;
 
-      const r = 0.10;
-      const price = calculateOptionPrice(type, spot, K, T_years, r, volatility);
-      
-      const baselinePrice = calculateOptionPrice(type, startPrice, K, 7/365, r, volatility);
+      const T = timeToExpiry(inst.expiry, atMs);
+      const price = calculateOptionPrice(type, spot, K, T, RISK_FREE_RATE, volatility);
+
+      const T0 = timeToExpiry(inst.expiry, startMs);
+      const baselinePrice = calculateOptionPrice(type, startPrice, K, T0, RISK_FREE_RATE, volatility);
       const change = price - baselinePrice;
       const changePercent = baselinePrice > 0 ? (change / baselinePrice) * 100 : 0;
-
-      const oi = 10000 + K * 5;
-      const volume = 500 + t * 20;
 
       stepTicks[inst.trading_symbol] = {
         trading_symbol: inst.trading_symbol,
         last_price: parseFloat(price.toFixed(2)),
-        volume,
-        open_interest: oi,
-        timestamp: Date.now(),
+        volume: 0,
+        open_interest: 0,
+        timestamp: atMs,
         change: parseFloat(change.toFixed(2)),
         change_percent: parseFloat(changePercent.toFixed(2)),
       };
     });
 
     allTicks.push(stepTicks);
-  }
+  });
 
   return { allTicks };
 }
@@ -92,17 +90,17 @@ export function stopPlayback() {
   }
 }
 
-export function startPlayback(allTicks: any[], onComplete: () => void) {
+export function startPlayback(allTicks: Record<string, TickData>[], onComplete: () => void) {
   stopPlayback();
   currentStep = 0;
-  
+
   const store = useReplayStore.getState();
   store.setProgressPercentage(0);
   store.setCurrentTicks(allTicks[0]);
 
   const tickRunner = () => {
     const activeStore = useReplayStore.getState();
-    
+
     if (!activeStore.isPlaying) return;
 
     currentStep++;
@@ -121,7 +119,7 @@ export function startPlayback(allTicks: any[], onComplete: () => void) {
     if (activeStore.isPlaying) {
       tickRunner();
     }
-    
+
     const interval = Math.max(10, 1000 / activeStore.speedMultiplier);
     playbackInterval = setTimeout(runLoop, interval);
   };

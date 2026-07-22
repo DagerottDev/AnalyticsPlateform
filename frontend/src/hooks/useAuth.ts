@@ -48,6 +48,7 @@ export function useAuth() {
     isLoading: store.isLoading,
     error: store.error,
     tradingMode: store.tradingMode,
+    sessionLive: store.sessionLive,
     hydrated,
 
     // Derived
