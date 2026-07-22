@@ -8,6 +8,7 @@ import { formatApiError } from "@/lib/apiError";
 import { cn, formatINR } from "@/lib/utils";
 import { Settings2 } from "lucide-react";
 import { calculateImpliedVolatility, calculateGreeks, Greeks } from "@/lib/greeks";
+import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
 import { Button } from "@/components/ui/Button";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -62,21 +63,12 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   
   // Get underlying price
   const underlyingTick = getTick(symbol);
-  const S = underlyingTick?.last_price || (symbol === "NIFTY" ? 22000 : 48000); // fallback
+  const S = underlyingTick?.last_price || defaultSpotFallback(symbol);
 
   // Time to expiry (T) in years
-  const T = useMemo(() => {
-    if (!expiry) return 0.01; // fallback
-    const expDate = new Date(expiry);
-    const now = new Date();
-    // Set time to end of trading day 3:30 PM IST
-    expDate.setHours(15, 30, 0, 0);
-    const diffMs = expDate.getTime() - now.getTime();
-    const diffDays = diffMs / (1000 * 60 * 60 * 24);
-    return Math.max(diffDays / 365, 0.0001); // Avoid T=0
-  }, [expiry]);
-  
-  const r = 0.10; // 10% risk-free rate for Indian markets
+  const T = useMemo(() => timeToExpiry(expiry), [expiry]);
+
+  const r = DEFAULT_RISK_FREE_RATE; // 10% risk-free rate for Indian markets
 
   // Group by strike price
   const strikes = useMemo(() => {
@@ -93,12 +85,11 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
       .sort((a, b) => a.strike - b.strike);
   }, [instruments]);
 
-  // Find ATM strike (approximation: closest to mid-point of available strikes)
+  // Find ATM strike (closest to the live/fallback spot price)
   const atmStrike = useMemo(() => {
     if (strikes.length === 0) return 0;
-    const midIndex = Math.floor(strikes.length / 2);
-    return strikes[midIndex].strike;
-  }, [strikes]);
+    return nearestStrikeTo(strikes.map((s) => s.strike), S);
+  }, [strikes, S]);
 
   if (loading) {
     return (

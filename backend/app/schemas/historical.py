@@ -14,13 +14,3 @@ class OHLCV(BaseModel):
     close: float
     volume: int
     open_interest: int
-
-class BackfillRequest(BaseModel):
-    symbol: str
-    from_date: str  # YYYY-MM-DD
-    to_date: str    # YYYY-MM-DD
-    resolution: str = "1"
-
-class BackfillResponse(BaseModel):
-    message: str
-    records_inserted: int

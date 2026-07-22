@@ -8,8 +8,6 @@ interface ApiErrorDisplayProps {
   className?: string;
 }
 
-export { formatApiError };
-
 export function ApiErrorDisplay({ error, className }: ApiErrorDisplayProps) {
   const [copied, setCopied] = useState(false);
 

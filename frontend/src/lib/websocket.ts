@@ -66,7 +66,7 @@ interface RawFyersTick {
  * for live-tick-shaped messages; the REST quote poller doesn't carry it
  * either (Fyers' quotes endpoint doesn't return OI), so it's 0 there too.
  */
-function normalizeTick(raw: RawFyersTick): MarketTick | null {
+export function normalizeTick(raw: RawFyersTick): MarketTick | null {
   if (raw.trading_symbol && typeof raw.last_price === "number") {
     return {
       trading_symbol: raw.trading_symbol,

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getExpiries } from "@/lib/market";
+import { formatApiError } from "@/lib/apiError";
 import { ChevronDown, RefreshCw, Search } from "lucide-react";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
@@ -23,26 +24,26 @@ export function InstrumentSelector({
 }: InstrumentSelectorProps) {
   const [expiries, setExpiries] = useState<string[]>([]);
   const [loadingExpiries, setLoadingExpiries] = useState(false);
+  const [expiriesError, setExpiriesError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
-    
+
     async function fetchExpiries() {
       setLoadingExpiries(true);
       try {
         const data = await getExpiries(symbol);
         if (isMounted) {
+          setExpiriesError(null);
           setExpiries(data.expiries);
           if (data.expiries.length > 0 && !data.expiries.includes(expiry || "")) {
             onExpiryChange(data.expiries[0]);
           }
         }
-      } catch (error) {
-        console.error("Failed to fetch expiries", error);
-        // Fallback for UI if backend fails
+      } catch (err) {
         if (isMounted) {
-          setExpiries(["25-JUL-2024", "01-AUG-2024"]);
-          onExpiryChange("25-JUL-2024");
+          setExpiries([]);
+          setExpiriesError(formatApiError(err) || "Failed to load expiries.");
         }
       } finally {
         if (isMounted) setLoadingExpiries(false);
@@ -134,6 +135,9 @@ export function InstrumentSelector({
           </Select>
           <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
         </div>
+        {expiriesError && (
+          <p className="mt-1 text-xs text-[var(--color-loss)]">{expiriesError}</p>
+        )}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
 import { getHistoricalVolatility, getVolatilityMetrics, VolatilityHistoricalData, VolatilityMetrics } from "@/lib/volatility";
 import { calculateImpliedVolatility } from "@/lib/greeks";
+import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
 import { Instrument } from "@/types/market";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -31,7 +32,8 @@ export default function VolatilityPage() {
   // Live Options State
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const tradingSymbols = useMemo(() => instruments.map((i) => i.trading_symbol), [instruments]);
-  const { getTick } = useMarketData([...tradingSymbols, symbol]);
+  const allSymbols = useMemo(() => [...tradingSymbols, symbol], [tradingSymbols, symbol]);
+  const { getTick } = useMarketData(allSymbols);
 
   // Load Historical Volatility
   useEffect(() => {
@@ -87,8 +89,8 @@ export default function VolatilityPage() {
 
   // Get underlying price
   const underlyingTick = getTick(symbol);
-  const S = underlyingTick?.last_price || (symbol === "NIFTY" ? 22000 : 48000);
-  const r = 0.10; // 10% risk free
+  const S = underlyingTick?.last_price || defaultSpotFallback(symbol);
+  const r = DEFAULT_RISK_FREE_RATE;
 
   // Calculate live IVs for all fetched instruments based on live ticks
   const liveIVData = useMemo(() => {
@@ -96,17 +98,12 @@ export default function VolatilityPage() {
       const tick = getTick(inst.trading_symbol);
       let iv = 0;
       if (tick && tick.last_price > 0 && inst.strike && inst.expiry && inst.option_type) {
-        // Calculate T
-        const expDate = new Date(inst.expiry);
-        expDate.setHours(15, 30, 0, 0);
-        const diffDays = (expDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24);
-        const T = Math.max(diffDays / 365, 0.0001);
-
+        const T = timeToExpiry(inst.expiry);
         iv = calculateImpliedVolatility(inst.option_type, S, inst.strike, T, r, tick.last_price);
       }
       return { ...inst, iv };
     });
-  }, [instruments, getTick, S]);
+  }, [instruments, getTick, S, r]);
 
   // Smile Data (Filter by selected expiry)
   const smileData = useMemo(() => {
@@ -132,8 +129,8 @@ export default function VolatilityPage() {
     // Find closest strike to S
     const strikes = Array.from(new Set(instruments.map(i => i.strike).filter(Boolean))) as number[];
     if (strikes.length === 0) return [];
-    
-    const atmStrike = strikes.reduce((prev, curr) => Math.abs(curr - S) < Math.abs(prev - S) ? curr : prev);
+
+    const atmStrike = nearestStrikeTo(strikes, S);
     
     const expiries = Array.from(
       new Set(instruments.map(i => i.expiry).filter((e): e is string => !!e))

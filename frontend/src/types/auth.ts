@@ -48,17 +48,6 @@ export interface LoginResponse {
   user: UserProfile;
 }
 
-/** Token verification request */
-export interface TokenVerifyRequest {
-  token: string;
-}
-
-/** Token verification response */
-export interface TokenVerifyResponse {
-  valid: boolean;
-  payload: Record<string, unknown> | null;
-}
-
 /** Auth store state */
 export interface AuthState {
   token: string | null;

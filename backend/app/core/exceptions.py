@@ -25,14 +25,6 @@ class BrokerAuthError(Exception):
         super().__init__(self.message)
 
 
-class BrokerNotConnectedError(Exception):
-    """Raised when broker operations are attempted without an active connection."""
-
-    def __init__(self, message: str = "Broker not connected") -> None:
-        self.message = message
-        super().__init__(self.message)
-
-
 async def broker_connection_error_handler(
     request: Request,
     exc: BrokerConnectionError,

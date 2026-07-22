@@ -5,6 +5,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
 import { calculateImpliedVolatility } from "@/lib/greeks";
+import { timeToExpiry, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
 import { 
   StrategyLeg, 
   calculatePayoffProfile, 
@@ -68,7 +69,7 @@ export default function StrategyBuilderPage() {
 
   // Live Calculations
   const underlyingTick = getTick(symbol);
-  const spotPrice = underlyingTick?.last_price || (symbol === "NIFTY" ? 22000 : 48000);
+  const spotPrice = underlyingTick?.last_price || defaultSpotFallback(symbol);
   const lotSize = getLotSize(symbol);
 
   // Auto-update Entry Prices and IV for legs based on live ticks if entryPrice is 0 (uninitialized)
@@ -90,17 +91,14 @@ export default function StrategyBuilderPage() {
         }
 
         // Always update live IV for T+0 calculations
-        const expDate = new Date(leg.instrument.expiry);
-        expDate.setHours(15, 30, 0, 0);
-        const diffDays = (expDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24);
-        const T = Math.max(diffDays / 365, 0.0001);
+        const T = timeToExpiry(leg.instrument.expiry);
 
         const iv = calculateImpliedVolatility(
           leg.instrument.option_type as "CE"|"PE",
           spotPrice,
           leg.instrument.strike!,
           T,
-          0.10, // risk free rate
+          DEFAULT_RISK_FREE_RATE,
           tick.last_price
         );
 

@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 import logging
 from typing import Any
@@ -23,12 +24,9 @@ async def get_instruments(
     if not service:
         raise HTTPException(status_code=401, detail="Active broker session not found")
 
-    try:
-        raw_instruments = await service.get_instruments(symbol.upper())
-        instruments = [Instrument(**instr) for instr in raw_instruments]
-        return InstrumentResponse(instruments=instruments)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    raw_instruments = await service.get_instruments(symbol.upper())
+    instruments = [Instrument(**instr) for instr in raw_instruments]
+    return InstrumentResponse(instruments=instruments)
 
 
 @router.get("/expiries/{symbol}", response_model=ExpiryList)
@@ -39,25 +37,22 @@ async def get_expiries(
     service = session_manager.get_session(current_user["sub"])
     if not service:
         raise HTTPException(status_code=401, detail="Active broker session not found")
-    try:
-        raw_instruments = await service.get_instruments(symbol.upper())
-        expiries = set()
-        for instr in raw_instruments:
-            if instr.get("expiry"):
-                expiries.add(instr["expiry"])
 
-        # Sort expiries by date (assuming DD-MMM-YYYY format)
-        import datetime
-        def parse_expiry(date_str: str) -> datetime.datetime:
-            try:
-                return datetime.datetime.strptime(date_str, "%d-%b-%Y")
-            except ValueError:
-                return datetime.datetime.max
+    raw_instruments = await service.get_instruments(symbol.upper())
+    expiries = set()
+    for instr in raw_instruments:
+        if instr.get("expiry"):
+            expiries.add(instr["expiry"])
 
-        sorted_expiries = sorted(list(expiries), key=parse_expiry)
-        return ExpiryList(expiries=sorted_expiries)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    # Sort expiries by date (assuming DD-MMM-YYYY format)
+    def parse_expiry(date_str: str) -> datetime.datetime:
+        try:
+            return datetime.datetime.strptime(date_str, "%d-%b-%Y")
+        except ValueError:
+            return datetime.datetime.max
+
+    sorted_expiries = sorted(expiries, key=parse_expiry)
+    return ExpiryList(expiries=sorted_expiries)
 
 
 @router.get("/quotes")
@@ -71,10 +66,8 @@ async def get_quotes(
         raise HTTPException(status_code=401, detail="Active broker session not found")
 
     symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
-    if hasattr(service, "get_quotes"):
-        quotes = await service.get_quotes(symbol_list)
-        return {"quotes": quotes}
-    return {"quotes": []}
+    quotes = await service.get_quotes(symbol_list)
+    return {"quotes": quotes}
 
 
 @router.get("/history")
@@ -96,11 +89,8 @@ async def get_history(
         raise HTTPException(status_code=401, detail="Active broker session not found")
 
     fyers_symbol = to_fyers_ws_symbol(symbol)
-    try:
-        candles = await service.get_historical_data(fyers_symbol, range_from, range_to, resolution)
-        return {"candles": candles}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    candles = await service.get_historical_data(fyers_symbol, range_from, range_to, resolution)
+    return {"candles": candles}
 
 
 @router.websocket("/ws")
@@ -154,13 +144,13 @@ async def market_ws(websocket: WebSocket, token: str = Query(...)) -> None:
             if msg.get("action") == "subscribe":
                 subscribed.update(fyers_symbols)
                 await asyncio.to_thread(stream.subscribe, fyers_symbols)
-                if service is not None and hasattr(service, "get_quotes"):
+                if service is not None:
                     try:
                         quotes = await service.get_quotes(symbols)
                         for q in quotes:
                             queue.put_nowait(q)
                     except Exception:
-                        pass
+                        logger.exception("Failed to seed quotes after subscribe for %s", symbols)
             elif msg.get("action") == "unsubscribe":
                 subscribed.difference_update(fyers_symbols)
                 await asyncio.to_thread(stream.unsubscribe, fyers_symbols)
@@ -182,14 +172,14 @@ async def market_ws(websocket: WebSocket, token: str = Query(...)) -> None:
         even if the live Fyers websocket tick stream isn't flowing."""
         while True:
             await asyncio.sleep(1.0)
-            if subscribed and service is not None and hasattr(service, "get_quotes"):
+            if subscribed and service is not None:
+                sym_list = [from_fyers_ws_symbol(s) for s in list(subscribed)]
                 try:
-                    sym_list = [from_fyers_ws_symbol(s) for s in list(subscribed)]
                     quotes = await service.get_quotes(sym_list)
                     for q in quotes:
                         queue.put_nowait(q)
                 except Exception:
-                    pass
+                    logger.exception("Failed to poll quotes for %s", sym_list)
 
     try:
         await asyncio.gather(reader(), writer(), poller())

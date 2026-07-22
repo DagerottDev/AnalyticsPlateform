@@ -1,5 +1,6 @@
 import { Instrument } from "@/types/market";
 import { calculateOptionPrice, calculateGreeks, Greeks } from "./greeks";
+import { timeToExpiry, DEFAULT_RISK_FREE_RATE } from "./optionMath";
 
 export interface StrategyLeg {
   id: string;
@@ -31,17 +32,13 @@ export interface StrategyMetrics {
  * different expiries) price correctly instead of sharing one strategy-wide T.
  */
 function deriveLegT(leg: StrategyLeg, fallbackT: number): number {
-  if (!leg.instrument?.expiry) return fallbackT;
-  const expDate = new Date(leg.instrument.expiry);
-  expDate.setHours(15, 30, 0, 0); // NSE close
-  const diffDays = (expDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-  return Math.max(diffDays / 365, 0.0001);
+  return leg.instrument?.expiry ? timeToExpiry(leg.instrument.expiry) : fallbackT;
 }
 
 export function calculatePayoffProfile(
   legs: StrategyLeg[],
   spotPrice: number,
-  r: number = 0.10,
+  r: number = DEFAULT_RISK_FREE_RATE,
   T: number = 0.01,
   steps: number = 100
 ): PayoffPoint[] {
@@ -110,7 +107,7 @@ export interface NetGreeks {
   netRho: number;
 }
 
-export function calculateNetGreeks(legs: StrategyLeg[], spotPrice: number, T: number = 0.01, r: number = 0.10): NetGreeks {
+export function calculateNetGreeks(legs: StrategyLeg[], spotPrice: number, T: number = 0.01, r: number = DEFAULT_RISK_FREE_RATE): NetGreeks {
   const netGreeks: NetGreeks = {
     netDelta: 0, netGamma: 0, netTheta: 0, netVega: 0, netRho: 0
   };

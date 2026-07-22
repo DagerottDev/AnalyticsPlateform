@@ -9,19 +9,27 @@ Frontend/backend interface definitions.
 
 ## Authentication
 
+Fyers is the only supported broker, and only one broker session is active at a
+time (see `app/services/session_manager.py`). No passwords are stored —
+authentication is delegated to Fyers' own OAuth/TOTP flows.
+
 ### POST `/auth/login`
-Authenticate with native broker credentials (Fyers or Zerodha). No passwords —
-the broker's own API validates the credentials.
+Authenticate with Fyers via OAuth redirect (`auth_code`) or headless TOTP
+auto-login (`client_id` + `totp_secret` + `pin`) — provide exactly one method.
 
 **Request:**
 ```json
 {
-  "broker_name": "fyers | zerodha (required)",
-  "app_id": "string (Fyers app/client ID, optional)",
-  "api_key": "string (Zerodha API key, optional)",
-  "api_secret": "string (optional, currently unused)",
-  "access_token": "string (broker access token, optional)",
-  "trading_mode": "paper | live (default: paper)"
+  "app_id": "string (Fyers App ID, e.g. 'XXXXXXXXX-100')",
+  "api_secret": "string (Fyers App Secret Key)",
+  "redirect_uri": "string (default: http://127.0.0.1:3000)",
+  "trading_mode": "paper | live (default: paper)",
+
+  "auth_code": "string (OAuth redirect flow)",
+
+  "client_id": "string (Headless TOTP flow, e.g. 'YR02352')",
+  "totp_secret": "string (Headless TOTP flow, Base32)",
+  "pin": "string (Headless TOTP flow, 4-digit)"
 }
 ```
 
@@ -33,7 +41,7 @@ the broker's own API validates the credentials.
   "expires_in": 28800,
   "user": {
     "client_id": "ABC123",
-    "broker_name": "Zerodha",
+    "broker_name": "Fyers",
     "trading_mode": "paper",
     "account_name": "Default",
     "connected_at": "2024-01-01T00:00:00+00:00"
@@ -41,43 +49,15 @@ the broker's own API validates the credentials.
 }
 ```
 
-**Errors:** `400` (unsupported broker), `401` (invalid credentials), `503` (broker API unreachable), `422` (validation)
+**Errors:** `401` (invalid credentials), `503` (broker API unreachable), `422` (validation)
 
 ---
 
-### GET `/auth/me`
-Get current user profile. Requires Bearer token.
-
-**Response (200):**
-```json
-{
-  "client_id": "ABC123",
-  "broker_name": "Zerodha",
-  "trading_mode": "paper",
-  "account_name": "Default",
-  "connected_at": "2024-01-01T00:00:00+00:00"
-}
-```
-
----
-
-### POST `/auth/verify`
-Verify a JWT token.
-
-**Request:**
-```json
-{
-  "token": "eyJhbGci..."
-}
-```
-
-**Response (200):**
-```json
-{
-  "valid": true,
-  "payload": { "sub": "ABC123", "broker": "Zerodha", ... }
-}
-```
+### POST `/auth/auto-login`
+Silent login using Fyers credentials configured server-side (`backend/.env`),
+so the frontend can skip the manual login form when available. No request
+body. Same response shape as `/auth/login`. Returns `503` if no server-side
+credentials are configured.
 
 ---
 
@@ -130,35 +110,65 @@ Sorted list of available expiry dates for a symbol.
 }
 ```
 
+### GET `/market/quotes?symbols=NIFTY,NIFTY24JUL22000CE`
+Live REST price quotes for a comma-separated list of symbols.
+
+**Response (200):**
+```json
+{
+  "quotes": [
+    {
+      "symbol": "NIFTY",
+      "trading_symbol": "NIFTY",
+      "last_price": 22050.5,
+      "volume": 0,
+      "open_interest": 0,
+      "change": 12.3,
+      "change_percent": 0.056,
+      "timestamp": 1721800000
+    }
+  ]
+}
+```
+
+### GET `/market/history?symbol=NIFTY&range_from=2026-07-20&range_to=2026-07-20&resolution=1`
+Real historical OHLCV candles pulled live from the broker (not the DB-backed
+`/historical/ohlcv` below) — used by Replay Mode. `symbol` accepts either a
+bare UI symbol (`NIFTY`) or an already Fyers-qualified trading symbol.
+
+**Response (200):**
+```json
+{
+  "candles": [
+    {
+      "timestamp": "2026-07-20T03:45:00+00:00",
+      "open": 22000.0,
+      "high": 22010.0,
+      "low": 21990.0,
+      "close": 22005.0,
+      "volume": 1000,
+      "open_interest": 0
+    }
+  ]
+}
+```
+
+### WS `/market/ws?token={jwt}`
+Proxies live Fyers ticks to the browser. The JWT is passed as a query param
+since the browser WebSocket API can't set an Authorization header.
+
+Client → server: `{"action": "subscribe" | "unsubscribe", "symbols": [...]}`
+Server → client: `{"type": "tick", "data": {...}}` | `{"type": "info", "message": "..."}`
+
 ---
 
 ## Historical Data
 
 Requires Bearer token.
 
-### POST `/historical/backfill`
-Trigger a background job to backfill OHLCV data for a symbol into the database.
-
-**Request:**
-```json
-{
-  "symbol": "NIFTY24JUL22000CE",
-  "from_date": "2024-07-01",
-  "to_date": "2024-07-05",
-  "resolution": "1"
-}
-```
-
-**Response (200):**
-```json
-{
-  "message": "Backfill job started for NIFTY24JUL22000CE from 2024-07-01 to 2024-07-05",
-  "records_inserted": 0
-}
-```
-
 ### GET `/historical/ohlcv/{symbol}?limit=1000`
-Retrieve stored historical OHLCV candles for a symbol.
+Retrieve stored historical OHLCV candles for a symbol from the database
+(populated separately; see `app/models/market_data.py`).
 
 **Response (200):**
 ```json

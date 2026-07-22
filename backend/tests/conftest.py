@@ -82,7 +82,6 @@ def access_token(valid_token: str) -> str:
 def mock_broker_service() -> AsyncMock:
     """Create a mock broker service that simulates a successful connection."""
     mock = AsyncMock()
-    mock.verify_connection.return_value = True
     mock.get_profile.return_value = AsyncMock(
         client_id="TEST_CLIENT_001",
         broker_name="TestBroker",

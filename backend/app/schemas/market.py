@@ -18,11 +18,6 @@ class ExpiryList(BaseModel):
     expiries: list[str]
 
 
-class StrikeList(BaseModel):
-    """List of available strikes for a given symbol and expiry."""
-    strikes: list[float]
-
-
 class InstrumentResponse(BaseModel):
     """Response containing a list of instruments."""
     instruments: list[Instrument]

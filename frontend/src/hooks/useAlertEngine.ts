@@ -6,6 +6,7 @@ import { useAlertStore, Alert } from "@/stores/alertStore";
 import { useMarketData } from "./useMarketData";
 import { calculateGreeks, calculateImpliedVolatility } from "@/lib/greeks";
 import { getLotSize, calculateContractGEX } from "@/lib/dealerFlow";
+import { timeToExpiry, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
 
 // Helper to evaluate condition safely
 function evaluate(value: number, operator: string, threshold: number): boolean {
@@ -59,14 +60,10 @@ export function useAlertEngine() {
       // Greeks / IV / GEX require underlying spot price
       else if (alert.instrument.strike && alert.instrument.option_type && alert.instrument.expiry) {
         const underlyingTick = getTick(alert.instrument.symbol);
-        const S = underlyingTick?.last_price || (alert.instrument.symbol === "NIFTY" ? 22000 : 48000); // fallback
-        
-        const expDate = new Date(alert.instrument.expiry);
-        expDate.setHours(15, 30, 0, 0);
-        const diffDays = (expDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24);
-        const T = Math.max(diffDays / 365, 0.0001);
+        const S = underlyingTick?.last_price || defaultSpotFallback(alert.instrument.symbol);
 
-        const r = 0.10; // Risk free rate
+        const T = timeToExpiry(alert.instrument.expiry);
+        const r = DEFAULT_RISK_FREE_RATE;
 
         const iv = calculateImpliedVolatility(
           alert.instrument.option_type as "CE" | "PE",

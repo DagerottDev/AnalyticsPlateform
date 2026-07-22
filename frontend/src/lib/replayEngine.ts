@@ -2,20 +2,10 @@ import { useReplayStore } from "@/stores/replayStore";
 import { HistoricalCandle } from "@/lib/market";
 import { Instrument, TickData } from "@/types/market";
 import { calculateOptionPrice } from "./greeks";
+import { timeToExpiry, DEFAULT_RISK_FREE_RATE } from "./optionMath";
 
 let playbackInterval: ReturnType<typeof setTimeout> | null = null;
 let currentStep = 0;
-
-const RISK_FREE_RATE = 0.10;
-
-/** Time-to-expiry (years) for an instrument at a given point in real time. */
-function timeToExpiry(expiry: string | null, atMs: number): number {
-  if (!expiry) return 0.0001;
-  const expDate = new Date(expiry);
-  expDate.setHours(15, 30, 0, 0); // NSE close
-  const diffDays = (expDate.getTime() - atMs) / (1000 * 60 * 60 * 24);
-  return Math.max(diffDays / 365, 0.0001);
-}
 
 /**
  * Builds a real-data replay session: the underlying's ticks come straight
@@ -59,10 +49,10 @@ export function buildReplaySession(
       const type = inst.option_type as "CE" | "PE";
 
       const T = timeToExpiry(inst.expiry, atMs);
-      const price = calculateOptionPrice(type, spot, K, T, RISK_FREE_RATE, volatility);
+      const price = calculateOptionPrice(type, spot, K, T, DEFAULT_RISK_FREE_RATE, volatility);
 
       const T0 = timeToExpiry(inst.expiry, startMs);
-      const baselinePrice = calculateOptionPrice(type, startPrice, K, T0, RISK_FREE_RATE, volatility);
+      const baselinePrice = calculateOptionPrice(type, startPrice, K, T0, DEFAULT_RISK_FREE_RATE, volatility);
       const change = price - baselinePrice;
       const changePercent = baselinePrice > 0 ? (change / baselinePrice) * 100 : 0;
 

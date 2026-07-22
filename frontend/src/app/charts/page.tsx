@@ -31,7 +31,8 @@ export default function ChartsPage() {
   // For Heatmap
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const tradingSymbols = useMemo(() => instruments.map((i) => i.trading_symbol), [instruments]);
-  const { getTick } = useMarketData([...tradingSymbols, symbol]); // Subscribe to options + underlying
+  const allSymbols = useMemo(() => [...tradingSymbols, symbol], [tradingSymbols, symbol]);
+  const { getTick } = useMarketData(allSymbols); // Subscribe to options + underlying
 
   // Load option chain for Heatmap
   useEffect(() => {

@@ -21,38 +21,18 @@ class BrokerService(ABC):
         self.account_name = account_name
 
     @abstractmethod
-    async def verify_connection(self) -> bool:
-        """Verify the connection and credentials."""
-        pass
-
-    @abstractmethod
     async def get_profile(self) -> UserProfile:
         """Retrieve the user profile."""
         pass
 
     @abstractmethod
-    async def get_funds(self) -> dict[str, Any]:
-        """Retrieve available trading funds."""
-        pass
-
-    @abstractmethod
-    async def get_holdings(self) -> list[dict[str, Any]]:
-        """Retrieve portfolio holdings."""
-        pass
-
-    @abstractmethod
-    async def get_positions(self) -> list[dict[str, Any]]:
-        """Retrieve open positions."""
-        pass
-
-    @abstractmethod
-    async def get_orderbook(self) -> list[dict[str, Any]]:
-        """Retrieve the daily order book."""
-        pass
-
-    @abstractmethod
     async def get_instruments(self, symbol: str) -> list[dict[str, Any]]:
         """Retrieve active instruments for a given symbol."""
+        pass
+
+    @abstractmethod
+    async def get_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
+        """Retrieve live REST price quotes for a list of symbols."""
         pass
 
     @abstractmethod

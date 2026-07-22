@@ -174,60 +174,6 @@ async def test_login_rejects_both_auth_methods(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_me_authenticated(
-    client: AsyncClient,
-    auth_headers: dict[str, str],
-) -> None:
-    """GET /me should return user profile when authenticated."""
-    response = await client.get(
-        "/api/v1/auth/me",
-        headers=auth_headers,
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["client_id"] == "TEST_CLIENT_001"
-    assert data["broker_name"] == "TestBroker"
-
-
-@pytest.mark.asyncio
-async def test_get_me_unauthenticated(client: AsyncClient) -> None:
-    """GET /me should return 403 without authentication."""
-    response = await client.get("/api/v1/auth/me")
-    assert response.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_verify_valid_token(
-    client: AsyncClient,
-    valid_token: str,
-) -> None:
-    """Token verification should return valid=True for good tokens."""
-    response = await client.post(
-        "/api/v1/auth/verify",
-        json={"token": valid_token},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["valid"] is True
-    assert data["payload"] is not None
-
-
-@pytest.mark.asyncio
-async def test_verify_invalid_token(client: AsyncClient) -> None:
-    """Token verification should return valid=False for bad tokens."""
-    response = await client.post(
-        "/api/v1/auth/verify",
-        json={"token": "invalid.token.here"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["valid"] is False
-
-
-@pytest.mark.asyncio
 async def test_logout_authenticated(
     client: AsyncClient,
     auth_headers: dict[str, str],

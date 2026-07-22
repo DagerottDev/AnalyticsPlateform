@@ -1,7 +1,6 @@
 """Fyers broker service implementation."""
 
 import asyncio
-import random
 import time
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -9,6 +8,7 @@ from typing import Any, cast
 from fyers_apiv3 import fyersModel
 
 from app.core.exceptions import BrokerAuthError, BrokerConnectionError
+from app.core.retry import compute_backoff_delay
 from app.models.user import TradingMode, UserProfile
 from app.services.broker_base import BrokerService
 from app.services.fyers_market_stream import FyersMarketStreamManager
@@ -110,16 +110,6 @@ class FyersService(BrokerService):
             self._market_stream = FyersMarketStreamManager(self.app_id, self.access_token)
         return self._market_stream
 
-    async def verify_connection(self) -> bool:
-        """Verify the Fyers connection by fetching profile."""
-        try:
-            response = await asyncio.to_thread(self.client.get_profile)
-            if response and response.get('s') == 'ok':
-                return True
-            raise BrokerAuthError(f"Fyers authentication failed: {response}")
-        except Exception as e:
-            raise BrokerConnectionError(f"Cannot connect to Fyers: {e}") from e
-
     async def get_profile(self) -> UserProfile:
         try:
             response = await asyncio.to_thread(self.client.get_profile)
@@ -141,42 +131,6 @@ class FyersService(BrokerService):
             raise BrokerAuthError(f"Failed to get profile: {response}")
         except Exception as e:
             raise BrokerConnectionError(f"Failed to retrieve profile: {e}") from e
-
-    async def get_funds(self) -> dict[str, Any]:
-        try:
-            response = await asyncio.to_thread(self.client.funds)
-            if response and response.get('s') == 'ok':
-                return cast(dict[str, Any], response.get('fund_limit', []))
-            raise BrokerConnectionError(f"Failed to retrieve funds: {response}")
-        except Exception as e:
-            raise BrokerConnectionError(f"Failed to retrieve funds: {e}") from e
-
-    async def get_holdings(self) -> list[dict[str, Any]]:
-        try:
-            response = await asyncio.to_thread(self.client.holdings)
-            if response and response.get('s') == 'ok':
-                return cast(list[dict[str, Any]], response.get('holdings', []))
-            raise BrokerConnectionError(f"Failed to retrieve holdings: {response}")
-        except Exception as e:
-            raise BrokerConnectionError(f"Failed to retrieve holdings: {e}") from e
-
-    async def get_positions(self) -> list[dict[str, Any]]:
-        try:
-            response = await asyncio.to_thread(self.client.positions)
-            if response and response.get('s') == 'ok':
-                return cast(list[dict[str, Any]], response.get('netPositions', []))
-            raise BrokerConnectionError(f"Failed to retrieve positions: {response}")
-        except Exception as e:
-            raise BrokerConnectionError(f"Failed to retrieve positions: {e}") from e
-
-    async def get_orderbook(self) -> list[dict[str, Any]]:
-        try:
-            response = await asyncio.to_thread(self.client.orderbook)
-            if response and response.get('s') == 'ok':
-                return cast(list[dict[str, Any]], response.get('orderBook', []))
-            raise BrokerConnectionError(f"Failed to retrieve orderbook: {response}")
-        except Exception as e:
-            raise BrokerConnectionError(f"Failed to retrieve orderbook: {e}") from e
 
     async def get_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
         """Fetch live quotes for a list of symbols from Fyers REST API."""
@@ -273,7 +227,7 @@ class FyersService(BrokerService):
             is_last_attempt = attempt == self._MAX_FETCH_RETRIES - 1
             if last_response.get("code") not in self._RETRYABLE_CODES or is_last_attempt:
                 break
-            delay = self._RETRY_BASE_DELAY_SECONDS * (2**attempt) + random.uniform(0, 0.5)
+            delay = compute_backoff_delay(attempt, self._RETRY_BASE_DELAY_SECONDS)
             await asyncio.sleep(delay)
         raise BrokerConnectionError(f"Fyers option chain request failed: {last_response}")
 

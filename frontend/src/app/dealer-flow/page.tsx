@@ -6,6 +6,7 @@ import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
 import { calculateGreeks, calculateImpliedVolatility } from "@/lib/greeks";
+import { timeToExpiry, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
 import { 
   getLotSize, 
   calculateContractGEX, 
@@ -30,7 +31,8 @@ export default function DealerFlowPage() {
   
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const tradingSymbols = useMemo(() => instruments.map((i) => i.trading_symbol), [instruments]);
-  const { getTick } = useMarketData([...tradingSymbols, symbol]);
+  const allSymbols = useMemo(() => [...tradingSymbols, symbol], [tradingSymbols, symbol]);
+  const { getTick } = useMarketData(allSymbols);
 
   // Load Contracts
   useEffect(() => {
@@ -58,8 +60,8 @@ export default function DealerFlowPage() {
   }, [symbol]); // Deliberately let it re-run when symbol changes
 
   const underlyingTick = getTick(symbol);
-  const S = underlyingTick?.last_price || (symbol === "NIFTY" ? 22000 : 48000);
-  const r = 0.10;
+  const S = underlyingTick?.last_price || defaultSpotFallback(symbol);
+  const r = DEFAULT_RISK_FREE_RATE;
   const lotSize = getLotSize(symbol);
 
   // Calculate live exposures for the selected expiry
@@ -67,12 +69,8 @@ export default function DealerFlowPage() {
     if (!expiry || instruments.length === 0) return { gex: [], vanna: [], charm: [] };
 
     const currentExpiryInts = instruments.filter(i => i.expiry === expiry && i.strike && i.option_type);
-    
-    // T Calculation
-    const expDate = new Date(expiry);
-    expDate.setHours(15, 30, 0, 0);
-    const diffDays = (expDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24);
-    const T = Math.max(diffDays / 365, 0.0001);
+
+    const T = timeToExpiry(expiry);
 
     const strikeMap = new Map<number, { 
       ceGex: number; peGex: number; 
@@ -125,7 +123,7 @@ export default function DealerFlowPage() {
       charm: charmProfile.sort((a, b) => a.strike - b.strike)
     };
 
-  }, [instruments, expiry, getTick, S, lotSize]);
+  }, [instruments, expiry, getTick, S, lotSize, r]);
 
   // Top level metrics
   const totalCallGex = exposures.gex.reduce((sum, item) => sum + item.callExposure, 0);

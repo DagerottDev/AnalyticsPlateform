@@ -8,14 +8,31 @@ import { useReplayStore } from "@/stores/replayStore";
 export function useMarketData(symbols: string[]) {
   const { user } = useAuth();
   const [ticks, setTicks] = useState<Record<string, MarketTick>>({});
-  
+
   // Replay Interception
   const replayIsActive = useReplayStore(state => state.isActive);
   const replayTicks = useReplayStore(state => state.currentTicks);
-  
+
   // Use ref to avoid re-running effects on symbols change if not necessary,
   // but we do want to resubscribe when symbols change.
   const prevSymbols = useRef<string[]>([]);
+
+  // Stable across effect re-runs (only closes over setTicks, itself stable
+  // from useState) so subscribe/unsubscribe always operate on the same
+  // handler reference — required for the Set<TickHandler>-based bookkeeping
+  // in MarketWebSocketClient to correctly remove a handler on cleanup.
+  const handleTick = useCallback((tick: MarketTick) => {
+    setTicks((prev) => ({
+      ...prev,
+      [tick.trading_symbol]: tick,
+    }));
+  }, []);
+
+  // Callers often pass a freshly-constructed array (e.g. `[...syms, symbol]`)
+  // on every render. Keying the effect off the array's *content* instead of
+  // its reference means the effect only actually re-runs when the symbol set
+  // changes, not on every parent re-render.
+  const symbolsKey = symbols.join(",");
 
   useEffect(() => {
     // If Replay Mode is active, we disconnect/ignore live websocket
@@ -24,13 +41,6 @@ export function useMarketData(symbols: string[]) {
     if (!user?.client_id) return;
 
     const ws = getWebSocket();
-    
-    const handleTick = (tick: MarketTick) => {
-      setTicks((prev) => ({
-        ...prev,
-        [tick.trading_symbol]: tick,
-      }));
-    };
 
     // Unsubscribe from old symbols not in the new list
     const removedSymbols = prevSymbols.current.filter(s => !symbols.includes(s));
@@ -65,7 +75,8 @@ export function useMarketData(symbols: string[]) {
       // Cleanup: unsubscribe from all when component unmounts
       ws.unsubscribeMany(symbols, handleTick);
     };
-  }, [symbols, user, replayIsActive]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- symbolsKey is the intentional stable proxy for `symbols`
+  }, [symbolsKey, user, replayIsActive, handleTick]);
 
   const getTick = useCallback((symbol: string): MarketTick | null => {
     if (replayIsActive) {

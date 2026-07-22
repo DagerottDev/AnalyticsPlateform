@@ -10,6 +10,7 @@
  */
 import { Instrument } from "@/types/market";
 import { StrategyLeg } from "./strategy";
+import { nearestStrikeTo as nearestOf } from "./optionMath";
 
 function uniqueSortedStrikes(instruments: Instrument[], expiry: string): number[] {
   const strikes = new Set<number>();
@@ -43,9 +44,7 @@ function findInstrument(
 }
 
 function nearestStrikeTo(instruments: Instrument[], expiry: string, target: number): number {
-  const strikes = uniqueSortedStrikes(instruments, expiry);
-  if (strikes.length === 0) return target;
-  return strikes.reduce((closest, s) => (Math.abs(s - target) < Math.abs(closest - target) ? s : closest));
+  return nearestOf(uniqueSortedStrikes(instruments, expiry), target);
 }
 
 function makeLeg(instrument: Instrument | null, action: "Buy" | "Sell", quantity: number): StrategyLeg {

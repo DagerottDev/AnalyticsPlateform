@@ -3,6 +3,7 @@
 Creates the FastAPI app with middleware, routers, and lifespan management.
 """
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -11,6 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.config import get_settings
+from app.core.exceptions import register_exception_handlers
+from app.services.session_manager import session_manager
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -22,11 +27,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     settings = get_settings()
     # Startup
-    print(f"🚀 Starting {settings.app_title} v{settings.app_version}")
-    print(f"   Environment: {settings.app_env}")
+    logger.info("Starting %s v%s", settings.app_title, settings.app_version)
+    logger.info("Environment: %s", settings.app_env)
     yield
     # Shutdown
-    print(f"👋 Shutting down {settings.app_title}")
+    await session_manager.clear()
+    logger.info("Shutting down %s", settings.app_title)
 
 
 def create_app() -> FastAPI:
@@ -51,6 +57,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    register_exception_handlers(app)
 
     # Include API router
     app.include_router(api_router, prefix="/api")

@@ -18,6 +18,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { TradingModeToggle } from "@/components/ui/TradingModeToggle";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
@@ -187,11 +188,11 @@ export default function AccountsPage() {
                 value={
                   isEditingName ? (
                     <div className="flex items-center gap-1.5">
-                      <input
+                      <Input
                         type="text"
                         value={nameInput}
                         onChange={(e) => setNameInput(e.target.value)}
-                        className="rounded border border-[var(--color-border-accent)] bg-[var(--color-bg-hover)] px-2 py-0.5 text-xs text-[var(--color-text-bright)] outline-none"
+                        className="w-auto px-2 py-0.5 text-xs"
                         autoFocus
                       />
                       <button
@@ -229,34 +230,7 @@ export default function AccountsPage() {
               <InfoRow
                 icon={isPaperMode ? Shield : Zap}
                 label="Trading Mode"
-                value={
-                  <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-hover)] p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setTradingMode("paper")}
-                      className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-bold transition-all ${
-                        isPaperMode
-                          ? "bg-[var(--color-accent-blue)] text-white shadow-sm"
-                          : "text-[var(--color-text-muted)] hover:text-[var(--color-text-bright)]"
-                      }`}
-                    >
-                      <Shield className="h-3 w-3" />
-                      Paper Mode
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTradingMode("live")}
-                      className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-bold transition-all ${
-                        !isPaperMode
-                          ? "bg-[var(--color-status-bad)] text-white shadow-sm"
-                          : "text-[var(--color-text-muted)] hover:text-[var(--color-text-bright)]"
-                      }`}
-                    >
-                      <Zap className="h-3 w-3" />
-                      Live Market
-                    </button>
-                  </div>
-                }
+                value={<TradingModeToggle value={tradingMode} onChange={setTradingMode} size="sm" />}
               />
               <InfoRow icon={Activity} label="Connected Since" value={formatDate(user.connected_at)} />
             </div>

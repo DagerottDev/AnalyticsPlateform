@@ -18,6 +18,9 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { TradingModeToggle } from "@/components/ui/TradingModeToggle";
 import { SAVED_LOGIN_KEYS } from "@/lib/auth";
 import type { TradingMode } from "@/types/auth";
 import { cn } from "@/lib/utils";
@@ -146,11 +149,8 @@ export function LoginForm() {
       </div>
 
       {/* Login Card */}
-      <div className="gradient-border rounded-xl">
-        <form
-          onSubmit={handleSubmit}
-          className="glass-strong space-y-5 rounded-xl p-6"
-        >
+      <Card variant="glass">
+        <form onSubmit={handleSubmit} className="space-y-5">
           {/* Tab Selector */}
           <div className="flex gap-2 rounded-lg bg-[var(--color-bg-primary)] p-1">
             <button
@@ -190,13 +190,12 @@ export function LoginForm() {
                   <User className="h-3.5 w-3.5" />
                   Fyers Client ID
                 </label>
-                <input
+                <Input
                   type="text"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
                   placeholder="e.g. YR02352"
                   required
-                  className="focus-ring w-full"
                 />
               </div>
 
@@ -206,13 +205,12 @@ export function LoginForm() {
                   <KeyRound className="h-3.5 w-3.5" />
                   Fyers App ID
                 </label>
-                <input
+                <Input
                   type="text"
                   value={appId}
                   onChange={(e) => setAppId(e.target.value)}
                   placeholder="e.g. XXXXXXXXX-100"
                   required
-                  className="focus-ring w-full"
                 />
               </div>
 
@@ -223,13 +221,13 @@ export function LoginForm() {
                   Fyers Secret Key
                 </label>
                 <div className="relative">
-                  <input
+                  <Input
                     type={showApiSecret ? "text" : "password"}
                     value={apiSecret}
                     onChange={(e) => setApiSecret(e.target.value)}
                     placeholder="Enter Fyers Secret Key"
                     required
-                    className="focus-ring w-full pr-10"
+                    className="pr-10"
                   />
                   <button
                     type="button"
@@ -247,14 +245,14 @@ export function LoginForm() {
                   <Shield className="h-3.5 w-3.5" />
                   Fyers Security PIN
                 </label>
-                <input
+                <Input
                   type="password"
                   maxLength={4}
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
                   placeholder="Enter 4-digit PIN"
                   required
-                  className="focus-ring w-full font-mono text-center tracking-widest text-lg"
+                  className="font-mono text-center tracking-widest text-lg"
                 />
               </div>
 
@@ -265,13 +263,13 @@ export function LoginForm() {
                   TOTP Secret (2FA Key)
                 </label>
                 <div className="relative">
-                  <input
+                  <Input
                     type={showTotpSecret ? "text" : "password"}
                     value={totpSecret}
                     onChange={(e) => setTotpSecret(e.target.value)}
                     placeholder="Enter your 32-character TOTP secret key"
                     required
-                    className="focus-ring w-full pr-10"
+                    className="pr-10"
                   />
                   <button
                     type="button"
@@ -294,13 +292,12 @@ export function LoginForm() {
                   <KeyRound className="h-3.5 w-3.5" />
                   Fyers App ID
                 </label>
-                <input
+                <Input
                   type="text"
                   value={appId}
                   onChange={(e) => setAppId(e.target.value)}
                   placeholder="e.g. XXXXXXXXX-100"
                   required
-                  className="focus-ring w-full"
                 />
               </div>
 
@@ -311,13 +308,13 @@ export function LoginForm() {
                   Fyers Secret Key
                 </label>
                 <div className="relative">
-                  <input
+                  <Input
                     type={showApiSecret ? "text" : "password"}
                     value={apiSecret}
                     onChange={(e) => setApiSecret(e.target.value)}
                     placeholder="Enter Fyers Secret Key"
                     required
-                    className="focus-ring w-full pr-10"
+                    className="pr-10"
                   />
                   <button
                     type="button"
@@ -334,13 +331,12 @@ export function LoginForm() {
                 <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
                   Redirect URI
                 </label>
-                <input
+                <Input
                   type="text"
                   value={redirectUri}
                   onChange={(e) => setRedirectUri(e.target.value)}
                   placeholder="Enter registered Redirect URI"
                   required
-                  className="focus-ring w-full"
                 />
               </div>
 
@@ -376,7 +372,7 @@ export function LoginForm() {
                 <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
                   Paste the redirected URL or the auth_code parameter.
                 </p>
-                <input
+                <Input
                   type="text"
                   value={authCode}
                   onChange={(e) => {
@@ -391,7 +387,7 @@ export function LoginForm() {
                   }}
                   placeholder="Paste Fyers auth_code or Redirect URL"
                   required
-                  className="focus-ring w-full text-xs"
+                  className="text-xs"
                 />
               </div>
             </div>
@@ -403,34 +399,7 @@ export function LoginForm() {
               <Shield className="h-3.5 w-3.5" />
               Trading Mode
             </label>
-            <div className="flex gap-2 rounded-lg bg-[var(--color-bg-primary)] p-1">
-              <button
-                type="button"
-                onClick={() => setTradingMode("paper")}
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-all",
-                  tradingMode === "paper"
-                    ? "bg-[var(--color-accent-blue)] text-white shadow-md"
-                    : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                )}
-              >
-                <ShieldCheck className="h-4 w-4" />
-                Paper
-              </button>
-              <button
-                type="button"
-                onClick={() => setTradingMode("live")}
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-all",
-                  tradingMode === "live"
-                    ? "bg-[var(--color-accent-red)] text-white shadow-md"
-                    : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                )}
-              >
-                <Zap className="h-4 w-4" />
-                Live
-              </button>
-            </div>
+            <TradingModeToggle value={tradingMode} onChange={setTradingMode} />
             {tradingMode === "live" && (
               <p className="flex items-center gap-1.5 text-xs text-[var(--color-accent-orange)]">
                 <AlertCircle className="h-3 w-3" />
@@ -471,7 +440,7 @@ export function LoginForm() {
             )}
           </button>
         </form>
-      </div>
+      </Card>
 
       {/* Footer */}
       <p className="mt-6 text-center text-xs text-[var(--color-text-muted)]">

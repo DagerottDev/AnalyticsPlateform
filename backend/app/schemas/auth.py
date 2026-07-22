@@ -6,7 +6,6 @@ at a time (see app.services.session_manager).
 """
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -93,28 +92,6 @@ class UserProfileResponse(BaseModel):
     trading_mode: str
     account_name: str
     connected_at: datetime
-
-
-class TokenVerifyRequest(BaseModel):
-    """Request body for POST /api/v1/auth/verify.
-
-    Attributes:
-        token: JWT token to verify.
-    """
-
-    token: str = Field(..., min_length=1, description="JWT token to verify")
-
-
-class TokenVerifyResponse(BaseModel):
-    """Response body for token verification.
-
-    Attributes:
-        valid: Whether the token is valid.
-        payload: Decoded token payload (only if valid).
-    """
-
-    valid: bool
-    payload: dict[str, Any] | None = None
 
 
 class AuthErrorResponse(BaseModel):

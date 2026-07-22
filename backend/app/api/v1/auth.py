@@ -15,14 +15,12 @@ from fyers_apiv3 import fyersModel
 
 from app.config import Settings, get_settings
 from app.core.exceptions import BrokerAuthError, BrokerConnectionError
-from app.core.security import create_access_token, decode_token, get_current_user
+from app.core.security import create_access_token, get_current_user
 from app.models.user import TradingMode
 from app.schemas.auth import (
     AuthErrorResponse,
     LoginRequest,
     LoginResponse,
-    TokenVerifyRequest,
-    TokenVerifyResponse,
     UserProfileResponse,
 )
 from app.services.fyers_headless import get_fyers_access_token_headless
@@ -202,61 +200,6 @@ async def auto_login(settings: Settings = Depends(get_settings)) -> LoginRespons
         TradingMode(settings.fyers_trading_mode),
         settings,
     )
-
-
-@router.get(
-    "/me",
-    response_model=UserProfileResponse,
-    summary="Get Current User Profile",
-    description="Returns the authenticated user's profile from the JWT token.",
-    responses={
-        401: {"model": AuthErrorResponse, "description": "Not authenticated"},
-    },
-)
-async def get_me(
-    current_user: dict[str, Any] = Depends(get_current_user),
-) -> UserProfileResponse:
-    """Get the currently authenticated user's profile.
-
-    Args:
-        current_user: Decoded JWT payload from the auth dependency.
-
-    Returns:
-        UserProfileResponse with current user information.
-    """
-    return UserProfileResponse(
-        client_id=current_user["sub"],
-        broker_name=current_user.get("broker", "Fyers"),
-        trading_mode=current_user.get("trading_mode", "paper"),
-        account_name=current_user.get("account_name", ""),
-        connected_at=current_user.get("connected_at", ""),
-    )
-
-
-@router.post(
-    "/verify",
-    response_model=TokenVerifyResponse,
-    summary="Verify Token",
-    description="Verify if a JWT token is valid and not expired.",
-)
-async def verify_token(
-    request: TokenVerifyRequest,
-    settings: Settings = Depends(get_settings),
-) -> TokenVerifyResponse:
-    """Verify the validity of a JWT token.
-
-    Args:
-        request: Token to verify.
-        settings: Application settings.
-
-    Returns:
-        TokenVerifyResponse indicating validity and decoded payload.
-    """
-    try:
-        payload = decode_token(request.token, settings)
-        return TokenVerifyResponse(valid=True, payload=payload)
-    except HTTPException:
-        return TokenVerifyResponse(valid=False, payload=None)
 
 
 @router.post(

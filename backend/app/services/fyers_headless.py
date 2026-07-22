@@ -19,7 +19,6 @@ import asyncio
 import base64
 import hashlib
 import logging
-import random
 from datetime import datetime
 from time import sleep
 from urllib.parse import parse_qs, urlparse
@@ -28,6 +27,7 @@ import pyotp
 import requests  # synchronous — needed for requests.Session() cookie persistence
 
 from app.core.exceptions import BrokerAuthError
+from app.core.retry import compute_backoff_delay
 from app.services.token_cache import broker_token_cache
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ def _post_with_retry(
         ct = res.headers.get("content-type", "")
         if res.status_code != 429 and "application/json" in ct:
             return res
-        delay = (2**attempt) * 3 + random.uniform(0, 2)
+        delay = compute_backoff_delay(attempt, base_delay=3, jitter=2)
         logger.warning(
             f"[Fyers headless] Step '{step}' got HTTP {res.status_code} "
             f"(retry {attempt + 1}/{max_retries}) — backing off {delay:.1f}s"
