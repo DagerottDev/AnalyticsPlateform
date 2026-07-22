@@ -80,16 +80,6 @@ async def test_get_historical_data_error_raises_broker_connection_error() -> Non
         await service.get_historical_data("NSE:BADSYM-EQ", "2023-11-15", "2023-11-15", "1")
 
 
-@pytest.mark.asyncio
-async def test_mock_session_get_historical_data_returns_empty_list() -> None:
-    """Paper/mock sessions never hit the network — get_historical_data short-circuits to []."""
-    service = FyersService(
-        app_id="TESTAPP-100", access_token="mock_token", trading_mode=TradingMode.PAPER
-    )
-    rows = await service.get_historical_data("NSE:NIFTY50-INDEX", "2023-11-15", "2023-11-15", "1")
-    assert rows == []
-
-
 def _expiry_discovery_response(*expiries: tuple[str, str]) -> dict[str, Any]:
     return {
         "s": "ok",
@@ -298,12 +288,3 @@ def test_from_fyers_ws_symbol_passes_through_option_trading_symbols() -> None:
     """An option contract tick's symbol is exactly what the frontend
     subscribed with (its trading_symbol) — it must not be rewritten."""
     assert from_fyers_ws_symbol("NSE:NIFTY2681823200PE") == "NSE:NIFTY2681823200PE"
-
-
-@pytest.mark.asyncio
-async def test_mock_session_get_instruments_returns_empty_list() -> None:
-    """Paper/mock sessions never hit the network — get_instruments short-circuits to []."""
-    service = FyersService(
-        app_id="TESTAPP-100", access_token="mock_token", trading_mode=TradingMode.PAPER
-    )
-    assert await service.get_instruments("NIFTY") == []

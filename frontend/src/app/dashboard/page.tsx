@@ -7,17 +7,21 @@
  * active alerts tracking, and an interactive module grid directing to core analytical pages.
  */
 
+import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { useAlertStore } from "@/stores/alertStore";
+import { useTickerStore } from "@/stores/tickerStore";
 import { useMarketData } from "@/hooks/useMarketData";
 import { formatDate } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { StatTile } from "@/components/ui/StatTile";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Eyebrow } from "@/components/ui/SectionHeader";
+import { AddTickerModal } from "@/components/market/AddTickerModal";
 import {
   BarChart3,
   CandlestickChart,
@@ -29,6 +33,8 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   BellRing,
+  Plus,
+  X,
 } from "lucide-react";
 
 /** Interactive Module Directory Card */
@@ -88,32 +94,45 @@ function ModuleCard({
 
 /** Ticker Card showing real-time price info */
 function IndexTickerCard({
-  label,
+  symbol,
   price,
   change,
   changePercent,
   loading,
+  onRemove,
 }: {
-  label: string;
+  symbol: string;
   price: string;
   change: number;
   changePercent: number;
   loading: boolean;
+  onRemove?: () => void;
 }) {
   const isUp = change >= 0;
   return (
-    <Card>
-      <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-        {label}
-      </p>
+    <Card className="group relative transition-all duration-200 hover:border-[var(--color-border-accent)]">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+          {symbol === "NIFTY" ? "NIFTY 50" : symbol}
+        </p>
+        {onRemove && (
+          <button
+            onClick={onRemove}
+            title="Remove card"
+            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-status-bad)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
       {loading ? (
-        <div className="mt-2 h-8 w-24 animate-pulse rounded bg-[var(--color-bg-hover)]" />
+        <div className="mt-2 h-8 w-28 animate-pulse rounded bg-[var(--color-bg-hover)]" />
       ) : (
-        <div className="mt-2 flex items-baseline justify-between">
+        <div className="mt-2 flex items-baseline justify-between gap-2">
           <p className="tnum text-2xl font-black tracking-tight text-[var(--color-text-bright)]">
             ₹{price}
           </p>
-          <Badge tone={isUp ? "profit" : "loss"} className="tnum px-2 py-0.5 text-xs">
+          <Badge tone={isUp ? "profit" : "loss"} className="tnum shrink-0 px-2 py-0.5 text-xs font-bold">
             {isUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
             {isUp ? "+" : ""}
             {changePercent.toFixed(2)}%
@@ -130,10 +149,9 @@ export default function DashboardPage() {
   const activeAlertsCount = alerts.filter((a) => a.status === "Active").length;
   const triggeredAlertsCount = alerts.filter((a) => a.status === "Triggered").length;
 
-  const { getTick } = useMarketData(["NIFTY", "BANKNIFTY"]);
-  
-  const niftyTick = getTick("NIFTY");
-  const bankNiftyTick = getTick("BANKNIFTY");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const { tickers, removeTicker } = useTickerStore();
+  const { getTick } = useMarketData(tickers);
 
   const formatPrice = (val: number) => {
     return val.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -157,7 +175,7 @@ export default function DashboardPage() {
               <p className="mt-1.5 text-sm text-[var(--color-text-secondary)]">
                 Connected to{" "}
                 <span className="font-bold text-[var(--color-text-primary)]">
-                  {user?.broker_name || "Mock Broker"}
+                  {user?.broker_name || "Fyers"}
                 </span>
               </p>
               {user?.connected_at && (
@@ -173,30 +191,45 @@ export default function DashboardPage() {
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-status-good)]" />
               </span>
               <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                Live Feed Active
+                Live Feed Active (1Hz)
               </span>
             </div>
           </div>
         </Card>
 
-        {/* Real-time Tickers & Quick Stats */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <IndexTickerCard
-            label="NIFTY 50"
-            price={niftyTick ? formatPrice(niftyTick.last_price) : "—"}
-            change={niftyTick ? niftyTick.change : 0}
-            changePercent={niftyTick ? niftyTick.change_percent : 0}
-            loading={!niftyTick}
-          />
-          <IndexTickerCard
-            label="BANKNIFTY"
-            price={bankNiftyTick ? formatPrice(bankNiftyTick.last_price) : "—"}
-            change={bankNiftyTick ? bankNiftyTick.change : 0}
-            changePercent={bankNiftyTick ? bankNiftyTick.change_percent : 0}
-            loading={!bankNiftyTick}
-          />
-          <StatTile label="Active Alerts" value={activeAlertsCount} icon={BellRing} />
-          <StatTile label="Triggered Today" value={triggeredAlertsCount} icon={Zap} tone="loss" />
+        {/* Real-time Tickers Header & Action */}
+        <div>
+          <div className="mb-3 flex items-center justify-between border-b border-[var(--color-border-default)] pb-2">
+            <Eyebrow>Live Market Tickers & Stats</Eyebrow>
+            <Button
+              onClick={() => setIsModalOpen(true)}
+              variant="secondary"
+              size="sm"
+              className="text-xs font-semibold"
+            >
+              <Plus className="mr-1 h-3.5 w-3.5 text-[var(--color-accent-green)]" />
+              Add Ticker Card
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {tickers.map((sym) => {
+              const tick = getTick(sym);
+              return (
+                <IndexTickerCard
+                  key={sym}
+                  symbol={sym}
+                  price={tick ? formatPrice(tick.last_price) : "—"}
+                  change={tick ? tick.change : 0}
+                  changePercent={tick ? tick.change_percent : 0}
+                  loading={!tick}
+                  onRemove={tickers.length > 1 ? () => removeTicker(sym) : undefined}
+                />
+              );
+            })}
+            <StatTile label="Active Alerts" value={activeAlertsCount} icon={BellRing} />
+            <StatTile label="Triggered Today" value={triggeredAlertsCount} icon={Zap} tone="loss" />
+          </div>
         </div>
 
         {/* Interactive Analytics Tools */}
@@ -255,7 +288,11 @@ export default function DashboardPage() {
             />
           </div>
         </div>
+
+        {/* Modal */}
+        <AddTickerModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
       </PageContainer>
     </DashboardLayout>
   );
 }
+

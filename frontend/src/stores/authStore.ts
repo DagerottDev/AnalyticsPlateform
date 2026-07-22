@@ -62,6 +62,18 @@ export const useAuthStore = create<AuthStore>()(
         set({ tradingMode: mode });
       },
 
+      updateAccountName: (name: string) => {
+        set((state) => {
+          if (!state.user) return state;
+          return {
+            user: {
+              ...state.user,
+              account_name: name,
+            },
+          };
+        });
+      },
+
       clearError: () => {
         set({ error: null });
       },
@@ -71,10 +83,24 @@ export const useAuthStore = create<AuthStore>()(
         // localStorage, restore it. Otherwise, silently try a server-side
         // auto-login (backend/.env credentials) before ever showing the
         // login form — falls back to the form if that isn't configured
-        // or fails.
         const state = get();
         if (state.token && state.user) {
           set({ isAuthenticated: true });
+          // Silently trigger auto-login to re-register the backend broker session
+          // in case the server restarted or in-memory session was lost.
+          autoLoginBroker()
+            .then((response) => {
+              set({
+                token: response.access_token,
+                user: response.user,
+                isAuthenticated: true,
+                error: null,
+                tradingMode: response.user.trading_mode,
+              });
+            })
+            .catch(() => {
+              // Non-blocking catch for manual/custom sessions
+            });
           return;
         }
 

@@ -37,13 +37,23 @@ apiClient.interceptors.request.use(
   }
 );
 
+// Endpoints whose failures are deliberately probed-and-ignored by the
+// caller (see authStore.ts's hydrate(), which always wraps this in a
+// non-blocking .catch()) — logging them would just be permanent noise in
+// the failure panel for something that isn't actually a problem.
+const SILENT_FAILURE_URLS = ["/auth/auto-login"];
+
 // Log every failed request so it can be reviewed/copied from the API error
 // log panel, regardless of whether the calling page shows its own inline error.
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    const method = (error?.config?.method || "GET").toUpperCase();
     const url = error?.config?.url || "unknown";
+    if (SILENT_FAILURE_URLS.some((silentUrl) => url.includes(silentUrl))) {
+      return Promise.reject(error);
+    }
+
+    const method = (error?.config?.method || "GET").toUpperCase();
     const status: number | null = error?.response?.status ?? null;
     const message =
       error?.response?.data?.detail || error?.response?.data?.message || error?.message || "Request failed";

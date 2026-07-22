@@ -180,7 +180,7 @@ export function deriveMetricsFromProfile(profile: PayoffPoint[]): StrategyMetric
     rr = parseFloat((finalMaxProfit / Math.abs(finalMaxLoss)).toFixed(2));
   }
 
-  // Mock Win probability based on profitable states
+  // Approximate win probability based on profitable states
   let profitablePoints = 0;
   profile.forEach(p => {
     if (p.profitAtExpiry > 0) profitablePoints++;

@@ -14,27 +14,27 @@ import { LoginForm } from "@/components/auth/LoginForm";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDate } from "@/lib/utils";
 import { getSavedLoginCredentials, hasSavedTotpCredentials, clearSavedLoginCredentials, SAVED_LOGIN_KEYS } from "@/lib/auth";
-import { useSettingsStore } from "@/stores/settingsStore";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Switch } from "@/components/ui/Switch";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import {
   Activity,
+  Check,
   Eye,
   EyeOff,
-  FlaskConical,
   Fingerprint,
   Loader2,
   LogOut,
+  Pencil,
   RefreshCw,
   Shield,
   Tag,
   Users,
+  X,
   Zap,
 } from "lucide-react";
 
@@ -63,9 +63,18 @@ function InfoRow({
 }
 
 export default function AccountsPage() {
-  const { user, tradingMode, logout, isPaperMode, brokerName, login, isLoading, error, clearError } = useAuth();
+  const { user, tradingMode, setTradingMode, updateAccountName, logout, isPaperMode, brokerName, login, isLoading, error, clearError } = useAuth();
   const canRelogin = hasSavedTotpCredentials();
-  const { showMockDataOnFailure, setShowMockDataOnFailure } = useSettingsStore();
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+
+  const handleSaveName = () => {
+    if (nameInput.trim()) {
+      updateAccountName(nameInput.trim());
+    }
+    setIsEditingName(false);
+  };
 
   const [showCredForm, setShowCredForm] = useState(false);
   const [showSecrets, setShowSecrets] = useState(false);
@@ -162,11 +171,82 @@ export default function AccountsPage() {
             {/* Details */}
             <div className="mt-6">
               <InfoRow icon={Fingerprint} label="Client ID" value={user.client_id} mono />
-              <InfoRow icon={Tag} label="Account Name" value={user.account_name || "—"} />
+              <InfoRow
+                icon={Tag}
+                label="Account Name"
+                value={
+                  isEditingName ? (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={nameInput}
+                        onChange={(e) => setNameInput(e.target.value)}
+                        className="rounded border border-[var(--color-border-accent)] bg-[var(--color-bg-hover)] px-2 py-0.5 text-xs text-[var(--color-text-bright)] outline-none"
+                        autoFocus
+                      />
+                      <button
+                        onClick={handleSaveName}
+                        title="Save Account Name"
+                        className="rounded p-1 text-[var(--color-status-good)] hover:bg-[var(--color-bg-hover)]"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setIsEditingName(false)}
+                        title="Cancel"
+                        className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span>{user.account_name || "—"}</span>
+                      <button
+                        onClick={() => {
+                          setNameInput(user.account_name || "");
+                          setIsEditingName(true);
+                        }}
+                        title="Edit Account Name"
+                        className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-bright)] transition-colors"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )
+                }
+              />
               <InfoRow
                 icon={isPaperMode ? Shield : Zap}
                 label="Trading Mode"
-                value={<Badge tone={isPaperMode ? "blue" : "loss"}>{tradingMode}</Badge>}
+                value={
+                  <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-hover)] p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setTradingMode("paper")}
+                      className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-bold transition-all ${
+                        isPaperMode
+                          ? "bg-[var(--color-accent-blue)] text-white shadow-sm"
+                          : "text-[var(--color-text-muted)] hover:text-[var(--color-text-bright)]"
+                      }`}
+                    >
+                      <Shield className="h-3 w-3" />
+                      Paper Mode
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTradingMode("live")}
+                      className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-bold transition-all ${
+                        !isPaperMode
+                          ? "bg-[var(--color-status-bad)] text-white shadow-sm"
+                          : "text-[var(--color-text-muted)] hover:text-[var(--color-text-bright)]"
+                      }`}
+                    >
+                      <Zap className="h-3 w-3" />
+                      Live Market
+                    </button>
+                  </div>
+                }
               />
               <InfoRow icon={Activity} label="Connected Since" value={formatDate(user.connected_at)} />
             </div>
@@ -263,35 +343,6 @@ export default function AccountsPage() {
             <LoginForm />
           </div>
         )}
-
-        <Card variant="panel" className="mt-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-accent-orange)]/10 text-[var(--color-accent-orange)]">
-              <FlaskConical className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-sm font-bold text-[var(--color-text-bright)]">Data Preferences</p>
-              <p className="text-xs text-[var(--color-text-muted)]">Controls how pages behave when a live API request fails</p>
-            </div>
-          </div>
-
-          <div className="mt-5 flex items-start justify-between gap-4 border-t border-[var(--color-border-subtle)] pt-4">
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text-primary)]">Show mock data on API failure</p>
-              <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                Off (default): a failed request shows a real error, so you always know when
-                you&apos;re looking at live data vs. nothing. On: pages like Option Chain and
-                Charts fall back to fabricated placeholder data instead — useful for UI
-                testing, but easy to mistake for a real quote.
-              </p>
-            </div>
-            <Switch
-              checked={showMockDataOnFailure}
-              onCheckedChange={setShowMockDataOnFailure}
-              label="Show mock data on API failure"
-            />
-          </div>
-        </Card>
       </PageContainer>
     </DashboardLayout>
   );

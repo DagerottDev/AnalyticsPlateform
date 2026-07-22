@@ -35,7 +35,7 @@ export function IVSmileChart({ data }: IVSmileChartProps) {
   if (!chartData || chartData.length === 0) {
     return (
       <div className="panel flex h-[300px] items-center justify-center">
-        <EmptyState title="No IV data available. Ensure market is open or mock ticks are flowing." />
+        <EmptyState title="No IV data available. Ensure the market is open and live ticks are flowing." />
       </div>
     );
   }

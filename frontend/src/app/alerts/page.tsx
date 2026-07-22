@@ -55,7 +55,7 @@ export default function AlertsPage() {
     let targetInst: Instrument | undefined;
 
     if (metric === "Price" && !selectedInstrumentToken) {
-      // Find underlying instrument object (mock it if not in list, usually we only get options back)
+      // Find underlying instrument object (synthesize it if not in list, usually we only get options back)
       targetInst = {
         trading_symbol: symbol,
         symbol: symbol,

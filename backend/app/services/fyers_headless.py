@@ -118,9 +118,6 @@ async def get_fyers_access_token_headless(
     Raises:
         BrokerAuthError: on any step failure.
     """
-    if client_id.lower() == "mock" or "mock" in totp_secret.lower():
-        return "mock_fyers_access_token_12345"
-
     cache_key = f"fyers:{client_id}"
     cached_token = broker_token_cache.get(cache_key)
     if cached_token:

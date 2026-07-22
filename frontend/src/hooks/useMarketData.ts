@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getWebSocket } from "@/lib/websocket";
+import { getMarketQuotes } from "@/lib/market";
 import { MarketTick } from "@/types/market";
 import { useAuth } from "@/hooks/useAuth";
 import { useReplayStore } from "@/stores/replayStore";
@@ -33,28 +34,42 @@ export function useMarketData(symbols: string[]) {
 
     // Unsubscribe from old symbols not in the new list
     const removedSymbols = prevSymbols.current.filter(s => !symbols.includes(s));
-    removedSymbols.forEach(s => ws.unsubscribe(s, handleTick));
+    if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
 
-    // Subscribe to new symbols
+    // Subscribe to new symbols (everything, on the first render)
     const addedSymbols = symbols.filter(s => !prevSymbols.current.includes(s));
-    addedSymbols.forEach(s => ws.subscribe(s, handleTick));
+    if (addedSymbols.length > 0) {
+      ws.subscribeMany(addedSymbols, handleTick);
 
-    // Initial subscription if it's the first render
-    if (prevSymbols.current.length === 0) {
-      symbols.forEach(s => ws.subscribe(s, handleTick));
+      // Seed ticks immediately via REST quote snapshot
+      getMarketQuotes(addedSymbols)
+        .then((res) => {
+          if (Array.isArray(res.quotes)) {
+            setTicks((prev) => {
+              const updated = { ...prev };
+              res.quotes.forEach((q: MarketTick) => {
+                if (q.trading_symbol) {
+                  updated[q.trading_symbol] = q;
+                }
+              });
+              return updated;
+            });
+          }
+        })
+        .catch(() => {});
     }
 
     prevSymbols.current = symbols;
 
     return () => {
       // Cleanup: unsubscribe from all when component unmounts
-      symbols.forEach(s => ws.unsubscribe(s, handleTick));
+      ws.unsubscribeMany(symbols, handleTick);
     };
   }, [symbols, user, replayIsActive]);
 
   const getTick = useCallback((symbol: string): MarketTick | null => {
     if (replayIsActive) {
-      // We cast TickData back to MarketTick (they are practically identical in our mock context)
+      // We cast TickData back to MarketTick (they are practically identical in the replay context)
       return (replayTicks[symbol] as MarketTick) || null;
     }
     return ticks[symbol] || null;

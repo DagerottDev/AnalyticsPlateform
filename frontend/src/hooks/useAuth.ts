@@ -59,6 +59,7 @@ export function useAuth() {
     login,
     logout: store.logout,
     setTradingMode: store.setTradingMode as (mode: TradingMode) => void,
+    updateAccountName: store.updateAccountName,
     clearError: store.clearError,
   };
 }

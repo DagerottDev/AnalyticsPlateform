@@ -10,7 +10,6 @@ import { apiClient } from "@/lib/api";
 import { OHLCVData } from "@/lib/indicators";
 import { Instrument } from "@/types/market";
 import { getInstruments } from "@/lib/market";
-import { useSettingsStore } from "@/stores/settingsStore";
 import { formatApiError } from "@/lib/apiError";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -26,8 +25,7 @@ export default function ChartsPage() {
   const [historicalData, setHistoricalData] = useState<OHLCVData[]>([]);
   const [loading, setLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
-  const showMockDataOnFailure = useSettingsStore((s) => s.showMockDataOnFailure);
-  
+
   const [indicators, setIndicators] = useState({ sma: false, ema: false, bbands: false, rsi: false, supertrend: false });
   
   // For Heatmap
@@ -89,8 +87,6 @@ export default function ChartsPage() {
               volume: item.volume
             }));
             setHistoricalData(formatted);
-          } else if (showMockDataOnFailure) {
-             generateMockData();
           } else {
             setHistoricalData([]);
             setChartError("No historical data returned for this symbol.");
@@ -99,47 +95,17 @@ export default function ChartsPage() {
       } catch (err) {
         console.error("Failed to fetch historical data", err);
         if (!isMounted) return;
-        if (showMockDataOnFailure) {
-          generateMockData();
-        } else {
-          setHistoricalData([]);
-          setChartError(formatApiError(err) || "Failed to load historical data.");
-        }
+        setHistoricalData([]);
+        setChartError(formatApiError(err) || "Failed to load historical data.");
       } finally {
         if (isMounted) setLoading(false);
       }
     }
 
-    const generateMockData = () => {
-      // Generate realistic mock data for UI testing
-      const data: OHLCVData[] = [];
-      let currentPrice = symbol === "NIFTY" ? 22000 : 48000;
-      const currentTime = new Date();
-      currentTime.setHours(9, 15, 0, 0); // Market open
-
-      for (let i = 0; i < 375; i++) { // 1 minute candles for a trading day
-        const volatility = currentPrice * 0.001;
-        const open = currentPrice;
-        const close = open + (Math.random() - 0.5) * volatility;
-        const high = Math.max(open, close) + Math.random() * volatility * 0.5;
-        const low = Math.min(open, close) - Math.random() * volatility * 0.5;
-        const volume = Math.floor(Math.random() * 10000) + 1000;
-
-        data.push({
-          time: new Date(currentTime).getTime() / 1000,
-          open, high, low, close, volume
-        });
-
-        currentPrice = close;
-        currentTime.setMinutes(currentTime.getMinutes() + 1);
-      }
-      setHistoricalData(data);
-    };
-
     fetchHistorical();
 
     return () => { isMounted = false; };
-  }, [symbol, showMockDataOnFailure]);
+  }, [symbol]);
 
   // Heatmap Data Preparation
   const heatmapData = useMemo(() => {

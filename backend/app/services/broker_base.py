@@ -12,10 +12,6 @@ from app.models.user import TradingMode, UserProfile
 class BrokerService(ABC):
     """Abstract base class for broker integrations."""
 
-    # Every concrete implementation sets this in __init__ (True for a
-    # paper/mock session that never talks to the network).
-    is_mock: bool
-
     def __init__(
         self,
         trading_mode: TradingMode = TradingMode.PAPER,
@@ -73,9 +69,5 @@ class BrokerService(ABC):
 
     @abstractmethod
     def get_market_stream(self) -> Any:
-        """Return the live tick-stream manager for this session.
-
-        Only meaningful when is_mock is False — callers must check that
-        first, since a mock session has no live connection to stream from.
-        """
+        """Return the live tick-stream manager for this session."""
         pass

@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 
-type Variant = "primary" | "outline" | "ghost" | "danger" | "icon";
+type Variant = "primary" | "secondary" | "outline" | "ghost" | "danger" | "icon";
 type Size = "sm" | "md";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -12,6 +12,8 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const variantClasses: Record<Variant, string> = {
   primary:
     "bg-[var(--color-accent-blue)] text-white hover:bg-[var(--color-accent-blue-hover)]",
+  secondary:
+    "bg-[var(--color-bg-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]",
   outline:
     "border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-accent)] hover:text-[var(--color-text-primary)]",
   ghost:

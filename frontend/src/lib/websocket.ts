@@ -41,20 +41,43 @@ function toWebSocketUrl(httpUrl: string): string {
 }
 
 interface RawFyersTick {
+  // Raw live-tick shape, straight from the Fyers websocket.
   symbol?: string;
   ltp?: number;
   vol_traded_today?: number;
   ch?: number;
   chp?: number;
+  // Already-normalized quote shape, from the backend's REST quotes poller
+  // (a resilience fallback that keeps refreshing via REST regardless of
+  // whether the live Fyers websocket tick stream is actually flowing).
+  trading_symbol?: string;
+  last_price?: number;
+  volume?: number;
+  open_interest?: number;
+  change?: number;
+  change_percent?: number;
+  timestamp?: number;
 }
 
 /**
- * Maps the backend's raw Fyers tick fields onto the app's MarketTick shape.
- * Fyers' live "scrips" (option/equity) tick payload never includes open
- * interest — the upstream SDK strips it before it reaches us — so OI here
- * is always 0. Real OI only comes from the periodic option-chain REST fetch.
+ * Maps either backend tick shape onto the app's MarketTick shape. Fyers'
+ * live "scrips" (option/equity) tick payload never includes open interest
+ * — the upstream SDK strips it before it reaches us — so OI is always 0
+ * for live-tick-shaped messages; the REST quote poller doesn't carry it
+ * either (Fyers' quotes endpoint doesn't return OI), so it's 0 there too.
  */
 function normalizeTick(raw: RawFyersTick): MarketTick | null {
+  if (raw.trading_symbol && typeof raw.last_price === "number") {
+    return {
+      trading_symbol: raw.trading_symbol,
+      last_price: raw.last_price,
+      volume: raw.volume ?? 0,
+      open_interest: raw.open_interest ?? 0,
+      timestamp: raw.timestamp ? raw.timestamp * 1000 : Date.now(),
+      change: raw.change ?? 0,
+      change_percent: raw.change_percent ?? 0,
+    };
+  }
   if (!raw.symbol || typeof raw.ltp !== "number") return null;
   return {
     trading_symbol: raw.symbol,
@@ -113,12 +136,10 @@ class MarketWebSocketClient {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data as string);
-        if (msg.type === "info") {
-          // e.g. "No live Fyers session — ticks unavailable." — not a
-          // connection failure, but important to surface: it means the
-          // backend has no active broker session for this user right now.
-          logWsFailure(String(msg.message ?? "Market stream: no data available"), null);
-          return;
+        if (msg.type === "info" || msg.type === "error" || msg.s === "error") {
+          const messageStr = String(msg.message ?? msg.detail ?? "Market stream error");
+          logWsFailure(messageStr, null, JSON.stringify(msg));
+          if (msg.type !== "tick") return;
         }
         if (msg.type !== "tick") return;
         const tick = normalizeTick(msg.data as RawFyersTick);
@@ -162,21 +183,37 @@ class MarketWebSocketClient {
     }
   }
 
-  subscribe(symbol: string, handler: TickHandler): void {
-    const isNewSymbol = !this.subscribers.has(symbol);
-    if (isNewSymbol) this.subscribers.set(symbol, new Set());
-    this.subscribers.get(symbol)!.add(handler);
-    if (isNewSymbol) this.send({ action: "subscribe", symbols: [symbol] });
+  /**
+   * Subscribes to many symbols in one websocket message. Each individual
+   * subscribe on the backend triggers a real REST call to Fyers to resolve
+   * symbol tokens plus a hardcoded delay, so a page like Option Chain
+   * (40+ strikes) subscribing one-by-one can take tens of seconds and risk
+   * tripping the connection's keepalive-ping timeout — batching keeps it
+   * to one round trip.
+   */
+  subscribeMany(symbols: string[], handler: TickHandler): void {
+    const newSymbols: string[] = [];
+    for (const symbol of symbols) {
+      const isNewSymbol = !this.subscribers.has(symbol);
+      if (isNewSymbol) this.subscribers.set(symbol, new Set());
+      this.subscribers.get(symbol)!.add(handler);
+      if (isNewSymbol) newSymbols.push(symbol);
+    }
+    if (newSymbols.length > 0) this.send({ action: "subscribe", symbols: newSymbols });
   }
 
-  unsubscribe(symbol: string, handler: TickHandler): void {
-    const handlers = this.subscribers.get(symbol);
-    if (!handlers) return;
-    handlers.delete(handler);
-    if (handlers.size === 0) {
-      this.subscribers.delete(symbol);
-      this.send({ action: "unsubscribe", symbols: [symbol] });
+  unsubscribeMany(symbols: string[], handler: TickHandler): void {
+    const dropSymbols: string[] = [];
+    for (const symbol of symbols) {
+      const handlers = this.subscribers.get(symbol);
+      if (!handlers) continue;
+      handlers.delete(handler);
+      if (handlers.size === 0) {
+        this.subscribers.delete(symbol);
+        dropSymbols.push(symbol);
+      }
     }
+    if (dropSymbols.length > 0) this.send({ action: "unsubscribe", symbols: dropSymbols });
   }
 
   destroy(): void {

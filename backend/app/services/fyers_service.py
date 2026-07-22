@@ -17,11 +17,19 @@ from app.services.fyers_market_stream import FyersMarketStreamManager
 # not the plain index names the UI uses.
 _INDEX_SYMBOL_MAP = {
     "NIFTY": "NSE:NIFTY50-INDEX",
+    "NIFTY 50": "NSE:NIFTY50-INDEX",
+    "NIFTY50": "NSE:NIFTY50-INDEX",
     "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
+    "BANK NIFTY": "NSE:NIFTYBANK-INDEX",
     "FINNIFTY": "NSE:FINNIFTY-INDEX",
     "MIDCPNIFTY": "NSE:MIDCPNIFTY-INDEX",
 }
-_REVERSE_INDEX_SYMBOL_MAP = {v: k for k, v in _INDEX_SYMBOL_MAP.items()}
+_REVERSE_INDEX_SYMBOL_MAP = {
+    "NSE:NIFTY50-INDEX": "NIFTY",
+    "NSE:NIFTYBANK-INDEX": "BANKNIFTY",
+    "NSE:FINNIFTY-INDEX": "FINNIFTY",
+    "NSE:MIDCPNIFTY-INDEX": "MIDCPNIFTY",
+}
 
 
 def to_fyers_ws_symbol(symbol: str) -> str:
@@ -82,11 +90,9 @@ class FyersService(BrokerService):
         # Fyers API v3 requires the appType (-100) suffix on the client_id
         self.app_id = app_id if app_id.endswith("-100") else f"{app_id}-100"
         self.access_token = access_token
-        self.is_mock = access_token.startswith("mock")
-        if not self.is_mock:
-            self.client = fyersModel.FyersModel(
-                client_id=self.app_id, token=self.access_token, is_async=False, log_path=""
-            )
+        self.client = fyersModel.FyersModel(
+            client_id=self.app_id, token=self.access_token, is_async=False, log_path=""
+        )
         # symbol -> (fetched_at_monotonic, instruments). The chain and
         # expiries endpoints are both called back-to-back for the same
         # symbol on page load, so this avoids doubling the Fyers API calls.
@@ -99,16 +105,13 @@ class FyersService(BrokerService):
         self._market_stream: FyersMarketStreamManager | None = None
 
     def get_market_stream(self) -> FyersMarketStreamManager:
-        """Lazily create the live tick stream for this session. Callers
-        must not call this for a mock session — check is_mock first."""
+        """Lazily create the live tick stream for this session."""
         if self._market_stream is None:
             self._market_stream = FyersMarketStreamManager(self.app_id, self.access_token)
         return self._market_stream
 
     async def verify_connection(self) -> bool:
         """Verify the Fyers connection by fetching profile."""
-        if self.is_mock:
-            return True
         try:
             response = await asyncio.to_thread(self.client.get_profile)
             if response and response.get('s') == 'ok':
@@ -118,23 +121,21 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Cannot connect to Fyers: {e}") from e
 
     async def get_profile(self) -> UserProfile:
-        if self.is_mock:
-            return UserProfile(
-                client_id="MOCK_FY_ID",
-                broker_name="Fyers",
-                trading_mode=self.trading_mode,
-                account_name=self.account_name,
-                funds=None,
-            )
         try:
             response = await asyncio.to_thread(self.client.get_profile)
             if response and response.get('s') == 'ok':
                 data = response['data']
+                real_name = (
+                    data.get("name")
+                    or data.get("display_name")
+                    or data.get("fy_id")
+                    or self.account_name
+                )
                 return UserProfile(
                     client_id=data.get("fy_id", "unknown"),
                     broker_name="Fyers",
                     trading_mode=self.trading_mode,
-                    account_name=self.account_name,
+                    account_name=real_name,
                     funds=None,
                 )
             raise BrokerAuthError(f"Failed to get profile: {response}")
@@ -142,8 +143,6 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve profile: {e}") from e
 
     async def get_funds(self) -> dict[str, Any]:
-        if self.is_mock:
-            return {"availableBalance": 1000000.0, "realisedPNL": 0.0}
         try:
             response = await asyncio.to_thread(self.client.funds)
             if response and response.get('s') == 'ok':
@@ -153,16 +152,6 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve funds: {e}") from e
 
     async def get_holdings(self) -> list[dict[str, Any]]:
-        if self.is_mock:
-            return [
-                {
-                    "symbol": "NSE:RELIANCE-EQ",
-                    "quantity": 10,
-                    "avgPrice": 2450.0,
-                    "marketVal": 24800.0,
-                    "pl": 300.0,
-                }
-            ]
         try:
             response = await asyncio.to_thread(self.client.holdings)
             if response and response.get('s') == 'ok':
@@ -172,17 +161,6 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve holdings: {e}") from e
 
     async def get_positions(self) -> list[dict[str, Any]]:
-        if self.is_mock:
-            return [
-                {
-                    "symbol": "NSE:NIFTY2671624300CE",
-                    "qty": 50,
-                    "avgPrice": 120.0,
-                    "lastPrice": 135.0,
-                    "realized_pl": 0.0,
-                    "unrealized_pl": 750.0,
-                }
-            ]
         try:
             response = await asyncio.to_thread(self.client.positions)
             if response and response.get('s') == 'ok':
@@ -192,18 +170,6 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve positions: {e}") from e
 
     async def get_orderbook(self) -> list[dict[str, Any]]:
-        if self.is_mock:
-            return [
-                {
-                    "orderId": "123456789",
-                    "symbol": "NSE:RELIANCE-EQ",
-                    "qty": 10,
-                    "price": 2450.0,
-                    "type": "LIMIT",
-                    "side": "BUY",
-                    "status": "FILLED",
-                }
-            ]
         try:
             response = await asyncio.to_thread(self.client.orderbook)
             if response and response.get('s') == 'ok':
@@ -211,6 +177,68 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve orderbook: {response}")
         except Exception as e:
             raise BrokerConnectionError(f"Failed to retrieve orderbook: {e}") from e
+
+    async def get_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
+        """Fetch live quotes for a list of symbols from Fyers REST API."""
+        if not symbols:
+            return []
+
+        fyers_symbols = [self._to_fyers_symbol(s) for s in symbols]
+        try:
+            response = await asyncio.to_thread(
+                self.client.quotes, {"symbols": ",".join(fyers_symbols)}
+            )
+            if not response or response.get("s") != "ok":
+                return []
+
+            quotes_list: list[dict[str, Any]] = []
+            for item in response.get("d", []):
+                val = item.get("v", {})
+                fyers_sym = item.get("n", "") or val.get("symbol", "")
+                cmd = val.get("cmd", {})
+                lp = cmd.get("lp") or val.get("lp") or val.get("last_price")
+                if lp is None or not isinstance(lp, int | float):
+                    continue
+
+                open_price = val.get("open_price") or cmd.get("o") or cmd.get("open_price") or 0.0
+                prev_close = (
+                    val.get("prev_close_price")
+                    or cmd.get("c")
+                    or val.get("c")
+                    or cmd.get("prev_close_price")
+                    or open_price
+                )
+
+                ch = val.get("ch") if val.get("ch") is not None else cmd.get("ch")
+                if (ch is None or ch == 0) and prev_close and prev_close > 0 and lp != prev_close:
+                    ch = round(lp - prev_close, 2)
+                elif ch is None:
+                    ch = 0.0
+
+                chp = val.get("chp") if val.get("chp") is not None else cmd.get("chp")
+                if (chp is None or chp == 0) and prev_close and prev_close > 0 and ch != 0:
+                    chp = round((ch / prev_close) * 100.0, 2)
+                elif chp is None:
+                    chp = 0.0
+
+                ui_symbol = from_fyers_ws_symbol(fyers_sym)
+                quotes_list.append(
+                    {
+                        "symbol": ui_symbol,
+                        "trading_symbol": ui_symbol,
+                        "last_price": float(lp),
+                        "volume": int(cmd.get("v") or cmd.get("volume") or val.get("volume") or 0),
+                        "open_interest": 0,
+                        "change": float(ch),
+                        "change_percent": float(chp),
+                        "timestamp": int(time.time()),
+                    }
+                )
+            return quotes_list
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error("Failed to fetch Fyers quotes: %s", e)
+            return []
 
     @staticmethod
     def _to_fyers_symbol(symbol: str) -> str:
@@ -258,9 +286,6 @@ class FyersService(BrokerService):
         flat instrument list — the shape the frontend expects (all expiries
         merged, filtered client-side by the selected one).
         """
-        if self.is_mock:
-            return []
-
         cache_key = symbol.upper()
         cached = self._instruments_cache.get(cache_key)
         if cached and (time.monotonic() - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
@@ -337,8 +362,6 @@ class FyersService(BrokerService):
             does not return historical open interest, so open_interest is
             always 0 here (a real limitation of the upstream API, not a stub).
         """
-        if self.is_mock:
-            return []
         try:
             response = await asyncio.to_thread(
                 self.client.history,

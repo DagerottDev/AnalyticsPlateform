@@ -74,6 +74,7 @@ export interface AuthActions {
   login: (request: LoginRequest) => Promise<void>;
   logout: () => void;
   setTradingMode: (mode: TradingMode) => void;
+  updateAccountName: (name: string) => void;
   clearError: () => void;
   hydrate: () => Promise<void>;
 }

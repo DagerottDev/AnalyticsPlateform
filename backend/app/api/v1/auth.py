@@ -37,9 +37,6 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 async def _resolve_access_token(request: LoginRequest, settings: Settings) -> str:
     """Resolve a Fyers access_token from whichever auth method was chosen."""
     if request.auth_code:
-        if request.auth_code.lower() == "mock":
-            return "mock_fyers_access_token_12345"
-
         # API v3 requires the -100 appType suffix on the client_id
         client_id = request.app_id if request.app_id.endswith("-100") else f"{request.app_id}-100"
         session = fyersModel.SessionModel(

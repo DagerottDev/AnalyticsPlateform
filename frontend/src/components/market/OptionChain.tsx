@@ -4,7 +4,6 @@ import { useEffect, useState, useMemo } from "react";
 import { Instrument } from "@/types/market";
 import { getInstruments } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
-import { useSettingsStore } from "@/stores/settingsStore";
 import { formatApiError } from "@/lib/apiError";
 import { cn, formatINR } from "@/lib/utils";
 import { Settings2 } from "lucide-react";
@@ -24,7 +23,6 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showGreeks, setShowGreeks] = useState(true);
-  const showMockDataOnFailure = useSettingsStore((s) => s.showMockDataOnFailure);
 
   // Fetch instruments when symbol or expiry changes
   useEffect(() => {
@@ -43,42 +41,8 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
         }
       } catch (err) {
         if (!isMounted) return;
-
-        if (!showMockDataOnFailure) {
-          // Default: surface the real failure instead of silently
-          // rendering fabricated strikes that look like live data.
-          setError(formatApiError(err) || "Failed to load option chain data.");
-          setInstruments([]);
-          return;
-        }
-
-        setError("Failed to load option chain data. Showing mocked data (enabled in Accounts > Data Preferences).");
-        // Create dummy instruments if backend fails
-        const dummy: Instrument[] = [];
-        const baseStrike = symbol === "NIFTY" ? 22000 : 48000;
-        const step = symbol === "NIFTY" ? 50 : 100;
-        for (let i = -10; i <= 10; i++) {
-          const strike = baseStrike + i * step;
-          dummy.push({
-            trading_symbol: `${symbol}${expiry}${strike}CE`,
-            symbol,
-            instrument_type: "OPTIDX",
-            expiry,
-            strike,
-            option_type: "CE",
-            exchange: "NFO",
-          });
-          dummy.push({
-            trading_symbol: `${symbol}${expiry}${strike}PE`,
-            symbol,
-            instrument_type: "OPTIDX",
-            expiry,
-            strike,
-            option_type: "PE",
-            exchange: "NFO",
-          });
-        }
-        setInstruments(dummy);
+        setError(formatApiError(err) || "Failed to load option chain data.");
+        setInstruments([]);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -88,7 +52,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
     return () => {
       isMounted = false;
     };
-  }, [symbol, expiry, showMockDataOnFailure]);
+  }, [symbol, expiry]);
 
   // Extract trading symbols for WebSocket subscription
   // Subscribe to live market data + underlying index
@@ -129,7 +93,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
       .sort((a, b) => a.strike - b.strike);
   }, [instruments]);
 
-  // Find ATM strike (mock calculation: closest to mid-point of available strikes)
+  // Find ATM strike (approximation: closest to mid-point of available strikes)
   const atmStrike = useMemo(() => {
     if (strikes.length === 0) return 0;
     const midIndex = Math.floor(strikes.length / 2);

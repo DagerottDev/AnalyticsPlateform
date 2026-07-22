@@ -60,6 +60,23 @@ async def get_expiries(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.get("/quotes")
+async def get_quotes(
+    symbols: str = Query(..., description="Comma-separated list of symbols"),
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Get live REST price quotes from Fyers for given symbols."""
+    service = session_manager.get_session(current_user["sub"])
+    if not service:
+        raise HTTPException(status_code=401, detail="Active broker session not found")
+
+    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    if hasattr(service, "get_quotes"):
+        quotes = await service.get_quotes(symbol_list)
+        return {"quotes": quotes}
+    return {"quotes": []}
+
+
 @router.websocket("/ws")
 async def market_ws(websocket: WebSocket, token: str = Query(...)) -> None:
     """Proxies live Fyers ticks to the browser.
@@ -80,18 +97,13 @@ async def market_ws(websocket: WebSocket, token: str = Query(...)) -> None:
 
     client_id = payload.get("sub")
     service = session_manager.get_session(client_id) if client_id else None
+
     await websocket.accept()
 
     stream = None
-    if service is not None and not service.is_mock:
+    if service is not None:
         stream = service.get_market_stream()
-        # Must happen on this coroutine's loop, before any subscribe/
-        # unsubscribe call is offloaded to a thread below.
         stream.bind_loop()
-    else:
-        await websocket.send_json(
-            {"type": "info", "message": "No live Fyers session — ticks unavailable."}
-        )
 
     subscribed: set[str] = set()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -116,6 +128,13 @@ async def market_ws(websocket: WebSocket, token: str = Query(...)) -> None:
             if msg.get("action") == "subscribe":
                 subscribed.update(fyers_symbols)
                 await asyncio.to_thread(stream.subscribe, fyers_symbols)
+                if service is not None and hasattr(service, "get_quotes"):
+                    try:
+                        quotes = await service.get_quotes(symbols)
+                        for q in quotes:
+                            queue.put_nowait(q)
+                    except Exception:
+                        pass
             elif msg.get("action") == "unsubscribe":
                 subscribed.difference_update(fyers_symbols)
                 await asyncio.to_thread(stream.unsubscribe, fyers_symbols)
@@ -123,12 +142,31 @@ async def market_ws(websocket: WebSocket, token: str = Query(...)) -> None:
     async def writer() -> None:
         while True:
             message = await queue.get()
-            if "symbol" in message:
+            if "symbol" in message and "ltp" in message:
+                # Raw live-tick shape from the Fyers websocket — translate the
+                # upstream-qualified symbol back to what the frontend
+                # subscribed with. Quote-shaped messages from get_quotes()
+                # (different field names, symbol already de-aliased) pass
+                # through unchanged.
                 message = {**message, "symbol": from_fyers_ws_symbol(message["symbol"])}
             await websocket.send_json({"type": "tick", "data": message})
 
+    async def poller() -> None:
+        """Periodic 1Hz quote polling loop, so ticker values keep updating
+        even if the live Fyers websocket tick stream isn't flowing."""
+        while True:
+            await asyncio.sleep(1.0)
+            if subscribed and service is not None and hasattr(service, "get_quotes"):
+                try:
+                    sym_list = [from_fyers_ws_symbol(s) for s in list(subscribed)]
+                    quotes = await service.get_quotes(sym_list)
+                    for q in quotes:
+                        queue.put_nowait(q)
+                except Exception:
+                    pass
+
     try:
-        await asyncio.gather(reader(), writer())
+        await asyncio.gather(reader(), writer(), poller())
     except WebSocketDisconnect:
         pass
     except Exception:
