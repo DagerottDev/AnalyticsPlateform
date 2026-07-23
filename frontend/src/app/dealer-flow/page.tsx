@@ -17,6 +17,7 @@ import {
   StrikeExposure
 } from "@/lib/dealerFlow";
 import { Instrument } from "@/types/market";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { StatTile } from "@/components/ui/StatTile";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -26,7 +27,7 @@ import { GEXProfileChart } from "@/components/dealer-flow/GEXProfileChart";
 import { ExposureChart } from "@/components/dealer-flow/ExposureChart";
 
 export default function DealerFlowPage() {
-  const [symbol, setSymbol] = useState<string>("NIFTY");
+  const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
   
   const [instruments, setInstruments] = useState<Instrument[]>([]);

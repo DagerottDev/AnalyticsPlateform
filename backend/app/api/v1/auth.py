@@ -25,6 +25,7 @@ from app.schemas.auth import (
     LoginResponse,
     UserProfileResponse,
 )
+from app.services.broker_credentials_store import load_broker_credentials, save_broker_credentials
 from app.services.broker_session_store import clear_broker_session, save_broker_session
 from app.services.fyers_headless import get_fyers_access_token_headless
 from app.services.fyers_service import FyersService
@@ -156,19 +157,39 @@ async def login(
     except BrokerAuthError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
 
-    return await _complete_login(access_token, request.app_id, trading_mode, settings, db)
+    response = await _complete_login(access_token, request.app_id, trading_mode, settings, db)
+
+    if request.totp_secret:
+        # A successful headless TOTP login gives us everything /auto-login
+        # needs to silently re-authenticate later — persist it (encrypted)
+        # as the new source of truth, superseding whatever was saved before.
+        assert request.client_id and request.pin
+        await save_broker_credentials(
+            db,
+            settings,
+            app_id=request.app_id,
+            api_secret=request.api_secret,
+            client_id=request.client_id,
+            totp_secret=request.totp_secret,
+            pin=request.pin,
+            redirect_uri=request.redirect_uri,
+            trading_mode=request.trading_mode,
+        )
+
+    return response
 
 
 @router.post(
     "/auto-login",
     response_model=LoginResponse,
     status_code=status.HTTP_200_OK,
-    summary="Silent auto-login using server-configured credentials",
+    summary="Silent auto-login using previously-saved credentials",
     description=(
-        "Attempts a headless TOTP login using Fyers credentials configured "
-        "server-side (backend/.env) rather than passed in the request body. "
-        "Used by the frontend to skip the manual login form on startup when "
-        "credentials are available. Returns 503 if none are configured."
+        "Attempts a headless TOTP login using the credentials persisted "
+        "from the last successful /login call made with client_id + "
+        "totp_secret + pin (see save_broker_credentials). Used by the "
+        "frontend to skip the manual login form on startup. Returns 503 "
+        "if no TOTP login has ever succeeded."
     ),
     responses={
         401: {"model": AuthErrorResponse, "description": "Invalid credentials"},
@@ -181,29 +202,27 @@ async def login(
 async def auto_login(
     settings: Settings = Depends(get_settings), db: AsyncSession = Depends(get_db)
 ) -> LoginResponse:
-    """Authenticate using server-side Fyers credentials, with no request body.
+    """Authenticate using DB-persisted Fyers TOTP credentials, no request body.
 
     Mirrors the TOTP auto-login branch of /login, but sources credentials
-    from Settings instead of the request, so the frontend can attempt this
-    silently before ever showing the login form.
+    from broker_credentials_store instead of the request, so the frontend
+    can attempt this silently before ever showing the login form.
     """
-    if not settings.has_auto_login_credentials:
+    creds = await load_broker_credentials(db, settings)
+    if creds is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Auto-login is not configured on the server.",
+            detail="Auto-login is not configured — log in once with TOTP credentials first.",
         )
-
-    assert settings.fyers_client_id and settings.fyers_totp_secret and settings.fyers_pin
-    assert settings.fyers_app_id and settings.fyers_api_secret
 
     try:
         access_token = await get_fyers_access_token_headless(
-            client_id=settings.fyers_client_id,
-            totp_secret=settings.fyers_totp_secret,
-            pin=settings.fyers_pin,
-            app_id=settings.fyers_app_id,
-            app_secret=settings.fyers_api_secret,
-            redirect_uri=settings.fyers_redirect_uri,
+            client_id=creds.client_id,
+            totp_secret=creds.totp_secret,
+            pin=creds.pin,
+            app_id=creds.app_id,
+            app_secret=creds.api_secret,
+            redirect_uri=creds.redirect_uri,
             ttl_seconds=settings.broker_token_cache_ttl_seconds,
         )
     except BrokerAuthError as e:
@@ -211,8 +230,8 @@ async def auto_login(
 
     return await _complete_login(
         access_token,
-        settings.fyers_app_id,
-        TradingMode(settings.fyers_trading_mode),
+        creds.app_id,
+        TradingMode(creds.trading_mode),
         settings,
         db,
     )

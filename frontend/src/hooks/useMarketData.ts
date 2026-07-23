@@ -42,16 +42,27 @@ export function useMarketData(symbols: string[]) {
 
     const ws = getWebSocket();
 
-    // Unsubscribe from old symbols not in the new list
-    const removedSymbols = prevSymbols.current.filter(s => !symbols.includes(s));
-    if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
+    // Always (re)subscribe the full current symbol list on the shared
+    // websocket client — it already refcounts symbol->handler membership
+    // internally, so resubscribing a symbol that's already registered is a
+    // harmless no-op (no duplicate wire message). Gating this call behind
+    // an "is this symbol new" check computed from a ref, as a previous
+    // version did, broke under React 18 StrictMode's dev-mode double-invoke
+    // (mount -> cleanup -> mount): the cleanup unsubscribed the handler, but
+    // the ref already reflected the post-subscribe state, so the second
+    // mount's diff saw "nothing added" and never re-registered the handler —
+    // ticks then silently stopped reaching this hook for the rest of the
+    // component's lifetime (a one-time REST seed fetch would still show a
+    // value, making it look like a stale/frozen price rather than a dead
+    // subscription).
+    ws.subscribeMany(symbols, handleTick);
 
-    // Subscribe to new symbols (everything, on the first render)
+    // Seed ticks immediately via REST quote snapshot, but only for symbols
+    // we haven't already seeded — a pure optimization (avoids re-fetching
+    // quotes for a symbol set that hasn't changed), not load-bearing for
+    // correctness like the subscribe call above is.
     const addedSymbols = symbols.filter(s => !prevSymbols.current.includes(s));
     if (addedSymbols.length > 0) {
-      ws.subscribeMany(addedSymbols, handleTick);
-
-      // Seed ticks immediately via REST quote snapshot
       getMarketQuotes(addedSymbols)
         .then((res) => {
           if (Array.isArray(res.quotes)) {
@@ -72,7 +83,6 @@ export function useMarketData(symbols: string[]) {
     prevSymbols.current = symbols;
 
     return () => {
-      // Cleanup: unsubscribe from all when component unmounts
       ws.unsubscribeMany(symbols, handleTick);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- symbolsKey is the intentional stable proxy for `symbols`

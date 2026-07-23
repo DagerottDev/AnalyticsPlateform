@@ -9,6 +9,7 @@ import { getHistoricalVolatility, getVolatilityMetrics, VolatilityHistoricalData
 import { calculateImpliedVolatility } from "@/lib/greeks";
 import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
 import { Instrument } from "@/types/market";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -28,7 +29,7 @@ const TABS = [
 
 export default function VolatilityPage() {
   const [activeTab, setActiveTab] = useState<string>("live");
-  const [symbol, setSymbol] = useState<string>("NIFTY");
+  const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
   
   // Historical State

@@ -54,10 +54,11 @@ auto-login (`client_id` + `totp_secret` + `pin`) — provide exactly one method.
 ---
 
 ### POST `/auth/auto-login`
-Silent login using Fyers credentials configured server-side (`backend/.env`),
-so the frontend can skip the manual login form when available. No request
-body. Same response shape as `/auth/login`. Returns `503` if no server-side
-credentials are configured.
+Silent login using the TOTP credentials saved (encrypted, in the
+`broker_credentials` DB table) from the last successful `/auth/login` call
+made with `client_id` + `totp_secret` + `pin`, so the frontend can skip the
+manual login form on subsequent startups. No request body. Same response
+shape as `/auth/login`. Returns `503` if no TOTP login has ever succeeded.
 
 ---
 

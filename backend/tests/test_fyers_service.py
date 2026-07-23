@@ -125,6 +125,37 @@ async def test_get_instruments_parses_option_chain_across_expiries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_instruments_parses_oi_change_fields() -> None:
+    """oi/oich/oichp from Fyers' optionchain rows are passed through so the
+    frontend can classify long/short buildup; missing on the index row is fine."""
+    service = _make_service()
+    near_expiry = ("10-Jul-2025", "1752105000")
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            _expiry_discovery_response(near_expiry),
+            _chain_response(
+                {"symbol": "NSE:NIFTY50-INDEX", "option_type": "", "strike_price": -1},
+                {
+                    "symbol": "NSE:NIFTY25071017500CE",
+                    "option_type": "CE",
+                    "strike_price": 17500,
+                    "oi": 125000,
+                    "oich": 15000,
+                    "oichp": 13.6,
+                },
+            ),
+        ]
+    )
+
+    instruments = await service.get_instruments("NIFTY")
+
+    ce = next(i for i in instruments if i["option_type"] == "CE")
+    assert ce["oi"] == 125000
+    assert ce["oi_change"] == 15000
+    assert ce["oi_change_percent"] == 13.6
+
+
+@pytest.mark.asyncio
 async def test_get_instruments_maps_equity_symbols_to_nse_eq() -> None:
     """Non-index symbols are treated as NSE equities, not exchange indices."""
     service = _make_service()

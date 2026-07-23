@@ -1,21 +1,28 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { toast } from "sonner";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useMarketData } from "@/hooks/useMarketData";
-import { getInstruments } from "@/lib/market";
+import { getInstruments, getMarginRequirement, MarginResult } from "@/lib/market";
 import { calculateImpliedVolatility } from "@/lib/greeks";
 import { timeToExpiry, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
-import { 
-  StrategyLeg, 
-  calculatePayoffProfile, 
-  calculateNetGreeks, 
-  deriveMetricsFromProfile 
+import {
+  StrategyLeg,
+  calculatePayoffProfile,
+  calculateNetGreeks,
+  deriveMetricsFromProfile
 } from "@/lib/strategy";
 import { getLotSize } from "@/lib/dealerFlow";
 import { Instrument } from "@/types/market";
+import { usePositionStore } from "@/stores/positionStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { InstrumentSelector } from "@/components/market/InstrumentSelector";
+import { Briefcase, Calculator, Loader2 } from "lucide-react";
 
 // Components
 import { LegManager } from "@/components/strategy-builder/LegManager";
@@ -23,7 +30,9 @@ import { PayoffChart } from "@/components/strategy-builder/PayoffChart";
 import { StrategyMetrics } from "@/components/strategy-builder/StrategyMetrics";
 
 export default function StrategyBuilderPage() {
-  const [symbol, setSymbol] = useState<string>("NIFTY");
+  const addPosition = usePositionStore((state) => state.addPosition);
+
+  const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [legs, setLegs] = useState<StrategyLeg[]>([]);
@@ -134,13 +143,86 @@ export default function StrategyBuilderPage() {
     }, 0);
   }, [legs]);
 
+  const validLegs = legs.filter(l => l.instrument !== null);
+
+  const [marginResult, setMarginResult] = useState<MarginResult | null>(null);
+  const [marginLoading, setMarginLoading] = useState(false);
+  const [marginError, setMarginError] = useState<string | null>(null);
+
+  // Reset any previously-fetched margin once the legs change — it's a
+  // point-in-time broker quote, not something that should keep being shown
+  // (and implicitly trusted) against a strategy that's since been edited.
+  useEffect(() => {
+    setMarginResult(null);
+    setMarginError(null);
+  }, [legs]);
+
+  const handleCheckMargin = async () => {
+    if (validLegs.length === 0) return;
+    setMarginLoading(true);
+    setMarginError(null);
+    try {
+      const result = await getMarginRequirement(
+        validLegs.map(leg => ({
+          symbol: leg.instrument!.trading_symbol,
+          quantity: leg.quantity,
+          side: leg.action,
+        }))
+      );
+      setMarginResult(result);
+    } catch {
+      setMarginError("Failed to fetch margin — check your broker session.");
+    } finally {
+      setMarginLoading(false);
+    }
+  };
+
+  const handleSaveAsPosition = () => {
+    if (validLegs.length === 0) return;
+
+    addPosition({
+      symbol,
+      label: `${symbol} • ${validLegs.length} leg${validLegs.length > 1 ? "s" : ""}`,
+      legs: validLegs,
+      entryCost: totalCost,
+    });
+
+    toast.success("Position saved", {
+      description: "Track it live on the Positions page.",
+    });
+  };
+
   return (
     <DashboardLayout>
       <PageContainer>
-        <SectionHeader
-          title="Strategy Builder"
-          description="Construct multi-leg strategies and visualize risk profiles."
-        />
+        <div className="flex items-center justify-between gap-4">
+          <SectionHeader
+            title="Strategy Builder"
+            description="Construct multi-leg strategies and visualize risk profiles."
+          />
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={handleCheckMargin}
+              disabled={validLegs.length === 0 || marginLoading}
+            >
+              {marginLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
+              Check Margin
+            </Button>
+            <Button onClick={handleSaveAsPosition} disabled={validLegs.length === 0}>
+              <Briefcase className="h-4 w-4" /> Save as Position
+            </Button>
+          </div>
+        </div>
+
+        <Card className="p-3">
+          <InstrumentSelector
+            symbol={symbol}
+            onSymbolChange={setSymbol}
+            expiry={expiry}
+            onExpiryChange={setExpiry}
+          />
+        </Card>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
 
@@ -149,16 +231,50 @@ export default function StrategyBuilderPage() {
               legs={legs}
               onChange={setLegs}
               availableInstruments={instruments}
-              underlyingSymbol={symbol}
-              onSymbolChange={setSymbol}
               currentExpiry={expiry}
-              onExpiryChange={setExpiry}
               lotSize={lotSize}
               spot={spotPrice}
             />
           </div>
 
           <div className="flex flex-col gap-6 lg:col-span-2">
+            {(marginResult || marginError) && (
+              <Card className="flex flex-col gap-2">
+                <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+                  <Calculator className="h-3.5 w-3.5" /> Margin Required
+                </h3>
+                {marginError ? (
+                  <p className="text-sm text-[var(--color-loss)]">{marginError}</p>
+                ) : marginResult ? (
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    <div>
+                      <div className="text-xs font-medium text-[var(--color-text-secondary)]">Total Margin</div>
+                      <div className="tnum mt-1 text-lg font-bold text-[var(--color-text-bright)]">
+                        {marginResult.total_margin !== null ? marginResult.total_margin.toFixed(2) : "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-[var(--color-text-secondary)]">Span</div>
+                      <div className="tnum mt-1 text-sm font-semibold text-[var(--color-text-primary)]">
+                        {marginResult.span_margin !== null ? marginResult.span_margin.toFixed(2) : "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-[var(--color-text-secondary)]">Exposure</div>
+                      <div className="tnum mt-1 text-sm font-semibold text-[var(--color-text-primary)]">
+                        {marginResult.exposure_margin !== null ? marginResult.exposure_margin.toFixed(2) : "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-[var(--color-text-secondary)]">Available</div>
+                      <div className="tnum mt-1 text-sm font-semibold text-[var(--color-text-primary)]">
+                        {marginResult.available_margin !== null ? marginResult.available_margin.toFixed(2) : "—"}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </Card>
+            )}
             <StrategyMetrics metrics={profileMetrics} netGreeks={netGreeks} cost={totalCost} />
             <PayoffChart data={payoffData} currentSpot={spotPrice} />
           </div>

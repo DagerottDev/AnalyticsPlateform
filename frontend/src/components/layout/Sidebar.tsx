@@ -18,6 +18,8 @@ import {
   History,
   LayoutDashboard,
   LineChart,
+  Milestone,
+  Settings,
   Waves,
   Zap,
 } from "lucide-react";
@@ -57,9 +59,16 @@ const navigation: NavGroup[] = [
     title: "Trading",
     items: [
       { icon: Zap, label: "Alerts", href: "/alerts" },
-      { icon: Briefcase, label: "Positions", href: "/positions", disabled: true },
+      { icon: Briefcase, label: "Positions", href: "/positions" },
       { icon: History, label: "Replay Mode", href: "/replay" },
       { icon: Blocks, label: "Strategy Builder", href: "/strategy" },
+    ],
+  },
+  {
+    title: "Product",
+    items: [
+      { icon: Milestone, label: "Roadmap", href: "/roadmap" },
+      { icon: Settings, label: "Settings", href: "/settings" },
     ],
   },
 ];

@@ -33,15 +33,8 @@ export function Header() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
 
-  const alerts = useAlertStore((state) => state.alerts);
-  const clearTriggered = useAlertStore((state) => state.clearTriggered);
-  const triggeredAlerts = alerts
-    .filter((a) => a.status === "Triggered")
-    .sort(
-      (a, b) =>
-        new Date(b.triggeredAt ?? b.createdAt).getTime() -
-        new Date(a.triggeredAt ?? a.createdAt).getTime()
-    );
+  const triggerLog = useAlertStore((state) => state.triggerLog);
+  const clearTriggerLog = useAlertStore((state) => state.clearTriggerLog);
 
   return (
     <header className="glass-strong sticky top-0 z-50 flex h-14 items-center justify-between border-b border-[var(--color-border-default)] px-4">
@@ -113,9 +106,9 @@ export function Header() {
             className="relative"
           >
             <Bell className="h-4 w-4" />
-            {triggeredAlerts.length > 0 && (
+            {triggerLog.length > 0 && (
               <span className="absolute right-1 top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[var(--color-accent-red)] px-0.5 text-[9px] font-bold text-white">
-                {triggeredAlerts.length > 9 ? "9+" : triggeredAlerts.length}
+                {triggerLog.length > 9 ? "9+" : triggerLog.length}
               </span>
             )}
           </Button>
@@ -126,9 +119,9 @@ export function Header() {
                 <p className="text-xs font-semibold text-[var(--color-text-bright)]">
                   Notifications
                 </p>
-                {triggeredAlerts.length > 0 && (
+                {triggerLog.length > 0 && (
                   <button
-                    onClick={clearTriggered}
+                    onClick={clearTriggerLog}
                     className="text-[10px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
                   >
                     Clear all
@@ -137,7 +130,7 @@ export function Header() {
               </div>
 
               <div className="max-h-72 overflow-y-auto">
-                {triggeredAlerts.length === 0 ? (
+                {triggerLog.length === 0 ? (
                   <div className="flex flex-col items-center gap-2 px-3 py-6 text-center">
                     <BellOff className="h-5 w-5 text-[var(--color-text-muted)]" />
                     <p className="text-xs text-[var(--color-text-muted)]">
@@ -145,17 +138,17 @@ export function Header() {
                     </p>
                   </div>
                 ) : (
-                  triggeredAlerts.map((alert) => (
+                  triggerLog.map((event) => (
                     <div
-                      key={alert.id}
+                      key={event.id}
                       className="border-b border-[var(--color-border-subtle)] px-3 py-2 last:border-0"
                     >
                       <p className="text-xs font-medium text-[var(--color-text-primary)]">
-                        {alert.instrument.trading_symbol} {alert.metric} {alert.operator}{" "}
-                        {alert.threshold}
+                        {event.tradingSymbol} {event.metric} {event.operator}{" "}
+                        {event.threshold}
                       </p>
                       <p className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
-                        Triggered {formatDate(alert.triggeredAt ?? alert.createdAt)}
+                        Triggered {formatDate(event.triggeredAt)}
                       </p>
                     </div>
                   ))

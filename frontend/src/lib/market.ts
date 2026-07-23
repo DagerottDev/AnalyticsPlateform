@@ -19,6 +19,29 @@ export async function getMarketQuotes(symbols: string[]): Promise<{ quotes: Mark
   return response.data;
 }
 
+export interface MarginOrderLeg {
+  symbol: string;
+  quantity: number;
+  side: "Buy" | "Sell";
+  product_type?: string;
+}
+
+export interface MarginResult {
+  total_margin: number | null;
+  available_margin: number | null;
+  span_margin: number | null;
+  exposure_margin: number | null;
+  premium: number | null;
+  raw: Record<string, unknown>;
+}
+
+/** Margin required to take a prospective basket of positions — hits Fyers'
+ * live margin calculator, no order is placed. */
+export async function getMarginRequirement(legs: MarginOrderLeg[]): Promise<MarginResult> {
+  const response = await apiClient.post<MarginResult>("/market/margin", { legs });
+  return response.data;
+}
+
 /** Mirrors the backend's actual response shape (backend/app/services/fyers_service.py get_historical_data). */
 export interface HistoricalCandle {
   timestamp: string;

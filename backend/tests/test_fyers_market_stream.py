@@ -8,8 +8,12 @@ body — not just around manager construction.
 """
 
 import asyncio
+import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -177,3 +181,99 @@ async def test_close_tears_down_socket_and_clears_state() -> None:
         mock_socket.close_connection.assert_called_once()
         assert manager._refcounts == {}
         assert manager._listeners == set()
+
+
+def test_importing_module_strips_stray_proxy_env_vars() -> None:
+    """Regression test: a leftover HTTP_PROXY/HTTPS_PROXY in the environment
+    (e.g. from an unrelated mitmproxy debugging session) makes
+    websocket-client route the Fyers connection through that proxy instead
+    of straight to Fyers. If it isn't actually listening, the handshake
+    fails with the exact same "unable to get local issuer certificate"
+    error as a missing CA bundle — very easy to misdiagnose. Verified via a
+    subprocess so the module is freshly imported (its env cleanup is
+    module-import-time, and this test suite has already imported it once)."""
+    backend_dir = Path(__file__).resolve().parent.parent
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os; import app.services.fyers_market_stream; "
+            "print(os.environ.get('HTTP_PROXY'), os.environ.get('https_proxy'))",
+        ],
+        env={**os.environ, "HTTP_PROXY": "http://127.0.0.1:8080", "https_proxy": "http://127.0.0.1:8080"},
+        capture_output=True,
+        text=True,
+        cwd=str(backend_dir),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "None None"
+
+
+@pytest.mark.asyncio
+async def test_shared_quote_poll_fetches_and_dispatches_to_all_listeners() -> None:
+    """One shared poll loop per session, not one per websocket connection —
+    a single quote_fetcher call result should reach every registered
+    listener (i.e. every connected browser tab), and the fetcher is called
+    with the union of subscribed symbols."""
+    quote_fetcher = AsyncMock(return_value=[{"trading_symbol": "NIFTY", "last_price": 100.0}])
+    with patch("app.services.fyers_market_stream.data_ws.FyersDataSocket") as mock_cls:
+        mock_cls.return_value = MagicMock()
+        manager = FyersMarketStreamManager(
+            app_id="TESTAPP-100",
+            access_token="fake-token",
+            quote_fetcher=quote_fetcher,
+            quote_poll_interval_seconds=0.01,
+        )
+        manager.bind_loop()
+
+        received_a: list[dict[str, Any]] = []
+        received_b: list[dict[str, Any]] = []
+        manager.add_listener(received_a.append)
+        manager.add_listener(received_b.append)
+
+        await asyncio.to_thread(manager.subscribe, ["NSE:NIFTY50-INDEX"])
+        await asyncio.sleep(0.05)
+
+        manager.close()
+
+    quote_fetcher.assert_called_with(["NSE:NIFTY50-INDEX"])
+    assert received_a and received_a[0]["trading_symbol"] == "NIFTY"
+    assert received_b and received_b[0]["trading_symbol"] == "NIFTY"
+
+
+@pytest.mark.asyncio
+async def test_shared_quote_poll_skips_fetch_when_nothing_subscribed() -> None:
+    """No point hitting Fyers on a timer if nobody's actually subscribed to
+    anything — keeps the loop from generating pointless API load."""
+    quote_fetcher = AsyncMock(return_value=[])
+    manager = FyersMarketStreamManager(
+        app_id="TESTAPP-100",
+        access_token="fake-token",
+        quote_fetcher=quote_fetcher,
+        quote_poll_interval_seconds=0.01,
+    )
+    manager.bind_loop()
+
+    await asyncio.sleep(0.05)
+    manager.close()
+
+    quote_fetcher.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_close_cancels_the_shared_quote_poll_task() -> None:
+    quote_fetcher = AsyncMock(return_value=[])
+    manager = FyersMarketStreamManager(
+        app_id="TESTAPP-100",
+        access_token="fake-token",
+        quote_fetcher=quote_fetcher,
+        quote_poll_interval_seconds=0.01,
+    )
+    manager.bind_loop()
+    task = manager._quote_poll_task
+    assert task is not None
+
+    manager.close()
+    await asyncio.sleep(0)
+
+    assert task.cancelled() or task.done()

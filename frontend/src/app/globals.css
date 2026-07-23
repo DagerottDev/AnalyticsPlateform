@@ -92,9 +92,68 @@
   --duration-slow: 400ms;
 }
 
+/* ─── Light Theme Overrides ─────────────────────────────────
+   Same token names as @theme above, redefined for :root.light —
+   .light on <html> beats the :root-scoped @theme values since it's a
+   higher-specificity selector on the same element. Deepened a few accent
+   hues (cyan/orange/purple/yellow/status-warning) here that read fine on
+   dark but wash out against a white surface. */
+:root.light {
+  --color-bg-primary: #f4f6f9;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #eceff3;
+  --color-bg-elevated: #ffffff;
+  --color-bg-surface: #ffffff;
+  --color-bg-hover: #eef1f5;
+
+  --color-border-default: #dfe3ea;
+  --color-border-subtle: #eaecf1;
+  --color-border-accent: #c7ccd6;
+
+  --color-text-primary: #1f2430;
+  --color-text-secondary: #5b6270;
+  --color-text-muted: #8a909c;
+  --color-text-bright: #0b0d12;
+
+  --color-accent-blue: #2962ff;
+  --color-accent-blue-hover: #1e53e5;
+  --color-accent-cyan: #0089a0;
+  --color-accent-green: #1f8a7e;
+  --color-accent-red: #dd3d3d;
+  --color-accent-orange: #d97600;
+  --color-accent-purple: #9536aa;
+  --color-accent-yellow: #b89400;
+
+  --color-profit: #1f8a7e;
+  --color-loss: #dd3d3d;
+
+  --color-status-good: #0d8f0d;
+  --color-status-warning: #a66a09;
+  --color-status-serious: #c1552a;
+  --color-status-critical: #c23434;
+
+  --color-bg-input: #ffffff;
+
+  --gradient-surface: linear-gradient(180deg, #ffffff 0%, #f4f6f9 100%);
+}
+
+:root.light .glass {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(223, 227, 234, 0.9);
+}
+
+:root.light .glass-strong {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(223, 227, 234, 0.95);
+}
+
 /* ─── Base ──────────────────────────────────────────────── */
-html {
+:root.dark {
   color-scheme: dark;
+}
+
+:root.light {
+  color-scheme: light;
 }
 
 body {
@@ -266,27 +325,11 @@ body {
   outline-offset: 2px;
 }
 
-/* ─── TradingView-style input ───────────────────────────── */
-input[type="text"],
-input[type="password"],
-input[type="url"] {
-  background-color: var(--color-bg-surface);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  padding: 10px 14px;
-  font-size: 14px;
-  transition: all var(--duration-fast) var(--ease-smooth);
-}
-
-input[type="text"]:focus,
-input[type="password"]:focus,
-input[type="url"]:focus {
-  border-color: var(--color-accent-blue);
-  box-shadow: 0 0 0 3px rgba(41, 98, 255, 0.15);
-  outline: none;
-}
-
-input::placeholder {
-  color: var(--color-text-muted);
-}
+/* Note: text/password/url inputs are NOT styled here — every usage (the
+ * shared Input component, and the few ad-hoc ones) fully specifies its own
+ * Tailwind classes. A global unlayered rule here would beat ALL of them
+ * regardless of specificity, since Tailwind v4's utilities live inside
+ * @layer and unlayered rules always win over layered ones — this used to
+ * silently override every Input's background/padding/border app-wide,
+ * which is exactly what broke icon-padding overrides like the search icon
+ * in InstrumentSelector. */

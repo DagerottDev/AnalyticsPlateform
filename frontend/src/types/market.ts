@@ -6,6 +6,10 @@ export interface Instrument {
   strike: number | null;
   option_type: "CE" | "PE" | null;
   exchange: string;
+  /** Snapshotted from the option-chain fetch (~30s refresh), not live-ticking. */
+  oi?: number | null;
+  oi_change?: number | null;
+  oi_change_percent?: number | null;
 }
 
 export interface ExpiryList {

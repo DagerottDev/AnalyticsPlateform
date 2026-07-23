@@ -43,11 +43,16 @@ class BrokerService(ABC):
         pass
 
     @abstractmethod
+    async def get_margin(self, orders: list[dict[str, Any]]) -> dict[str, Any]:
+        """Calculate margin required for a prospective (not-yet-placed) basket of orders."""
+        pass
+
+    @abstractmethod
     async def close(self) -> None:
         """Close any open connections or sessions."""
         pass
 
     @abstractmethod
-    def get_market_stream(self) -> Any:
+    def get_market_stream(self, quote_poll_interval_seconds: float = 3.0) -> Any:
         """Return the live tick-stream manager for this session."""
         pass

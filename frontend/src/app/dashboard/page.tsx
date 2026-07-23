@@ -12,7 +12,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { useAlertStore } from "@/stores/alertStore";
 import { useTickerStore } from "@/stores/tickerStore";
-import { useMarketData } from "@/hooks/useMarketData";
+import { useTickStore } from "@/stores/tickStore";
 import { formatDate } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/Card";
@@ -207,12 +207,19 @@ export default function DashboardPage() {
   const router = useRouter();
   const { user, tradingMode } = useAuth();
   const alerts = useAlertStore((state) => state.alerts);
-  const activeAlertsCount = alerts.filter((a) => a.status === "Active").length;
-  const triggeredAlertsCount = alerts.filter((a) => a.status === "Triggered").length;
+  const triggerLog = useAlertStore((state) => state.triggerLog);
+  const activeAlertsCount = alerts.filter((a) => a.status === "Active" || a.status === "Snoozed").length;
+  const triggeredAlertsCount = triggerLog.filter(
+    (e) => new Date(e.triggeredAt).toDateString() === new Date().toDateString()
+  ).length;
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const { tickers, removeTicker } = useTickerStore();
-  const { getTick } = useMarketData(tickers);
+  // Subscription is owned by TickerFeedMount (mounted once in the root
+  // layout) so it — and the last-known prices — survive this page
+  // unmounting on navigation instead of resetting every time.
+  const ticks = useTickStore((state) => state.ticks);
+  const getTick = (symbol: string) => ticks[symbol] ?? null;
 
   return (
     <DashboardLayout>

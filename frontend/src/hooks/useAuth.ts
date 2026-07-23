@@ -5,7 +5,7 @@
  * with derived state like `canTrade`.
  */
 
-import { useAuthStore } from "@/stores/authStore";
+import { useAuthStore, isAuthHydrated } from "@/stores/authStore";
 import type { LoginRequest, TradingMode } from "@/types/auth";
 import { useCallback, useEffect, useState } from "react";
 
@@ -19,7 +19,12 @@ import { useCallback, useEffect, useState } from "react";
  */
 export function useAuth() {
   const store = useAuthStore();
-  const [hydrated, setHydrated] = useState(false);
+  // DashboardLayout is rendered per-page rather than in a shared Next.js
+  // layout, so this hook remounts on every navigation. Seeding from the
+  // module-level flag (rather than always starting at false) means only the
+  // very first mount of the whole page load shows the hydrating spinner —
+  // every later navigation already knows hydration settled and skips it.
+  const [hydrated, setHydrated] = useState(isAuthHydrated);
 
   // Restore session from localStorage, or silently attempt a server-side
   // auto-login, before revealing the login form.

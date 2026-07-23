@@ -3,10 +3,11 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.models.user import TradingMode
+from app.services.broker_credentials_store import load_broker_credentials, save_broker_credentials
 from tests.conftest import get_test_settings
 
 
@@ -14,6 +15,7 @@ from tests.conftest import get_test_settings
 async def test_login_oauth_success(
     client: AsyncClient,
     mock_broker_service: AsyncMock,
+    db_session: AsyncSession,
 ) -> None:
     """Login via OAuth auth_code should return JWT token on successful broker connection."""
     with (
@@ -47,13 +49,19 @@ async def test_login_oauth_success(
     assert data["user"]["broker_name"] == "TestBroker"
     assert data["user"]["trading_mode"] == "paper"
 
+    # OAuth logins have no TOTP secret/pin to reuse for headless auto-login —
+    # nothing should be persisted to broker_credentials.
+    assert await load_broker_credentials(db_session, get_test_settings()) is None
+
 
 @pytest.mark.asyncio
 async def test_login_totp_success(
     client: AsyncClient,
     mock_broker_service: AsyncMock,
+    db_session: AsyncSession,
 ) -> None:
-    """Login via headless TOTP auto-login should return JWT token."""
+    """Login via headless TOTP auto-login should return JWT token, and persist
+    the credentials used (encrypted) as the new source of truth for auto-login."""
     with (
         patch(
             "app.api.v1.auth.FyersService",
@@ -81,49 +89,63 @@ async def test_login_totp_success(
     assert "access_token" in data
     assert data["user"]["client_id"] == "TEST_CLIENT_001"
 
+    creds = await load_broker_credentials(db_session, get_test_settings())
+    assert creds is not None
+    assert creds.client_id == "test-client"
+    assert creds.totp_secret == "test-totp-secret"
+    assert creds.pin == "1234"
+
 
 @pytest.mark.asyncio
 async def test_auto_login_not_configured(client: AsyncClient) -> None:
-    """Auto-login should 503 when no server-side Fyers credentials are set."""
+    """Auto-login should 503 when no TOTP login has ever succeeded (nothing
+    persisted in broker_credentials yet)."""
     response = await client.post("/api/v1/auth/auto-login")
     assert response.status_code == 503
 
 
 @pytest.mark.asyncio
 async def test_auto_login_success(
-    app: FastAPI,
+    client: AsyncClient,
     mock_broker_service: AsyncMock,
+    db_session: AsyncSession,
 ) -> None:
-    """Auto-login should return a JWT using server-configured credentials."""
-    auto_login_settings = get_test_settings().model_copy(
-        update={
-            "fyers_app_id": "test-app-id-100",
-            "fyers_api_secret": "test-api-secret",
-            "fyers_client_id": "test-client",
-            "fyers_totp_secret": "test-totp-secret",
-            "fyers_pin": "1234",
-        }
+    """Auto-login should return a JWT using credentials persisted in the DB
+    from a prior successful TOTP login."""
+    await save_broker_credentials(
+        db_session,
+        get_test_settings(),
+        app_id="test-app-id-100",
+        api_secret="test-api-secret",
+        client_id="test-client",
+        totp_secret="test-totp-secret",
+        pin="1234",
+        redirect_uri="http://127.0.0.1:3000",
+        trading_mode=TradingMode.PAPER.value,
     )
-    app.dependency_overrides[get_settings] = lambda: auto_login_settings
 
-    try:
-        with (
-            patch("app.api.v1.auth.FyersService", return_value=mock_broker_service),
-            patch(
-                "app.api.v1.auth.get_fyers_access_token_headless",
-                return_value="test-headless-access-token",
-            ),
-        ):
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as ac:
-                response = await ac.post("/api/v1/auth/auto-login")
-    finally:
-        app.dependency_overrides[get_settings] = lambda: get_test_settings()
+    with (
+        patch("app.api.v1.auth.FyersService", return_value=mock_broker_service),
+        patch(
+            "app.api.v1.auth.get_fyers_access_token_headless",
+            return_value="test-headless-access-token",
+        ) as mock_headless,
+    ):
+        response = await client.post("/api/v1/auth/auto-login")
 
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
     assert data["user"]["client_id"] == "TEST_CLIENT_001"
+    mock_headless.assert_called_once_with(
+        client_id="test-client",
+        totp_secret="test-totp-secret",
+        pin="1234",
+        app_id="test-app-id-100",
+        app_secret="test-api-secret",
+        redirect_uri="http://127.0.0.1:3000",
+        ttl_seconds=get_test_settings().broker_token_cache_ttl_seconds,
+    )
 
 
 @pytest.mark.asyncio

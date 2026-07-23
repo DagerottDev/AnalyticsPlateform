@@ -45,7 +45,7 @@ export function IVSmileChart({ data }: IVSmileChartProps) {
       <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Volatility Smile</h3>
       <div className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" vertical={false} />
             <XAxis
               dataKey="strike"

@@ -14,7 +14,7 @@ interface InstrumentSelectorProps {
   onExpiryChange: (expiry: string) => void;
 }
 
-const INDICES = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"];
+export const INDICES = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"];
 
 export function InstrumentSelector({
   symbol,
@@ -42,8 +42,9 @@ export function InstrumentSelector({
         }
       } catch (err) {
         if (isMounted) {
+          console.error("Failed to load expiries", formatApiError(err));
           setExpiries([]);
-          setExpiriesError(formatApiError(err) || "Failed to load expiries.");
+          setExpiriesError("Failed to load expiries.");
         }
       } finally {
         if (isMounted) setLoadingExpiries(false);
@@ -136,7 +137,9 @@ export function InstrumentSelector({
           <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
         </div>
         {expiriesError && (
-          <p className="mt-1 text-xs text-[var(--color-loss)]">{expiriesError}</p>
+          <p className="mt-1 truncate text-xs text-[var(--color-loss)]" title={expiriesError}>
+            {expiriesError}
+          </p>
         )}
       </div>
     </div>

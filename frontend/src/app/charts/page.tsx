@@ -10,6 +10,7 @@ import { apiClient } from "@/lib/api";
 import { OHLCVData } from "@/lib/indicators";
 import { Instrument } from "@/types/market";
 import { getInstruments } from "@/lib/market";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { formatApiError } from "@/lib/apiError";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -19,7 +20,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 
 export default function ChartsPage() {
-  const [symbol, setSymbol] = useState<string>("NIFTY");
+  const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
   
   const [historicalData, setHistoricalData] = useState<OHLCVData[]>([]);

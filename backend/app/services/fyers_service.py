@@ -79,6 +79,11 @@ class FyersService(BrokerService):
     _RETRY_BASE_DELAY_SECONDS = 1.5
     _RETRYABLE_CODES = {429, 500, 502, 503, 504}
 
+    # Fyers' margin calculator wants an order `type` (1=Limit, 2=Market, 3=Stop,
+    # 4=StopLimit) even though no order is actually placed here — Market
+    # gives a same-side-agnostic estimate without needing a limit price.
+    _MARGIN_ORDER_TYPE = 2
+
     def __init__(
         self,
         app_id: str,
@@ -104,10 +109,20 @@ class FyersService(BrokerService):
         self._instruments_locks: dict[str, asyncio.Lock] = {}
         self._market_stream: FyersMarketStreamManager | None = None
 
-    def get_market_stream(self) -> FyersMarketStreamManager:
-        """Lazily create the live tick stream for this session."""
+    def get_market_stream(
+        self, quote_poll_interval_seconds: float = 3.0
+    ) -> FyersMarketStreamManager:
+        """Lazily create the live tick stream (+ shared REST-quote-poll loop)
+        for this session. quote_poll_interval_seconds only takes effect on
+        first creation — there's one stream per session, shared by every
+        connected websocket."""
         if self._market_stream is None:
-            self._market_stream = FyersMarketStreamManager(self.app_id, self.access_token)
+            self._market_stream = FyersMarketStreamManager(
+                self.app_id,
+                self.access_token,
+                quote_fetcher=self.get_quotes,
+                quote_poll_interval_seconds=quote_poll_interval_seconds,
+            )
         return self._market_stream
 
     async def get_profile(self) -> UserProfile:
@@ -313,6 +328,9 @@ class FyersService(BrokerService):
                             "strike": row.get("strike_price"),
                             "option_type": option_type,
                             "exchange": "NFO",
+                            "oi": row.get("oi"),
+                            "oi_change": row.get("oich"),
+                            "oi_change_percent": row.get("oichp"),
                         }
                     )
 
@@ -371,6 +389,40 @@ class FyersService(BrokerService):
             raise
         except Exception as e:
             raise BrokerConnectionError(f"Failed to retrieve history for {symbol}: {e}") from e
+
+    async def get_margin(self, orders: list[dict[str, Any]]) -> dict[str, Any]:
+        """Calls Fyers' multi-order margin calculator for a prospective basket
+        of orders — no order is actually placed. Each item in `orders`:
+        {symbol, quantity, side ("Buy"/"Sell"), product_type}.
+
+        This endpoint isn't wrapped by fyers_apiv3's FyersModel, so it's
+        called directly via the SDK's own request plumbing (same
+        session/headers/base-URL post_call() uses internally).
+        """
+        if not orders:
+            return {}
+
+        payload = {
+            "data": [
+                {
+                    "symbol": order["symbol"],
+                    "qty": abs(int(order["quantity"])),
+                    "side": 1 if order["side"].lower() == "buy" else -1,
+                    "type": self._MARGIN_ORDER_TYPE,
+                    "productType": order.get("product_type") or "MARGIN",
+                }
+                for order in orders
+            ]
+        }
+        try:
+            response = await asyncio.to_thread(
+                self.client.service.post_call, "/multiorder/margin", self.client.header, payload
+            )
+        except Exception as e:
+            raise BrokerConnectionError(f"Fyers margin calculator request failed: {e}") from e
+        if not response or response.get("s") != "ok":
+            raise BrokerConnectionError(f"Fyers margin calculator request failed: {response}")
+        return cast(dict[str, Any], response.get("data", {}))
 
     async def close(self) -> None:
         if self._market_stream is not None:

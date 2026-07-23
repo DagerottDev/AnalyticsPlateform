@@ -7,9 +7,10 @@ import { OptionChain } from "@/components/market/OptionChain";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 export default function OptionChainPage() {
-  const [symbol, setSymbol] = useState("NIFTY");
+  const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
 
   return (

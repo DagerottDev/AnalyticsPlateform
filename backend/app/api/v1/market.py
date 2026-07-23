@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 
 from app.config import Settings, get_settings
 from app.core.security import decode_token, get_current_user
-from app.schemas.market import ExpiryList, Instrument, InstrumentResponse
+from app.schemas.market import ExpiryList, Instrument, InstrumentResponse, MarginRequest, MarginResponse
 from app.services.fyers_service import from_fyers_ws_symbol, to_fyers_ws_symbol
 from app.services.session_manager import session_manager
 
@@ -94,6 +94,52 @@ async def get_history(
     return {"candles": candles}
 
 
+@router.post("/margin", response_model=MarginResponse)
+async def get_margin(
+    request: MarginRequest, current_user: dict[str, Any] = Depends(get_current_user)
+) -> MarginResponse:
+    """Margin required to take a prospective basket of positions (e.g. the
+    legs currently in the Strategy Builder) — no order is placed.
+
+    Fyers' margin calculator response schema is sparsely documented and
+    varies in the exact keys it returns, so this reads several candidate
+    key spellings and always includes the raw payload as a fallback.
+    """
+    service = session_manager.get_session(current_user["sub"])
+    if not service:
+        raise HTTPException(status_code=401, detail="Active broker session not found")
+
+    if not request.legs:
+        raise HTTPException(status_code=400, detail="At least one leg is required")
+
+    orders = [
+        {
+            "symbol": leg.symbol,
+            "quantity": leg.quantity,
+            "side": leg.side,
+            "product_type": leg.product_type,
+        }
+        for leg in request.legs
+    ]
+    data = await service.get_margin(orders)
+
+    def first_of(*keys: str) -> float | None:
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, int | float):
+                return float(value)
+        return None
+
+    return MarginResponse(
+        total_margin=first_of("margin_total", "total", "marginTotal"),
+        available_margin=first_of("margin_avail", "marginAvail", "available_balance"),
+        span_margin=first_of("span", "span_margin", "spanMargin"),
+        exposure_margin=first_of("expo", "exposure", "exposure_margin"),
+        premium=first_of("premium", "option_premium"),
+        raw=data,
+    )
+
+
 @router.websocket("/ws")
 async def market_ws(
     websocket: WebSocket, token: str = Query(...), settings: Settings = Depends(get_settings)
@@ -121,7 +167,9 @@ async def market_ws(
 
     stream = None
     if service is not None:
-        stream = service.get_market_stream()
+        stream = service.get_market_stream(
+            quote_poll_interval_seconds=settings.market_quote_poll_interval_seconds
+        )
         stream.bind_loop()
 
     subscribed: set[str] = set()
@@ -170,24 +218,8 @@ async def market_ws(
                 message = {**message, "symbol": from_fyers_ws_symbol(message["symbol"])}
             await websocket.send_json({"type": "tick", "data": message})
 
-    async def poller() -> None:
-        """Periodic REST quote polling loop, so ticker values keep updating
-        even if the live Fyers websocket tick stream isn't flowing. Interval
-        is configurable (MARKET_QUOTE_POLL_INTERVAL_SECONDS) since Fyers
-        rate-limits the quotes endpoint aggressively per app."""
-        while True:
-            await asyncio.sleep(settings.market_quote_poll_interval_seconds)
-            if subscribed and service is not None:
-                sym_list = [from_fyers_ws_symbol(s) for s in list(subscribed)]
-                try:
-                    quotes = await service.get_quotes(sym_list)
-                    for q in quotes:
-                        queue.put_nowait(q)
-                except Exception:
-                    logger.exception("Failed to poll quotes for %s", sym_list)
-
     try:
-        await asyncio.gather(reader(), writer(), poller())
+        await asyncio.gather(reader(), writer())
     except WebSocketDisconnect:
         pass
     except Exception:

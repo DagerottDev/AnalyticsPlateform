@@ -6,13 +6,17 @@ import { getInstruments } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
 import { formatApiError } from "@/lib/apiError";
 import { cn, formatINR } from "@/lib/utils";
-import { Settings2 } from "lucide-react";
+import { Settings2, TrendingUp } from "lucide-react";
 import { calculateImpliedVolatility, calculateGreeks, Greeks } from "@/lib/greeks";
+import { classifyBuildup } from "@/lib/buildup";
 import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
 import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
+
+const REFRESH_INTERVAL_MS = 30_000;
 
 interface OptionChainProps {
   symbol: string;
@@ -24,34 +28,42 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showGreeks, setShowGreeks] = useState(true);
+  const [showBuildup, setShowBuildup] = useState(true);
 
-  // Fetch instruments when symbol or expiry changes
+  // Fetch instruments when symbol or expiry changes, then keep OI/buildup
+  // fresh with a background poll matching the backend's own ~30s cache TTL —
+  // instruments were previously fetched once and never refreshed.
   useEffect(() => {
     let isMounted = true;
     if (!symbol || !expiry) return;
 
-    async function fetchContracts() {
-      setLoading(true);
-      setError(null);
+    async function fetchContracts(isBackground: boolean) {
+      if (!isBackground) {
+        setLoading(true);
+        setError(null);
+      }
       try {
         const data = await getInstruments(symbol);
         if (isMounted) {
           // Filter by expiry
           const filtered = data.instruments.filter((i) => i.expiry === expiry);
           setInstruments(filtered);
+          if (isBackground) setError(null);
         }
       } catch (err) {
         if (!isMounted) return;
         setError(formatApiError(err) || "Failed to load option chain data.");
-        setInstruments([]);
+        if (!isBackground) setInstruments([]);
       } finally {
-        if (isMounted) setLoading(false);
+        if (isMounted && !isBackground) setLoading(false);
       }
     }
 
-    fetchContracts();
+    fetchContracts(false);
+    const interval = setInterval(() => fetchContracts(true), REFRESH_INTERVAL_MS);
     return () => {
       isMounted = false;
+      clearInterval(interval);
     };
   }, [symbol, expiry]);
 
@@ -121,10 +133,16 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
             DTE: <span className="tnum font-bold text-[var(--color-text-bright)]">{Math.round(T * 365)} days</span>
           </span>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setShowGreeks(!showGreeks)}>
-          <Settings2 className="h-4 w-4" />
-          {showGreeks ? "Hide Greeks" : "Show Greeks"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowBuildup(!showBuildup)}>
+            <TrendingUp className="h-4 w-4" />
+            {showBuildup ? "Hide Buildup" : "Show Buildup"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowGreeks(!showGreeks)}>
+            <Settings2 className="h-4 w-4" />
+            {showGreeks ? "Hide Greeks" : "Show Greeks"}
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -137,9 +155,9 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
           {/* Table Header */}
           <thead className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]">
             <tr>
-              <th colSpan={showGreeks ? 9 : 4} className="border-b border-r border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-profit)]">CALLS</th>
+              <th colSpan={(showGreeks ? 5 : 0) + (showBuildup ? 1 : 0) + 4} className="border-b border-r border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-profit)]">CALLS</th>
               <th className="border-b border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-text-primary)]">STRIKE</th>
-              <th colSpan={showGreeks ? 9 : 4} className="border-b border-l border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-loss)]">PUTS</th>
+              <th colSpan={(showGreeks ? 5 : 0) + (showBuildup ? 1 : 0) + 4} className="border-b border-l border-[var(--color-border-default)] px-4 py-2 text-center font-semibold text-[var(--color-loss)]">PUTS</th>
             </tr>
             <tr className="border-b border-[var(--color-border-default)]">
               {showGreeks && (
@@ -151,17 +169,19 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                   <th className="px-3 py-2 font-medium">IV%</th>
                 </>
               )}
+              {showBuildup && <th className="px-3 py-2 font-medium">Buildup</th>}
               <th className="px-3 py-2 font-medium">OI</th>
               <th className="px-3 py-2 font-medium">Vol</th>
               <th className="px-3 py-2 font-medium">Chg%</th>
               <th className="border-r border-[var(--color-border-default)] px-3 py-2 font-medium">LTP</th>
-              
+
               <th className="bg-[var(--color-bg-secondary)] px-3 py-2 text-center font-medium">Strike</th>
-              
+
               <th className="border-l border-[var(--color-border-default)] px-3 py-2 font-medium">LTP</th>
               <th className="px-3 py-2 font-medium">Chg%</th>
               <th className="px-3 py-2 font-medium">Vol</th>
               <th className="px-3 py-2 font-medium">OI</th>
+              {showBuildup && <th className="px-3 py-2 font-medium">Buildup</th>}
               {showGreeks && (
                 <>
                   <th className="px-3 py-2 font-medium">IV%</th>
@@ -201,6 +221,9 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                 }
               }
 
+              const ceBuildup = classifyBuildup(ceTick?.change_percent, row.CE?.oi_change_percent);
+              const peBuildup = classifyBuildup(peTick?.change_percent, row.PE?.oi_change_percent);
+
               return (
                 <tr key={row.strike} className={cn("hover:bg-[var(--color-bg-hover)] transition-colors", isATM && "border-y-2 border-[var(--color-accent-blue)]")}>
                   {/* CALL GREEKS */}
@@ -224,8 +247,19 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                     </>
                   )}
                   {/* CALLS */}
+                  {showBuildup && (
+                    <td className={cn("px-3 py-2 text-center", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
+                      {ceBuildup ? (
+                        <Badge tone={ceBuildup.tone} title={ceBuildup.category}>
+                          {ceBuildup.shortLabel}
+                        </Badge>
+                      ) : (
+                        <span className="text-[var(--color-text-muted)]">-</span>
+                      )}
+                    </td>
+                  )}
                   <td className={cn("px-3 py-2", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
-                    {ceTick?.open_interest.toLocaleString() || "-"}
+                    {row.CE?.oi != null ? row.CE.oi.toLocaleString() : "-"}
                   </td>
                   <td className={cn("px-3 py-2", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
                     {ceTick?.volume.toLocaleString() || "-"}
@@ -253,8 +287,19 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                     {peTick?.volume.toLocaleString() || "-"}
                   </td>
                   <td className={cn("px-3 py-2", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
-                    {peTick?.open_interest.toLocaleString() || "-"}
+                    {row.PE?.oi != null ? row.PE.oi.toLocaleString() : "-"}
                   </td>
+                  {showBuildup && (
+                    <td className={cn("px-3 py-2 text-center", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
+                      {peBuildup ? (
+                        <Badge tone={peBuildup.tone} title={peBuildup.category}>
+                          {peBuildup.shortLabel}
+                        </Badge>
+                      ) : (
+                        <span className="text-[var(--color-text-muted)]">-</span>
+                      )}
+                    </td>
+                  )}
                   {/* PUT GREEKS */}
                   {showGreeks && (
                     <>

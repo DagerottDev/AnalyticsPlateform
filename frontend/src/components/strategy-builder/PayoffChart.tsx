@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { PayoffPoint } from "@/lib/strategy";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LineChart as LineChartIcon } from "lucide-react";
 
 interface PayoffChartProps {
   data: PayoffPoint[];
@@ -57,7 +58,9 @@ export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
 
   return (
     <div className="panel flex flex-col gap-2">
-      <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Payoff Profile</h3>
+      <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
+        <LineChartIcon className="h-4 w-4 text-[var(--color-accent-blue)]" /> Payoff Profile
+      </h3>
       <div className="h-[400px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
@@ -79,7 +82,7 @@ export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
               stroke="var(--color-chart-axis-text)"
               fontSize={11}
               domain={[-limit, limit]}
-              tickFormatter={(value) => value > 1000 ? `${(value/1000).toFixed(1)}k` : value}
+              tickFormatter={(value) => Math.abs(value) > 1000 ? `${(value / 1000).toFixed(1)}k` : String(Math.round(value))}
             />
             <Tooltip
               cursor={{ stroke: 'var(--color-border-accent)', strokeWidth: 1, strokeDasharray: '3 3' }}

@@ -6,6 +6,7 @@ import { useReplayStore } from "@/stores/replayStore";
 import { buildReplaySession, startPlayback, stopPlayback } from "@/lib/replayEngine";
 import { getInstruments, getHistoricalCandles } from "@/lib/market";
 import { formatApiError } from "@/lib/apiError";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
@@ -37,7 +38,7 @@ export default function ReplayPage() {
     reset,
   } = useReplayStore();
 
-  const [targetSymbol, setTargetSymbol] = useState("NIFTY");
+  const [targetSymbol, setTargetSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [sessionDate, setSessionDate] = useState(yesterday());
   const [resolution, setResolution] = useState("1");
   const [volatility, setVolatility] = useState("15"); // used to price options off the real spot path

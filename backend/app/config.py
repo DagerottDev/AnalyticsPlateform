@@ -57,28 +57,6 @@ class Settings(BaseSettings):
     # Left unset, the token is stored in plaintext (with a startup warning).
     broker_token_encryption_key: str | None = None
 
-    # Server-side Fyers credentials for silent auto-login (POST /auth/auto-login).
-    # Optional — when unset, the frontend falls back to the manual login form.
-    # Never exposed to the browser; kept server-side only, in backend/.env.
-    fyers_app_id: str | None = None
-    fyers_api_secret: str | None = None
-    fyers_client_id: str | None = None
-    fyers_totp_secret: str | None = None
-    fyers_pin: str | None = None
-    fyers_redirect_uri: str = "http://127.0.0.1:3000"
-    fyers_trading_mode: Literal["paper", "live"] = "paper"
-
-    @property
-    def has_auto_login_credentials(self) -> bool:
-        """Whether enough server-side Fyers credentials are configured for auto-login."""
-        return bool(
-            self.fyers_app_id
-            and self.fyers_api_secret
-            and self.fyers_client_id
-            and self.fyers_totp_secret
-            and self.fyers_pin
-        )
-
     @property
     def cors_origin_list(self) -> list[str]:
         """Parse comma-separated CORS origins into a list."""

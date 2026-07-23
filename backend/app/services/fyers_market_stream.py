@@ -16,7 +16,7 @@ keep coming from the periodic option-chain REST fetch in FyersService.
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import certifi
@@ -32,11 +32,27 @@ import certifi
 # an explicit value the environment already set.
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
+# websocket-client also silently honors HTTP_PROXY/HTTPS_PROXY from the
+# environment. A stray proxy var left over from an unrelated debugging
+# session (e.g. mitmproxy) then routes this connection through that proxy
+# instead of straight to Fyers — if it isn't actually running, or its
+# certificate isn't the one SSL_CERT_FILE above points at, the handshake
+# fails with the exact same "unable to get local issuer certificate" error,
+# which is easy to misdiagnose as a CA-bundle problem. This connection
+# should always go directly to Fyers, so those vars are dropped outright
+# (both casings — different libraries check different ones).
+_PROXY_ENV_VARS = (
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"
+)
+for _proxy_var in _PROXY_ENV_VARS:
+    os.environ.pop(_proxy_var, None)
+
 from fyers_apiv3.FyersWebsocket import data_ws  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 TickListener = Callable[[dict[str, Any]], None]
+QuoteFetcher = Callable[[list[str]], Awaitable[list[dict[str, Any]]]]
 
 
 class FyersMarketStreamManager:
@@ -44,9 +60,24 @@ class FyersMarketStreamManager:
     ticks out to any number of registered listeners. Symbol subscriptions
     are refcounted across listeners so a symbol is only dropped from the
     upstream Fyers socket once nothing still needs it.
+
+    Also runs a single shared REST-quote-poll loop (a resilience fallback so
+    ticker values keep updating even when the live tick stream isn't
+    flowing) against that same refcounted symbol set. This is deliberately
+    one loop per *session*, not one per websocket connection — N browser
+    tabs subscribed to the same symbols used to mean N independent pollers
+    all hitting Fyers' quotes endpoint on their own timers, needlessly
+    multiplying API load and making the effective per-tab update cadence
+    depend on how many tabs happened to be open.
     """
 
-    def __init__(self, app_id: str, access_token: str) -> None:
+    def __init__(
+        self,
+        app_id: str,
+        access_token: str,
+        quote_fetcher: QuoteFetcher | None = None,
+        quote_poll_interval_seconds: float = 3.0,
+    ) -> None:
         self._app_id = app_id
         self._access_token = access_token
         self._socket: data_ws.FyersDataSocket | None = None
@@ -54,16 +85,36 @@ class FyersMarketStreamManager:
         self._listeners: set[TickListener] = set()
         self._refcounts: dict[str, int] = {}
         self._connected = False
+        self._quote_fetcher = quote_fetcher
+        self._quote_poll_interval_seconds = quote_poll_interval_seconds
+        self._quote_poll_task: asyncio.Task[None] | None = None
 
     def bind_loop(self) -> None:
         """Capture the asyncio event loop that should receive dispatched
-        ticks. Must be called once from a coroutine actually running on
-        that loop (e.g. the websocket endpoint), before subscribe()/
-        unsubscribe() — those do blocking I/O and are meant to be run via
-        asyncio.to_thread, where asyncio.get_running_loop() would fail.
+        ticks, and start the shared quote-poll loop on it. Must be called
+        once from a coroutine actually running on that loop (e.g. the
+        websocket endpoint), before subscribe()/unsubscribe() — those do
+        blocking I/O and are meant to be run via asyncio.to_thread, where
+        asyncio.get_running_loop() would fail.
         """
         if self._loop is None:
             self._loop = asyncio.get_running_loop()
+            if self._quote_fetcher is not None:
+                self._quote_poll_task = self._loop.create_task(self._quote_poll_loop())
+
+    async def _quote_poll_loop(self) -> None:
+        assert self._quote_fetcher is not None
+        while True:
+            await asyncio.sleep(self._quote_poll_interval_seconds)
+            symbols = list(self._refcounts.keys())
+            if not symbols:
+                continue
+            try:
+                quotes = await self._quote_fetcher(symbols)
+                for quote in quotes:
+                    self._dispatch(quote)
+            except Exception:
+                logger.exception("Shared quote-poll failed for %s", symbols)
 
     def add_listener(self, listener: TickListener) -> None:
         self._listeners.add(listener)
@@ -94,6 +145,9 @@ class FyersMarketStreamManager:
             self._socket.unsubscribe(symbols=drop_symbols, data_type="SymbolUpdate")
 
     def close(self) -> None:
+        if self._quote_poll_task is not None:
+            self._quote_poll_task.cancel()
+            self._quote_poll_task = None
         if self._socket is not None:
             try:
                 self._socket.close_connection()
@@ -150,6 +204,9 @@ class FyersMarketStreamManager:
         logger.error("Fyers market stream error: %s", message)
 
     def _on_message(self, message: dict[str, Any]) -> None:
+        self._dispatch(message)
+
+    def _dispatch(self, message: dict[str, Any]) -> None:
         if self._loop is None:
             return
         for listener in list(self._listeners):
