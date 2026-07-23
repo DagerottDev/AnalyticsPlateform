@@ -22,6 +22,7 @@ import { StatTile } from "@/components/ui/StatTile";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Eyebrow } from "@/components/ui/SectionHeader";
 import { AddTickerModal } from "@/components/market/AddTickerModal";
+import { MarketTick } from "@/types/market";
 import {
   BarChart3,
   CandlestickChart,
@@ -32,10 +33,24 @@ import {
   PlayCircle,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowRight,
   BellRing,
   Plus,
   X,
 } from "lucide-react";
+
+function formatPrice(val: number): string {
+  return val.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Compact Indian-style magnitude for volume (lakh/crore), e.g. 1234567 -> "1.23L" */
+function formatCompactVolume(vol: number): string {
+  if (!vol) return "0";
+  if (vol >= 1e7) return `${(vol / 1e7).toFixed(2)}Cr`;
+  if (vol >= 1e5) return `${(vol / 1e5).toFixed(2)}L`;
+  if (vol >= 1e3) return `${(vol / 1e3).toFixed(1)}K`;
+  return String(vol);
+}
 
 /** Interactive Module Directory Card */
 function ModuleCard({
@@ -92,23 +107,25 @@ function ModuleCard({
   );
 }
 
-/** Ticker Card showing real-time price info */
+/** Ticker Card showing real-time price info plus OHLC/volume/day-range context */
 function IndexTickerCard({
   symbol,
-  price,
-  change,
-  changePercent,
-  loading,
+  tick,
   onRemove,
 }: {
   symbol: string;
-  price: string;
-  change: number;
-  changePercent: number;
-  loading: boolean;
+  tick: MarketTick | null;
   onRemove?: () => void;
 }) {
-  const isUp = change >= 0;
+  const isUp = (tick?.change ?? 0) >= 0;
+  const low = tick?.low_price ?? 0;
+  const high = tick?.high_price ?? 0;
+  const hasRange = high > low;
+  const rangePct = hasRange
+    ? Math.min(100, Math.max(0, ((tick!.last_price - low) / (high - low)) * 100))
+    : 50;
+  const toneColor = isUp ? "var(--color-accent-green)" : "var(--color-accent-red)";
+
   return (
     <Card className="group relative transition-all duration-200 hover:border-[var(--color-border-accent)]">
       <div className="flex items-center justify-between">
@@ -119,31 +136,75 @@ function IndexTickerCard({
           <button
             onClick={onRemove}
             title="Remove card"
-            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-status-bad)]"
+            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-red)]"
           >
             <X className="h-3.5 w-3.5" />
           </button>
         )}
       </div>
-      {loading ? (
+
+      {!tick ? (
         <div className="mt-2 h-8 w-28 animate-pulse rounded bg-[var(--color-bg-hover)]" />
       ) : (
-        <div className="mt-2 flex items-baseline justify-between gap-2">
-          <p className="tnum text-2xl font-black tracking-tight text-[var(--color-text-bright)]">
-            ₹{price}
-          </p>
-          <Badge tone={isUp ? "profit" : "loss"} className="tnum shrink-0 px-2 py-0.5 text-xs font-bold">
-            {isUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-            {isUp ? "+" : ""}
-            {changePercent.toFixed(2)}%
-          </Badge>
-        </div>
+        <>
+          <div className="mt-2">
+            <p className="tnum text-2xl font-black tracking-tight text-[var(--color-text-bright)]">
+              ₹{formatPrice(tick.last_price)}
+            </p>
+            <Badge
+              tone={isUp ? "profit" : "loss"}
+              className="tnum mt-1.5 inline-flex px-2 py-0.5 text-xs font-bold"
+            >
+              {isUp ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+              {isUp ? "+" : ""}
+              {tick.change.toFixed(2)} ({isUp ? "+" : ""}
+              {tick.change_percent.toFixed(2)}%)
+            </Badge>
+          </div>
+
+          {hasRange && (
+            <div className="mt-3">
+              <div className="relative h-1 rounded-full bg-[var(--color-bg-hover)]">
+                <div
+                  className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--color-bg-surface)]"
+                  style={{ left: `${rangePct}%`, backgroundColor: toneColor }}
+                />
+              </div>
+              <div className="mt-1 flex justify-between text-[10px] tabular-nums text-[var(--color-text-muted)]">
+                <span>L {formatPrice(low)}</span>
+                <span>H {formatPrice(high)}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-[var(--color-border-subtle)] pt-2">
+            <div>
+              <p className="text-[10px] font-medium text-[var(--color-text-muted)]">Open</p>
+              <p className="tnum text-xs font-semibold text-[var(--color-text-secondary)]">
+                {tick.open_price ? formatPrice(tick.open_price) : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-medium text-[var(--color-text-muted)]">Prev Close</p>
+              <p className="tnum text-xs font-semibold text-[var(--color-text-secondary)]">
+                {tick.prev_close_price ? formatPrice(tick.prev_close_price) : "—"}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-medium text-[var(--color-text-muted)]">Volume</p>
+              <p className="tnum text-xs font-semibold text-[var(--color-text-secondary)]">
+                {formatCompactVolume(tick.volume)}
+              </p>
+            </div>
+          </div>
+        </>
       )}
     </Card>
   );
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { user, tradingMode } = useAuth();
   const alerts = useAlertStore((state) => state.alerts);
   const activeAlertsCount = alerts.filter((a) => a.status === "Active").length;
@@ -152,10 +213,6 @@ export default function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const { tickers, removeTicker } = useTickerStore();
   const { getTick } = useMarketData(tickers);
-
-  const formatPrice = (val: number) => {
-    return val.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  };
 
   return (
     <DashboardLayout>
@@ -191,7 +248,7 @@ export default function DashboardPage() {
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-status-good)]" />
               </span>
               <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                Live Feed Active (1Hz)
+                Live Feed Active
               </span>
             </div>
           </div>
@@ -213,20 +270,31 @@ export default function DashboardPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {tickers.map((sym) => {
-              const tick = getTick(sym);
-              return (
-                <IndexTickerCard
-                  key={sym}
-                  symbol={sym}
-                  price={tick ? formatPrice(tick.last_price) : "—"}
-                  change={tick ? tick.change : 0}
-                  changePercent={tick ? tick.change_percent : 0}
-                  loading={!tick}
-                  onRemove={tickers.length > 1 ? () => removeTicker(sym) : undefined}
-                />
-              );
-            })}
+            {tickers.map((sym) => (
+              <IndexTickerCard
+                key={sym}
+                symbol={sym}
+                tick={getTick(sym)}
+                onRemove={tickers.length > 1 ? () => removeTicker(sym) : undefined}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Alerts Overview */}
+        <div>
+          <div className="mb-3 flex items-center justify-between border-b border-[var(--color-border-default)] pb-2">
+            <Eyebrow>Alerts</Eyebrow>
+            <Button
+              onClick={() => router.push("/alerts")}
+              variant="secondary"
+              size="sm"
+              className="text-xs font-semibold"
+            >
+              View All <ArrowRight className="ml-1 h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <StatTile label="Active Alerts" value={activeAlertsCount} icon={BellRing} />
             <StatTile label="Triggered Today" value={triggeredAlertsCount} icon={Zap} tone="loss" />
           </div>

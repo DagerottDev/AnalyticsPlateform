@@ -23,6 +23,7 @@ python-multipart = "^0.0.20"
 pyotp = "^2.9.0"
 certifi = "^2026.6.17"
 requests = "2.31.0"  # pinned to match fyers-apiv3's own dependency constraint
+cryptography = "^49.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"
@@ -31,6 +32,7 @@ pytest-cov = "^6.0.0"
 ruff = "^0.8.0"
 mypy = "^1.13.0"
 types-requests = "^2.32.0"
+aiosqlite = "^0.22.1"
 
 [build-system]
 requires = ["poetry-core"]

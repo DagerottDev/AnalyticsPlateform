@@ -24,6 +24,14 @@ export interface MarketTick {
   timestamp: number;
   change: number;
   change_percent: number;
+  /** Only populated by the REST quote snapshot/poller, not raw live ticks. */
+  open_price?: number;
+  high_price?: number;
+  low_price?: number;
+  prev_close_price?: number;
+  ask?: number;
+  bid?: number;
+  atp?: number;
 }
 
 /** A tick produced by the Replay engine, driven by real historical candles. */

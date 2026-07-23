@@ -9,9 +9,13 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from app.config import Settings, get_settings
 from app.core.security import create_access_token
+from app.db.base import Base
+from app.db.session import get_db
 from app.main import app as fastapi_app
 from app.models.user import TradingMode
 from app.services.session_manager import session_manager
@@ -26,6 +30,9 @@ def get_test_settings() -> Settings:
         jwt_expiry_minutes=60,
         database_url="postgresql+asyncpg://postgres:postgres@localhost:5432/test_db",
         cors_origins="http://localhost:3000",
+        # Fixed test-only Fernet key so the login/logout flow exercises
+        # encrypt/decrypt end-to-end instead of silently no-op'ing.
+        broker_token_encryption_key="RE3Kurb2aXAoc60-vTry1BwGmXSpTT7RQeTkewOGVTg=",
     )
 
 
@@ -36,11 +43,37 @@ def test_settings() -> Settings:
 
 
 @pytest.fixture
-def app(test_settings: Settings) -> FastAPI:
-    """Provide the FastAPI app with settings overridden for the test."""
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    """In-memory SQLite DB standing in for Postgres in tests that touch
+    broker-session persistence, so they don't require a live Postgres
+    instance. Real deployments use Postgres (see app.db.session)."""
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_maker() as session:
+        yield session
+
+    await engine.dispose()
+
+
+@pytest.fixture
+def app(test_settings: Settings, db_session: AsyncSession) -> FastAPI:
+    """Provide the FastAPI app with settings and DB session overridden for the test."""
     fastapi_app.dependency_overrides[get_settings] = lambda: test_settings
+
+    async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    fastapi_app.dependency_overrides[get_db] = _override_get_db
     yield fastapi_app
     fastapi_app.dependency_overrides.pop(get_settings, None)
+    fastapi_app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture

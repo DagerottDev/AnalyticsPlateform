@@ -108,9 +108,9 @@ export function InstrumentSelector({
             }}
             onBlur={submitCustomSymbol}
             placeholder="e.g. RELIANCE"
-            className="pl-8"
+            className="pl-9"
           />
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
         </div>
       </div>
 

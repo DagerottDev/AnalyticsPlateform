@@ -37,11 +37,25 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = "http://localhost:3001"
 
+    # How often the /market/ws proxy re-polls REST quotes for subscribed
+    # symbols as a resilience fallback (see market_ws's poller()). Fyers'
+    # quotes endpoint rate-limits aggressively per app, so this shouldn't be
+    # pushed much below a few seconds, especially with several tickers/pages
+    # open concurrently, each holding their own subscription.
+    market_quote_poll_interval_seconds: float = 3.0
+
     # Broker auto-login
     # Fyers access tokens are valid ~24h; caching avoids re-hitting the
     # internal Vagator login endpoints on every /auto-login call, which is
     # what triggers Cloudflare's rate limiting on repeated automated logins.
     broker_token_cache_ttl_seconds: int = 82800  # 23 hours
+
+    # Encrypts the broker access token before it's persisted to the
+    # broker_sessions table (see app.core.crypto). A urlsafe-base64 Fernet
+    # key — generate one with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Left unset, the token is stored in plaintext (with a startup warning).
+    broker_token_encryption_key: str | None = None
 
     # Server-side Fyers credentials for silent auto-login (POST /auth/auto-login).
     # Optional — when unset, the frontend falls back to the manual login form.

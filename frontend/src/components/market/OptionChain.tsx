@@ -118,7 +118,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
             Underlying ({symbol}): <span className="tnum font-bold text-[var(--color-text-bright)]">{formatINR(S)}</span>
           </span>
           <span className="text-sm font-medium text-[var(--color-text-secondary)]">
-            DTE: <span className="tnum font-bold text-[var(--color-text-bright)]">{(T * 365).toFixed(1)} days</span>
+            DTE: <span className="tnum font-bold text-[var(--color-text-bright)]">{Math.round(T * 365)} days</span>
           </span>
         </div>
         <Button variant="outline" size="sm" onClick={() => setShowGreeks(!showGreeks)}>

@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 
+from app.config import Settings, get_settings
 from app.core.security import decode_token, get_current_user
 from app.schemas.market import ExpiryList, Instrument, InstrumentResponse
 from app.services.fyers_service import from_fyers_ws_symbol, to_fyers_ws_symbol
@@ -94,7 +95,9 @@ async def get_history(
 
 
 @router.websocket("/ws")
-async def market_ws(websocket: WebSocket, token: str = Query(...)) -> None:
+async def market_ws(
+    websocket: WebSocket, token: str = Query(...), settings: Settings = Depends(get_settings)
+) -> None:
     """Proxies live Fyers ticks to the browser.
 
     The browser WebSocket API can't set an Authorization header, so the JWT
@@ -168,10 +171,12 @@ async def market_ws(websocket: WebSocket, token: str = Query(...)) -> None:
             await websocket.send_json({"type": "tick", "data": message})
 
     async def poller() -> None:
-        """Periodic 1Hz quote polling loop, so ticker values keep updating
-        even if the live Fyers websocket tick stream isn't flowing."""
+        """Periodic REST quote polling loop, so ticker values keep updating
+        even if the live Fyers websocket tick stream isn't flowing. Interval
+        is configurable (MARKET_QUOTE_POLL_INTERVAL_SECONDS) since Fyers
+        rate-limits the quotes endpoint aggressively per app."""
         while True:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(settings.market_quote_poll_interval_seconds)
             if subscribed and service is not None:
                 sym_list = [from_fyers_ws_symbol(s) for s in list(subscribed)]
                 try:

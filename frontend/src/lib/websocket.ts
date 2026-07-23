@@ -57,6 +57,13 @@ interface RawFyersTick {
   change?: number;
   change_percent?: number;
   timestamp?: number;
+  open_price?: number;
+  high_price?: number;
+  low_price?: number;
+  prev_close_price?: number;
+  ask?: number;
+  bid?: number;
+  atp?: number;
 }
 
 /**
@@ -76,6 +83,13 @@ export function normalizeTick(raw: RawFyersTick): MarketTick | null {
       timestamp: raw.timestamp ? raw.timestamp * 1000 : Date.now(),
       change: raw.change ?? 0,
       change_percent: raw.change_percent ?? 0,
+      open_price: raw.open_price,
+      high_price: raw.high_price,
+      low_price: raw.low_price,
+      prev_close_price: raw.prev_close_price,
+      ask: raw.ask,
+      bid: raw.bid,
+      atp: raw.atp,
     };
   }
   if (!raw.symbol || typeof raw.ltp !== "number") return null;

@@ -13,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.config import get_settings
 from app.core.exceptions import register_exception_handlers
+from app.db.session import async_session_maker
+from app.services.broker_session_store import restore_broker_session
 from app.services.session_manager import session_manager
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     logger.info("Starting %s v%s", settings.app_title, settings.app_version)
     logger.info("Environment: %s", settings.app_env)
+    try:
+        async with async_session_maker() as db:
+            await restore_broker_session(db, settings)
+    except Exception:
+        # A DB outage (e.g. Postgres not up yet in dev) shouldn't block
+        # startup — it just means the user logs in as normal, same as
+        # before this restore step existed.
+        logger.exception("Could not restore persisted broker session; continuing without one.")
     yield
     # Shutdown
     await session_manager.clear()

@@ -12,7 +12,8 @@ import { Instrument } from "@/types/market";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
-import { LoadingState } from "@/components/ui/LoadingState";
+import { Tabs } from "@/components/ui/Tabs";
+import { Activity, History } from "lucide-react";
 
 // Components
 import { IVSmileChart } from "@/components/volatility/IVSmileChart";
@@ -20,7 +21,13 @@ import { TermStructureChart } from "@/components/volatility/TermStructureChart";
 import { HistoricalVolChart } from "@/components/volatility/HistoricalVolChart";
 import { IVSurfaceHeatmap } from "@/components/volatility/IVSurfaceHeatmap";
 
+const TABS = [
+  { id: "live", label: "Live Volatility", icon: Activity },
+  { id: "historical", label: "Historical Analysis", icon: History },
+];
+
 export default function VolatilityPage() {
+  const [activeTab, setActiveTab] = useState<string>("live");
   const [symbol, setSymbol] = useState<string>("NIFTY");
   const [expiry, setExpiry] = useState<string | null>(null);
   
@@ -183,57 +190,78 @@ export default function VolatilityPage() {
           description="IV Rank, Skew, Term Structure, and Historical Surface."
         />
 
-        {/* Top Controls & Metrics */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
-          <div className="col-span-1 flex flex-col gap-4">
-            <InstrumentSelector
-              symbol={symbol}
-              onSymbolChange={(s) => { setSymbol(s); setExpiry(null); }}
-              expiry={expiry}
-              onExpiryChange={setExpiry}
-            />
+        {/* Instrument controls — apply to both tabs below */}
+        <Card>
+          <InstrumentSelector
+            symbol={symbol}
+            onSymbolChange={(s) => { setSymbol(s); setExpiry(null); }}
+            expiry={expiry}
+            onExpiryChange={setExpiry}
+          />
+        </Card>
 
-            {/* Metrics Cards */}
-            {loadingHist ? (
-              <Card>
-                <LoadingState size="sm" />
-              </Card>
-            ) : metrics ? (
-              <Card className="flex flex-col gap-3">
-                <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] pb-2">
-                  <span className="text-sm font-medium text-[var(--color-text-secondary)]">Current IV</span>
-                  <span className="tnum font-mono text-lg font-bold text-[var(--color-accent-blue)]">{(metrics.current_iv * 100).toFixed(1)}%</span>
-                </div>
-                <div className="flex items-center justify-between border-b border-[var(--color-border-subtle)] pb-2">
-                  <span className="text-sm font-medium text-[var(--color-text-secondary)]">IV Rank (IVR)</span>
-                  <span className="tnum font-mono text-lg font-bold text-[var(--color-accent-purple)]">{metrics.iv_rank.toFixed(1)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-[var(--color-text-secondary)]">IV Percentile</span>
-                  <span className="tnum font-mono text-lg font-bold text-[var(--color-text-bright)]">{metrics.iv_percentile.toFixed(1)}%</span>
-                </div>
-                <div className="mt-1 text-center text-[10px] text-[var(--color-text-muted)]">
-                  Based on 1Y historical data ({metrics.data_points} days)
-                </div>
-              </Card>
-            ) : null}
-          </div>
+        <Tabs tabs={TABS} value={activeTab} onChange={setActiveTab} />
 
-          <div className="col-span-1 lg:col-span-3">
-             <HistoricalVolChart data={histData} />
-          </div>
-        </div>
+        {activeTab === "live" && (
+          <>
+            {/* Live Volatility Charts — derived from the current live tick/instrument snapshot */}
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <IVSmileChart data={smileData} />
+              <TermStructureChart data={termStructureData} />
+            </div>
+            <IVSurfaceHeatmap data={surfaceData} />
+          </>
+        )}
 
-        {/* Live Volatility Charts */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <IVSmileChart data={smileData} />
-          <TermStructureChart data={termStructureData} />
-        </div>
+        {activeTab === "historical" && (
+          <>
+            {/* Metrics derived from 1Y of daily historical IV/RV data */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {loadingHist ? (
+                [0, 1, 2].map((i) => (
+                  <Card key={i}>
+                    <div className="h-3 w-20 animate-pulse rounded bg-[var(--color-bg-hover)]" />
+                    <div className="mt-3 h-7 w-16 animate-pulse rounded bg-[var(--color-bg-hover)]" />
+                  </Card>
+                ))
+              ) : metrics ? (
+                <>
+                  <Card>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Current IV
+                    </p>
+                    <p className="tnum mt-2 text-2xl font-black text-[var(--color-accent-blue)]">
+                      {(metrics.current_iv * 100).toFixed(1)}%
+                    </p>
+                  </Card>
+                  <Card>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                      IV Rank (IVR)
+                    </p>
+                    <p className="tnum mt-2 text-2xl font-black text-[var(--color-accent-purple)]">
+                      {metrics.iv_rank.toFixed(1)}
+                    </p>
+                  </Card>
+                  <Card>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                      IV Percentile
+                    </p>
+                    <p className="tnum mt-2 text-2xl font-black text-[var(--color-text-bright)]">
+                      {metrics.iv_percentile.toFixed(1)}%
+                    </p>
+                  </Card>
+                </>
+              ) : null}
+            </div>
+            {metrics && (
+              <p className="text-center text-[10px] text-[var(--color-text-muted)]">
+                Based on 1Y historical data ({metrics.data_points} days)
+              </p>
+            )}
 
-        {/* IV Surface */}
-        <div>
-          <IVSurfaceHeatmap data={surfaceData} />
-        </div>
+            <HistoricalVolChart data={histData} />
+          </>
+        )}
       </PageContainer>
     </DashboardLayout>
   );

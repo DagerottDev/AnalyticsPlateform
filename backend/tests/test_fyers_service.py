@@ -257,6 +257,32 @@ async def test_get_instruments_gives_up_after_max_retries_on_persistent_rate_lim
     assert service.client.optionchain.call_count == FyersService._MAX_FETCH_RETRIES
 
 
+@pytest.mark.asyncio
+async def test_get_quotes_does_not_double_prefix_already_qualified_symbols() -> None:
+    """Regression test: get_quotes used to run every symbol through
+    _to_fyers_symbol unconditionally, which double-wrapped an
+    already-exchange-qualified option trading symbol into
+    "NSE:NSE:...-EQ" — rejected by Fyers with 'Please provide a valid
+    symbol'. Bare underlying aliases still need the NSE:...-EQ mapping;
+    already-qualified symbols must pass through untouched."""
+    service = _make_service()
+    service.client.quotes = MagicMock(
+        return_value={
+            "s": "ok",
+            "d": [
+                {"n": "NSE:RELIANCE-EQ", "v": {"lp": 1300.0}, "s": "ok"},
+                {"n": "NSE:NIFTY26JUL23000PE", "v": {"lp": 50.0}, "s": "ok"},
+            ],
+        }
+    )
+
+    await service.get_quotes(["RELIANCE", "NSE:NIFTY26JUL23000PE"])
+
+    service.client.quotes.assert_called_once_with(
+        {"symbols": "NSE:RELIANCE-EQ,NSE:NIFTY26JUL23000PE"}
+    )
+
+
 def test_to_fyers_ws_symbol_maps_bare_index_alias() -> None:
     """A bare underlying alias (what the UI subscribes for the underlying's
     own price) must be exchange-qualified before reaching Fyers — a bare

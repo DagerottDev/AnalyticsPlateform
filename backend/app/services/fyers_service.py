@@ -137,7 +137,13 @@ class FyersService(BrokerService):
         if not symbols:
             return []
 
-        fyers_symbols = [self._to_fyers_symbol(s) for s in symbols]
+        # Callers pass either a bare underlying alias ("NIFTY") or an
+        # already-exchange-qualified option/equity trading symbol
+        # ("NSE:NIFTY26JUL23000PE") straight from the instrument list —
+        # only the former needs the NSE:...-EQ mapping. Using
+        # _to_fyers_symbol unconditionally here used to double-wrap the
+        # latter into "NSE:NSE:...-EQ", which Fyers rejects.
+        fyers_symbols = [to_fyers_ws_symbol(s) for s in symbols]
         try:
             response = await asyncio.to_thread(
                 self.client.quotes, {"symbols": ",".join(fyers_symbols)}
@@ -175,6 +181,12 @@ class FyersService(BrokerService):
                 elif chp is None:
                     chp = 0.0
 
+                high_price = val.get("high_price") or cmd.get("h") or cmd.get("high_price") or 0.0
+                low_price = val.get("low_price") or cmd.get("l") or cmd.get("low_price") or 0.0
+                ask = val.get("ask") or cmd.get("ask") or 0.0
+                bid = val.get("bid") or cmd.get("bid") or 0.0
+                atp = val.get("atp") or cmd.get("atp") or 0.0
+
                 ui_symbol = from_fyers_ws_symbol(fyers_sym)
                 quotes_list.append(
                     {
@@ -185,6 +197,13 @@ class FyersService(BrokerService):
                         "open_interest": 0,
                         "change": float(ch),
                         "change_percent": float(chp),
+                        "open_price": float(open_price),
+                        "high_price": float(high_price),
+                        "low_price": float(low_price),
+                        "prev_close_price": float(prev_close) if prev_close else 0.0,
+                        "ask": float(ask),
+                        "bid": float(bid),
+                        "atp": float(atp),
                         "timestamp": int(time.time()),
                     }
                 )

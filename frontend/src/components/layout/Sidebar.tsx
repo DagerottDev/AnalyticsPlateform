@@ -18,7 +18,6 @@ import {
   History,
   LayoutDashboard,
   LineChart,
-  Settings,
   Waves,
   Zap,
 } from "lucide-react";
@@ -131,19 +130,6 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-
-      {/* Bottom — Settings */}
-      <div className="border-t border-[var(--color-border-subtle)] p-2">
-        <button
-          className={cn(
-            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
-            collapsed && "justify-center px-0"
-          )}
-        >
-          <Settings className="h-4 w-4 shrink-0" />
-          {!collapsed && <span>Settings</span>}
-        </button>
-      </div>
     </aside>
   );
 }

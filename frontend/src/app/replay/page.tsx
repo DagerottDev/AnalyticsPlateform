@@ -19,6 +19,14 @@ function yesterday(): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** True for Sat/Sun, parsed as a local calendar date (not UTC) so a
+ * "YYYY-MM-DD" from a date input can't shift a day off under IST. */
+function isWeekend(isoDate: string): boolean {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const dayOfWeek = new Date(year, month - 1, day).getDay();
+  return dayOfWeek === 0 || dayOfWeek === 6;
+}
+
 export default function ReplayPage() {
   const {
     isActive,
@@ -37,8 +45,12 @@ export default function ReplayPage() {
   const [error, setError] = useState<string | null>(null);
 
   const handleStart = async () => {
-    setIsGenerating(true);
     setError(null);
+    if (isWeekend(sessionDate)) {
+      setError("Selected date is a weekend — the market was closed. Pick a weekday.");
+      return;
+    }
+    setIsGenerating(true);
     try {
       // 1. Fetch the real instruments list so we have valid strikes to price
       const [instrumentData, candles] = await Promise.all([

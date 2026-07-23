@@ -12,10 +12,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fyers_apiv3 import fyersModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.exceptions import BrokerAuthError, BrokerConnectionError
 from app.core.security import create_access_token, get_current_user
+from app.db.session import get_db
 from app.models.user import TradingMode
 from app.schemas.auth import (
     AuthErrorResponse,
@@ -23,6 +25,7 @@ from app.schemas.auth import (
     LoginResponse,
     UserProfileResponse,
 )
+from app.services.broker_session_store import clear_broker_session, save_broker_session
 from app.services.fyers_headless import get_fyers_access_token_headless
 from app.services.fyers_service import FyersService
 from app.services.session_manager import session_manager
@@ -66,7 +69,7 @@ async def _resolve_access_token(request: LoginRequest, settings: Settings) -> st
 
 
 async def _complete_login(
-    access_token: str, app_id: str, trading_mode: TradingMode, settings: Settings
+    access_token: str, app_id: str, trading_mode: TradingMode, settings: Settings, db: AsyncSession
 ) -> LoginResponse:
     """Verify a resolved Fyers access_token and establish the broker session.
 
@@ -80,6 +83,15 @@ async def _complete_login(
 
         token = create_access_token(data=profile.to_jwt_payload(), settings=settings)
         await session_manager.set_session(profile.client_id, service)
+        await save_broker_session(
+            db,
+            settings,
+            client_id=profile.client_id,
+            app_id=app_id,
+            access_token=access_token,
+            trading_mode=trading_mode,
+            account_name=profile.account_name,
+        )
 
         return LoginResponse(
             access_token=token,
@@ -122,6 +134,7 @@ async def _complete_login(
 async def login(
     request: LoginRequest,
     settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
     """Authenticate with Fyers and establish the single active broker session.
 
@@ -143,7 +156,7 @@ async def login(
     except BrokerAuthError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
 
-    return await _complete_login(access_token, request.app_id, trading_mode, settings)
+    return await _complete_login(access_token, request.app_id, trading_mode, settings, db)
 
 
 @router.post(
@@ -165,7 +178,9 @@ async def login(
         },
     },
 )
-async def auto_login(settings: Settings = Depends(get_settings)) -> LoginResponse:
+async def auto_login(
+    settings: Settings = Depends(get_settings), db: AsyncSession = Depends(get_db)
+) -> LoginResponse:
     """Authenticate using server-side Fyers credentials, with no request body.
 
     Mirrors the TOTP auto-login branch of /login, but sources credentials
@@ -199,6 +214,7 @@ async def auto_login(settings: Settings = Depends(get_settings)) -> LoginRespons
         settings.fyers_app_id,
         TradingMode(settings.fyers_trading_mode),
         settings,
+        db,
     )
 
 
@@ -210,6 +226,7 @@ async def auto_login(settings: Settings = Depends(get_settings)) -> LoginRespons
 )
 async def logout(
     current_user: dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Logout the current user.
 
@@ -219,10 +236,12 @@ async def logout(
 
     Args:
         current_user: Decoded JWT payload.
+        db: Database session, used to drop the persisted broker session.
 
     Returns:
         Success message.
     """
     client_id = current_user["sub"]
     await session_manager.remove_session(client_id)
+    await clear_broker_session(db)
     return {"message": "Successfully logged out", "client_id": client_id}
