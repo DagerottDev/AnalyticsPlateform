@@ -15,10 +15,10 @@ Append all major decisions here.
 
 ## ADR-002: Zustand + TanStack Query for State Management
 **Date:** 2026-06-26
-**Status:** Accepted
+**Status:** Superseded
 **Context:** Need client-side state for auth/UI and server-side state for market data and analytics.
-**Decision:** Zustand for client state (auth, UI preferences, sidebar state). TanStack Query for server state (API calls, caching, real-time data). No Redux.
-**Consequences:** Small bundle, simple APIs, built-in cache invalidation. TQ handles refetching, polling, and stale-while-revalidate out of the box.
+**Decision:** This was replaced by Zustand for client state and explicit Axios-backed API modules/hooks for server requests. TanStack Query is not a project dependency.
+**Consequences:** The current data flow remains small and explicit; market subscriptions and polling are managed by the shared market-data hook and backend stream proxy.
 
 ---
 

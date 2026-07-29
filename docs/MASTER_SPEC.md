@@ -1,7 +1,7 @@
 # MASTER SPEC - Option Analytics Platform
 
 ## Vision
-Build a production-grade, responsive web platform for Indian options analytics with multi-broker support (Fyers, Zerodha).
+Build a production-grade, responsive web platform for Indian options analytics with native Fyers and Dhan broker support.
 
 ## Core Goals
 - Single login through native broker credentials

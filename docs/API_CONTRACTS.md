@@ -93,13 +93,18 @@ Active option instruments for an underlying symbol (e.g. `NIFTY`).
       "expiry": "25-Jul-2024",
       "strike": 22000.0,
       "option_type": "CE",
-      "exchange": "NFO"
+      "exchange": "NFO",
+      "oi": 125000,
+      "oi_change": 4200,
+      "oi_change_percent": 3.48
     }
   ]
 }
 ```
 
-**Errors:** `401` (no active broker session), `500`
+Malformed broker instrument rows are omitted rather than returned to the client.
+
+**Errors:** `401` (no active broker session), `503` (broker unavailable)
 
 ### GET `/market/expiries/{symbol}`
 Sorted list of available expiry dates for a symbol.
@@ -110,6 +115,11 @@ Sorted list of available expiry dates for a symbol.
   "expiries": ["25-Jul-2024", "01-Aug-2024"]
 }
 ```
+
+Quote rows are normalized and malformed broker rows are omitted. Fyers live
+ticks and quote snapshots do not carry option open interest, so their
+`open_interest` value is `0`; option-chain `instrument.oi` is the current
+snapshot source used by Dealer Flow when live OI is unavailable.
 
 ### GET `/market/quotes?symbols=NIFTY,NIFTY24JUL22000CE`
 Live REST price quotes for a comma-separated list of symbols.
@@ -159,7 +169,11 @@ Proxies live Fyers ticks to the browser. The JWT is passed as a query param
 since the browser WebSocket API can't set an Authorization header.
 
 Client → server: `{"action": "subscribe" | "unsubscribe", "symbols": [...]}`
-Server → client: `{"type": "tick", "data": {...}}` | `{"type": "info", "message": "..."}`
+Server → client: `{"type": "tick", "data": {...}}`,
+`{"type": "info", "message": "..."}`, or recoverable
+`{"type": "error", "message": "..."}`. The backend shares one Fyers
+stream per broker session and seeds/polls REST quotes when live ticks are not
+available.
 
 ---
 

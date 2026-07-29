@@ -6,8 +6,8 @@ A production-grade, responsive web platform for Indian options analytics with na
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 15, TypeScript, Tailwind CSS, shadcn/ui, Zustand, TanStack Query |
-| Backend | FastAPI, Python 3.12, WebSockets |
+| Frontend | Next.js 15, TypeScript, Tailwind CSS, Zustand, Lightweight Charts, Recharts |
+| Backend | FastAPI, Python 3.12+, Pydantic v2, SQLAlchemy 2, WebSockets |
 | Analytics | Native TypeScript (Black-Scholes, Greeks, GBM Replay Engine) |
 | Storage | PostgreSQL + TimescaleDB, Redis |
 | Broker | Fyers SDK + Dhan API v2 adapter |
@@ -76,7 +76,7 @@ enter the instrument as `EXCHANGE_SEGMENT:SECURITY_ID` (for example
 ## Documentation
 
 - [Master Spec](docs/MASTER_SPEC.md) — Full feature requirements
-- [Milestones](docs/MILESTONES.md) — Development roadmap
+- [Milestones](docs/MILESTONES.md) — Development history
 - [Architecture](docs/Architecture.md) — Technical architecture
 - [API Contracts](docs/API_CONTRACTS.md) — REST API definitions
 - [Decisions](docs/DECISIONS.md) — Architecture decision records

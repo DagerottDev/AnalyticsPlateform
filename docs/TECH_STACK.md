@@ -16,7 +16,7 @@
 - PostgreSQL 16 + TimescaleDB extension — historical OHLCV storage
 - Redis — reserved for session cache / pub-sub (not yet wired into any endpoint)
 - python-jose — JWT issuance/verification
-- Native broker SDKs: `fyers-apiv3`, `kiteconnect` (Zerodha) — no third-party broker gateway
+- Native broker integrations: `fyers-apiv3` and the Dhan v2 HTTP adapter — no third-party broker gateway
 - Poetry — dependency management
 - Ruff + Mypy (strict) — lint/type-check gates in CI
 - Pytest + pytest-asyncio — test suite

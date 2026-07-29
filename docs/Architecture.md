@@ -1,35 +1,24 @@
 # Architecture
 
-Frontend:
-- Next.js
-- TypeScript
-- Tailwind
-- shadcn/ui
-- Zustand
-- TanStack Query
-- TradingView Lightweight Charts
+## Frontend
 
-Backend:
-- FastAPI
-- Python
-- WebSockets
+- Next.js 15 App Router, React 19, TypeScript, and Tailwind CSS.
+- Zustand owns local auth, alert, replay, settings, and UI state; API access uses the shared Axios client and focused hooks.
+- Lightweight Charts renders OHLCV views; Recharts renders Dealer Flow and volatility views.
+- A browser WebSocket connects to the backend market-stream proxy. REST quote seeding and polling provide a resilience fallback.
 
-Analytics:
-- NumPy
-- Pandas
-- PyVollib
-- QuantLib
-- Numba
+## Backend
 
-Storage:
-- PostgreSQL
-- TimescaleDB
-- Redis
+- FastAPI with Pydantic v2 request/response schemas and SQLAlchemy 2 async mappings.
+- Connected Fyers or Dhan sessions remain server-side; the browser receives only the application JWT and normalized market data.
+- The backend validates and normalizes broker payloads at API boundaries, persists journals/alerts/snapshots, and runs alert/backfill background loops.
 
-Broker Layer:
-- Native Broker SDKs
+## Analytics and storage
 
-Deployment:
-- Docker
-- Kubernetes
-- CI/CD
+- TypeScript handles interactive chart, strategy, replay, and Dealer Flow calculations; Python handles server-side Greeks, volatility, alert evaluation, and persistence jobs.
+- PostgreSQL with TimescaleDB stores historical OHLCV and daily volatility snapshots. Redis supports token revocation and is provisioned through Docker Compose.
+
+## Deployment
+
+- Docker Compose provides PostgreSQL, Redis, backend, and frontend services locally.
+- GitHub Actions runs frontend lint/type/test/build checks and backend Ruff, Mypy, and Pytest checks.

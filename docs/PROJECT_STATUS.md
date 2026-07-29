@@ -19,6 +19,11 @@ Current Milestone:
 - Made durable alert channels retry transient delivery failures with correlated, secret-safe structured logs; misconfigured enabled channels are now reported.
 - Added rate-limit outcome logging and deterministic coverage for data freshness and transient delivery retries. Existing responsive layouts for the dashboard, alerts, charts, and chain retain usable controls and information hierarchy at narrow widths.
 
+## Dealer Flow open-interest correction (2026-07-30)
+
+- Fixed empty GEX, Vanna, and Charm profiles caused by Fyers live ticks and quote snapshots reporting `open_interest: 0`. Dealer Flow now prefers a positive live OI value and falls back to the typed OI snapshot returned with each option-chain instrument.
+- Added regression coverage for the fallback, including the case where a broker later supplies a live OI value.
+
 ## Targeted quality refactor (2026-07-29)
 
 - Preserved the current API contracts while tightening SQLAlchemy mappings, broker/alert validation boundaries, and persisted literal-backed response values.
@@ -44,11 +49,11 @@ Completed:
 
 - M2: Market Data
   - Market data schemas and API endpoints (`/market/instruments`, `/market/expiries`)
-  - Simulated WebSocket client (`MockWebSocketClient`) with reconnect handling
+  - Backend-mediated Fyers WebSocket proxy with reconnect handling and REST quote fallback
   - `useMarketData` React hook for live streaming ticks
   - Option Chain UI with Calls/Puts grid and ITM highlighting
   - Instrument selection (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY) and expiry picker
-  - *Correction:* the original wording here ("mock fallback") implied a real broker WebSocket path exists and mock is the fallback. In reality there has never been a real Fyers WebSocket connection anywhere in the codebase — it's mock-only. See Known Issues below.
+  - *Correction:* the original mock-only implementation was replaced by the backend-mediated Fyers stream; REST quote polling remains available if the upstream stream is delayed.
 
 - M3: Historical Engine
   - Database setup with SQLAlchemy and Alembic.
@@ -81,7 +86,7 @@ Completed:
 - M7: Dealer Flow
   - Mathematical implementation of Gamma Exposure (GEX), Zero Gamma, Call Walls, and Put Walls.
   - Created interactive `GEXProfileChart` visually separating Call (positive) and Put (negative) exposures.
-  - Built the `/dealer-flow` dashboard unifying these metrics with live WebSocket data.
+  - Built the `/dealer-flow` dashboard with live price ticks and option-chain OI snapshots; Fyers tick OI is unavailable, so the chain snapshot is the exposure fallback.
   - *Correction:* Vanna and Charm Exposure were **not** actually implemented in M7 despite `FEATURE_MATRIX.md` marking them "✅ Done" at the time — the page imported functions that didn't exist and didn't compile (`tsc` failed outright) until the Post-M10 audit pass below implemented them for real.
 
 - M8: Strategy Builder
@@ -115,7 +120,7 @@ Completed:
   - **Gave Strategy Builder's named strategies real substance.** Iron Condor/Straddle/Strangle/Butterfly/Calendar/Diagonal previously had zero preset code — only a generic manual leg builder existed, and Calendar/Diagonal couldn't even be represented correctly (every leg shared one strategy-wide time-to-expiry). Added `strategyPresets.ts` with a real generator per strategy, wired a "Load Preset" control into `LegManager`, and changed `calculatePayoffProfile`/`calculateNetGreeks` to derive each leg's own T from its own instrument's expiry (proven correct with a test showing per-leg T changes the priced P&L vs. forcing one shared T).
   - **Implemented real historical candle fetching.** `FyersService.get_historical_data` now calls Fyers' actual `history()` API and parses `candles` rows (mocked in tests against the documented response shape) instead of unconditionally returning `[]` — the TimescaleDB backfill path (`/historical/backfill`) can now actually populate real data, not just accept and silently drop it.
   - Added a free-text stock-symbol field to `InstrumentSelector` alongside the 4 fixed indices, so "Stock F&O" is at least reachable (not a full searchable symbol master — see Known Issues).
-  - Removed `@tanstack/react-query` (frontend) and `redis`/`redis_url` (backend) — both were unused dependencies flagged in a prior audit; this executes the "remove" side of that decision.
+  - Removed unused `@tanstack/react-query`; Redis remains configured for token revocation and Docker deployment.
 
 In Progress:
 - None
@@ -124,20 +129,17 @@ Pending:
 - See "Known Issues" — the Tier 3 items below are deliberately deferred, not scheduled.
 
 Known Issues:
-- **`FyersService.get_instruments` (option-chain / instrument-master fetching) is still a stub returning `[]`.** Fyers' real `optionchain()` response shape was only corroborated via web search of community posts, not an official verified schema or a live test account — implementing it against a guessed shape risked shipping exactly the kind of "looks done, silently wrong" code this audit exists to catch, so it was deliberately left alone rather than guessed at. Concretely this means: expiries, multi-strike option-chain data, and anything downstream of it (Option Chain, Heatmaps, IV Smile/Surface, Dealer Flow, Strategy Builder leg selection) run on the frontend's mock-data fallback in a real (non-mock) session, not live broker data.
-- **Real broker WebSocket streaming is not implemented.** `frontend/src/lib/websocket.ts`'s `MockWebSocketClient` synthesizes random-walk ticks; no code anywhere (frontend or backend) opens a real Fyers WebSocket connection. This needs a backend-mediated WS proxy (a Fyers access token can't safely go to the browser) — a real architecture item, not a quick fix.
-- **Stock F&O selection is a free-text field, not a searchable symbol master.** You can type a symbol, but there's no lookup/autocomplete against Fyers' actual instrument list (which itself depends on the `get_instruments` gap above).
+- **Fyers option OI is snapshot-based.** Fyers live ticks and REST quotes do not provide option OI. The option-chain response supplies OI on a short cache TTL, and Dealer Flow uses that snapshot when a live OI value is absent.
+- **Dhan does not expose a Fyers-compatible option-chain-by-symbol API.** The Dhan adapter supports authenticated account, order, portfolio, and explicit-security quote flows; chain-driven analytics require a connected Fyers session.
 - **Replay engine's OI and IV are not truly simulated.** `replayEngine.ts` uses a real GBM (Geometric Brownian Motion) process for Price, but Open Interest is a static `10000 + strike*5` formula (no time variance) and IV is a single constant fed into every tick for the whole session (no smile/skew/vol-of-vol dynamics). "Greeks replay" isn't generated by the replay engine either — it's recomputed generically downstream from the simulated price, the same code path used in live mode.
 - **7 of the 13 MASTER_SPEC indicators are library-only.** WMA, HMA, VWMA, Stochastic RSI, ATR, ADX, and Donchian Channel are implemented and tested in `indicators.ts` but not wired into the `/charts` UI (only SMA, EMA, Bollinger, RSI, and now Supertrend are chart-toggleable).
 - **Dual-axis comparison charts and multi-strike price overlays** (both named in `MASTER_SPEC.md`'s Visualization section, absent from `FEATURE_MATRIX.md` entirely) are not implemented anywhere.
-- **Volatility data is backend-synthetic, not live-market.** `backend/app/api/v1/volatility.py`'s historical IV/RV series is a `random.gauss` random walk per symbol, not derived from real market data — the routing/field-mismatch bug that made it *worse* (silently falling back to an even-more-random frontend mock) is fixed, but the underlying data source itself is still synthetic.
-- `@tanstack/react-query` and `redis` — resolved. Both were unused dependencies; removed from `frontend/package.json` and `backend/pyproject.toml` respectively (Redis stays provisioned in `docker-compose` for future use, just not wired into any backend code path).
+- **Volatility history begins with a realized-volatility proxy until sufficient daily ATM-IV snapshots accumulate.** The backend derives realized volatility from broker daily candles and persists one ATM-IV observation per day when a live option pair is available.
 - **Quality checks**: the targeted refactor resolved the previous ESLint warning set and strict Mypy findings. The supported verification commands are listed in the 2026-07-29 quality-pass section above.
 - A prior audit (2026-07-06) found and fixed a batch of regressions left over from the OpenAlgo → native broker SDK migration (2f06dfb, acff4bf) — retained here for history: a syntax error that prevented the backend from importing at all, a double-prefixed API router, a dead `openalgo_host` field reference, an undefined `tradingSymbols` reference crashing `/chain`, and a missing `calculateOptionPrice` export.
 
 Next Actions:
-- If live Fyers credentials become available: verify the real `optionchain()` response shape against a live account, then implement `get_instruments`/`get_expiries` for real (the option-chain item above is the single highest-leverage remaining gap — nearly every other "mock data" symptom traces back to it).
-- Decide whether real broker WebSocket streaming is worth the backend WS-proxy architecture, or whether the mock feed is acceptable for the platform's actual use case.
+- Verify the current Fyers option-chain and stream behavior against production credentials on each SDK upgrade, especially the OI snapshot fields used by Dealer Flow.
 - Wire the remaining 7 library-only indicators into the `/charts` UI if there's demand for them beyond SMA/EMA/Bollinger/RSI/Supertrend.
 
 Tech Stack Locked:
@@ -145,7 +147,7 @@ Tech Stack Locked:
 - Frontend: Next.js 15 + TypeScript + Tailwind v4 + Zustand + Lightweight Charts + Recharts + Sonner
 - Database: PostgreSQL + TimescaleDB
 - Cache: Redis (provisioned in `docker-compose`, intentionally not a backend dependency — nothing in the codebase consumes it)
-- Broker: Native SDK (Fyers only — Zerodha support was removed; see `backend/app/services/fyers_service.py` / `fyers_headless.py`)
+- Broker: Native Fyers SDK and Dhan API v2 adapter
 - CI/CD: GitHub Actions
 - Container: Docker + Docker Compose
 

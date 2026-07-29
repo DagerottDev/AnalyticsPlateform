@@ -89,7 +89,7 @@ To deploy this platform securely to a live server (e.g., Ubuntu 22.04 on Digital
      # Important: In prod, CORS should be specific
      CORS_ORIGINS=https://yourdomain.com
      ```
-     Note: broker credentials (Fyers/Zerodha) are not environment variables — they are
+     Note: broker credentials (Fyers/Dhan) are not environment variables — they are
      supplied per-request via the `/api/v1/auth/login` body.
    - For the **Frontend** (`frontend/.env.local`):
      ```env

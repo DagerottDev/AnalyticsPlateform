@@ -30,8 +30,11 @@ policy is configured yet — this is a gap to revisit once volume grows.
 
 ## Broker sessions
 
-There is no `users`/`accounts` table. Authentication is stateless: `POST /auth/login`
-validates credentials directly against the broker's API (Fyers/Zerodha), issues a JWT, and
-keeps the live broker client in an in-memory `SessionManager` (`app/services/session_manager.py`)
-keyed by `client_id`. Restarting the backend drops all sessions — there is no persistence of
-broker credentials or sessions in the database by design (single-account MVP).
+There is no `users`/`accounts` table. `POST /auth/login` validates the connected Fyers or
+Dhan account and issues a JWT. `SessionManager` keeps the live, non-serializable broker client
+in memory, keyed by `client_id`.
+
+`broker_sessions` stores the one active session's reconstructable data (broker, client ID, app
+ID, encrypted access token, mode, account name, and connection time) so startup can restore it.
+`broker_credentials` stores encrypted Fyers TOTP credentials for optional auto-login. The live
+client itself is always rebuilt in memory; neither table represents a multi-user account system.
