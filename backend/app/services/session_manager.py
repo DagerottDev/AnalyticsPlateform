@@ -31,6 +31,10 @@ class SessionManager:
             return self._service
         return None
 
+    def get_active_session(self) -> BrokerService | None:
+        """Return the sole active session for trusted background jobs."""
+        return self._service
+
     async def clear(self) -> None:
         """Close and remove the active session, if any."""
         if self._service is not None:

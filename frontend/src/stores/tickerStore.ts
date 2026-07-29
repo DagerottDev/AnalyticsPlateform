@@ -1,7 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-interface TickerState {
+/**
+ * Persisted app-wide watchlist. `tickers` remains the state key for backward
+ * compatibility with the Dashboard ticker cards and existing localStorage.
+ */
+interface WatchlistState {
   tickers: string[];
   addTicker: (symbol: string) => void;
   removeTicker: (symbol: string) => void;
@@ -9,12 +13,12 @@ interface TickerState {
   resetTickers: () => void;
 }
 
-const DEFAULT_TICKERS = ["NIFTY", "BANKNIFTY"];
+const DEFAULT_WATCHLIST = ["NIFTY", "BANKNIFTY"];
 
-export const useTickerStore = create<TickerState>()(
+export const useTickerStore = create<WatchlistState>()(
   persist(
     (set) => ({
-      tickers: DEFAULT_TICKERS,
+      tickers: DEFAULT_WATCHLIST,
 
       addTicker: (symbol: string) => {
         const formatted = symbol.trim().toUpperCase();
@@ -42,8 +46,11 @@ export const useTickerStore = create<TickerState>()(
         }
       },
 
-      resetTickers: () => set({ tickers: DEFAULT_TICKERS }),
+      resetTickers: () => set({ tickers: DEFAULT_WATCHLIST }),
     }),
     { name: "ticker-storage" }
   )
 );
+
+/** Preferred name for new consumers; the Dashboard alias remains supported. */
+export const useWatchlistStore = useTickerStore;

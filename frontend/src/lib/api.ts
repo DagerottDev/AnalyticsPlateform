@@ -51,6 +51,13 @@ const SILENT_FAILURE_URLS = ["/auth/auto-login"];
 // signature of that specific failure — see session_manager.get_session().
 const SESSION_LOST_DETAIL = "Active broker session not found";
 
+// The other recoverable 401: the browser's own JWT has expired
+// (JWT_EXPIRY_MINUTES elapsed) — see security.py's decode_token(). Since
+// /auto-login doesn't require a valid JWT, it can silently mint a new one
+// here too, the same way it recovers a lost broker session.
+const isExpiredTokenDetail = (detail: unknown): boolean =>
+  typeof detail === "string" && detail.startsWith("Invalid or expired token");
+
 // Recovery calls are deduped: if several requests 401 with a lost session at
 // once, they all await the same in-flight auto-login rather than each
 // triggering their own.
@@ -82,7 +89,7 @@ apiClient.interceptors.response.use(
     // being lost mid-session instead of only at page load.
     if (
       status === 401 &&
-      detail === SESSION_LOST_DETAIL &&
+      (detail === SESSION_LOST_DETAIL || isExpiredTokenDetail(detail)) &&
       !url.includes("/auth/") &&
       !error.config?.__sessionRecoveryAttempted
     ) {

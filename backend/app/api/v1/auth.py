@@ -8,6 +8,7 @@ and only one broker session is active at a time (see session_manager).
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,7 +30,9 @@ from app.services.broker_credentials_store import load_broker_credentials, save_
 from app.services.broker_session_store import clear_broker_session, save_broker_session
 from app.services.fyers_headless import get_fyers_access_token_headless
 from app.services.fyers_service import FyersService
+from app.services.market_data_backfill import request_market_data_backfill
 from app.services.session_manager import session_manager
+from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,8 @@ async def _complete_login(
             trading_mode=trading_mode,
             account_name=profile.account_name,
         )
+        if settings.market_data_backfill_enabled:
+            request_market_data_backfill()
 
         return LoginResponse(
             access_token=token,
@@ -241,26 +246,33 @@ async def auto_login(
     "/logout",
     status_code=status.HTTP_200_OK,
     summary="Logout",
-    description="Invalidate the current session. Client should discard the token.",
+    description="Invalidate the current session and revoke its token.",
 )
 async def logout(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    blocklist: TokenBlocklist = Depends(get_token_blocklist),
 ) -> dict[str, str]:
     """Logout the current user.
 
-    Note: Since JWTs are stateless, true invalidation requires a Redis
-    blocklist (implemented in M3 with database integration). For now,
-    the client discards the token.
+    Records this token's jti in the Redis-backed revocation blocklist (see
+    app.services.token_blocklist) so it's rejected by every other endpoint
+    from this point on, not just discarded client-side — the token's own
+    `exp` still bounds how long the blocklist entry needs to live.
 
     Args:
         current_user: Decoded JWT payload.
         db: Database session, used to drop the persisted broker session.
+        blocklist: JWT revocation blocklist.
 
     Returns:
         Success message.
     """
     client_id = current_user["sub"]
+    jti = current_user.get("jti")
+    exp = current_user.get("exp")
+    if jti and exp:
+        await blocklist.revoke(jti, datetime.fromtimestamp(exp, tz=UTC))
     await session_manager.remove_session(client_id)
     await clear_broker_session(db)
     return {"message": "Successfully logged out", "client_id": client_id}

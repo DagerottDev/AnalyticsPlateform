@@ -20,6 +20,11 @@ export interface InstrumentResponse {
   instruments: Instrument[];
 }
 
+export interface SymbolSuggestion {
+  symbol: string;
+  name: string;
+}
+
 export interface MarketTick {
   trading_symbol: string;
   last_price: number;

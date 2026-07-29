@@ -16,6 +16,7 @@ keep coming from the periodic option-chain REST fetch in FyersService.
 import asyncio
 import logging
 import os
+import threading
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -50,6 +51,28 @@ for _proxy_var in _PROXY_ENV_VARS:
 from fyers_apiv3.FyersWebsocket import data_ws  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+# data_ws.py's internal keep-alive ping thread (__ping) checks
+# `self.__ws_object.sock.connected` and then calls `.send()` a line later
+# with no lock around the pair — if the underlying TCP connection dies in
+# that gap (network blip, laptop sleep/wake, broker-side idle disconnect)
+# the send raises BrokenPipeError as an uncaught exception in that daemon
+# thread. It's harmless: reconnection is handled independently by the
+# socket's own on_close/restart_flag logic in its run_forever thread. But
+# by default Python dumps a full traceback for it, which reads like a
+# crash. Downgrade just this specific known race to a debug log so real
+# uncaught thread exceptions elsewhere still surface normally.
+_default_threading_excepthook = threading.excepthook
+
+
+def _fyers_ping_excepthook(args: threading.ExceptHookArgs) -> None:
+    if args.exc_type is BrokenPipeError and args.thread is not None and "__ping" in args.thread.name:
+        logger.debug("Fyers ping thread lost its connection (will auto-reconnect): %s", args.exc_value)
+        return
+    _default_threading_excepthook(args)
+
+
+threading.excepthook = _fyers_ping_excepthook
 
 TickListener = Callable[[dict[str, Any]], None]
 QuoteFetcher = Callable[[list[str]], Awaitable[list[dict[str, Any]]]]

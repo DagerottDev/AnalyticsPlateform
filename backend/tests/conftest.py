@@ -4,6 +4,7 @@ Provides test client, mock settings, and auth helpers.
 """
 
 from collections.abc import AsyncGenerator
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -19,6 +20,21 @@ from app.db.session import get_db
 from app.main import app as fastapi_app
 from app.models.user import TradingMode
 from app.services.session_manager import session_manager
+from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
+
+
+class FakeTokenBlocklist(TokenBlocklist):
+    """In-memory stand-in for RedisTokenBlocklist — the test suite shouldn't
+    require a real Redis instance just to exercise the revocation flow."""
+
+    def __init__(self) -> None:
+        self.revoked: set[str] = set()
+
+    async def revoke(self, jti: str, expires_at: datetime) -> None:
+        self.revoked.add(jti)
+
+    async def is_revoked(self, jti: str) -> bool:
+        return jti in self.revoked
 
 
 def get_test_settings() -> Settings:
@@ -63,7 +79,15 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest.fixture
-def app(test_settings: Settings, db_session: AsyncSession) -> FastAPI:
+def token_blocklist() -> FakeTokenBlocklist:
+    """In-memory JWT revocation blocklist for tests — see FakeTokenBlocklist."""
+    return FakeTokenBlocklist()
+
+
+@pytest.fixture
+def app(
+    test_settings: Settings, db_session: AsyncSession, token_blocklist: FakeTokenBlocklist
+) -> FastAPI:
     """Provide the FastAPI app with settings and DB session overridden for the test."""
     fastapi_app.dependency_overrides[get_settings] = lambda: test_settings
 
@@ -71,9 +95,11 @@ def app(test_settings: Settings, db_session: AsyncSession) -> FastAPI:
         yield db_session
 
     fastapi_app.dependency_overrides[get_db] = _override_get_db
+    fastapi_app.dependency_overrides[get_token_blocklist] = lambda: token_blocklist
     yield fastapi_app
     fastapi_app.dependency_overrides.pop(get_settings, None)
     fastapi_app.dependency_overrides.pop(get_db, None)
+    fastapi_app.dependency_overrides.pop(get_token_blocklist, None)
 
 
 @pytest.fixture

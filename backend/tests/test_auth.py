@@ -6,9 +6,10 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import create_access_token, decode_token
 from app.models.user import TradingMode
 from app.services.broker_credentials_store import load_broker_credentials, save_broker_credentials
-from tests.conftest import get_test_settings
+from tests.conftest import FakeTokenBlocklist, get_test_settings
 
 
 @pytest.mark.asyncio
@@ -216,3 +217,57 @@ async def test_logout_unauthenticated(client: AsyncClient) -> None:
     """Logout should fail without authentication."""
     response = await client.post("/api/v1/auth/logout")
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_logout_revokes_the_token_for_future_requests(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    token_blocklist: FakeTokenBlocklist,
+) -> None:
+    """The actual gap this feature closes: reusing a token after logout must
+    now be rejected, not just discarded client-side."""
+    logout_response = await client.post("/api/v1/auth/logout", headers=auth_headers)
+    assert logout_response.status_code == 200
+    assert len(token_blocklist.revoked) == 1
+
+    # Same still-unexpired, still-signature-valid token, reused after logout.
+    reused_response = await client.get("/api/v1/portfolio/funds", headers=auth_headers)
+    assert reused_response.status_code == 401
+    assert reused_response.json()["detail"] == "Token has been revoked"
+
+
+@pytest.mark.asyncio
+async def test_logout_does_not_revoke_other_sessions_token(
+    client: AsyncClient,
+    token_blocklist: FakeTokenBlocklist,
+) -> None:
+    """Two independently-issued tokens for the same user must have distinct
+    jtis — logging out of one session must not silently revoke the other."""
+    settings = get_test_settings()
+    token_a = create_access_token(
+        data={"sub": "TEST_CLIENT_001", "broker": "TestBroker"}, settings=settings
+    )
+    token_b = create_access_token(
+        data={"sub": "TEST_CLIENT_001", "broker": "TestBroker"}, settings=settings
+    )
+    assert decode_token(token_a, settings)["jti"] != decode_token(token_b, settings)["jti"]
+
+    await client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {token_a}"})
+
+    still_valid = await client.get(
+        "/api/v1/portfolio/funds", headers={"Authorization": f"Bearer {token_b}"}
+    )
+    # 401 here would be "no active broker session", not "revoked" — the
+    # session-manager check happens inside the endpoint, after
+    # get_current_user has already accepted the token.
+    assert still_valid.json().get("detail") != "Token has been revoked"
+
+
+def test_create_access_token_assigns_a_unique_jti() -> None:
+    settings = get_test_settings()
+    token_a = create_access_token(data={"sub": "X"}, settings=settings)
+    token_b = create_access_token(data={"sub": "X"}, settings=settings)
+    jti_a = decode_token(token_a, settings)["jti"]
+    jti_b = decode_token(token_b, settings)["jti"]
+    assert jti_a and jti_b and jti_a != jti_b

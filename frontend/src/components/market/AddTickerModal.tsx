@@ -65,10 +65,10 @@ export function AddTickerModal({ isOpen, onClose }: AddTickerModalProps) {
           <div>
             <h3 className="text-lg font-extrabold tracking-tight text-[var(--color-text-bright)] flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-[var(--color-accent-green)]" />
-              Manage Live Ticker Cards
+              Manage Global Watchlist
             </h3>
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              Select indices and equity symbols to stream real-time price feeds.
+              Symbols selected here are available across charts, option analysis, volatility, and dealer flow.
             </p>
           </div>
           <button
@@ -169,7 +169,7 @@ export function AddTickerModal({ isOpen, onClose }: AddTickerModalProps) {
           {/* Currently Selected Active Tickers */}
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">
-              Active Live Cards ({tickers.length})
+              Watchlist Symbols ({tickers.length})
             </p>
             <div className="flex flex-wrap gap-1.5">
               {tickers.map((sym) => (

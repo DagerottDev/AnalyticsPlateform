@@ -7,13 +7,53 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from app.config import Settings, get_settings
-from app.core.security import decode_token, get_current_user
-from app.schemas.market import ExpiryList, Instrument, InstrumentResponse, MarginRequest, MarginResponse
+from app.core.security import decode_token, ensure_not_revoked, get_current_user
+from app.data.nse_fo_symbols import NSE_FO_SYMBOLS
+from app.schemas.market import (
+    ExpiryList,
+    Instrument,
+    InstrumentResponse,
+    MarginRequest,
+    MarginResponse,
+    SymbolSearchResponse,
+    SymbolSuggestion,
+)
 from app.services.fyers_service import from_fyers_ws_symbol, to_fyers_ws_symbol
 from app.services.session_manager import session_manager
+from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/market", tags=["Market Data"])
+
+_MAX_SYMBOL_SUGGESTIONS = 8
+
+
+@router.get("/symbols/search", response_model=SymbolSearchResponse)
+async def search_symbols(
+    q: str = Query(..., min_length=1, description="Symbol or company name prefix/substring"),
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> SymbolSearchResponse:
+    """Autocomplete for the "Or Stock Symbol" field, matched against a static
+    NSE F&O-eligible symbol list (see app.data.nse_fo_symbols) — Fyers has no
+    live symbol-search API. Ranks symbol-prefix matches first, then
+    symbol-substring, then company-name-substring matches.
+    """
+    query = q.strip().upper()
+    prefix_matches: list[SymbolSuggestion] = []
+    substring_matches: list[SymbolSuggestion] = []
+    name_matches: list[SymbolSuggestion] = []
+
+    for symbol, name in NSE_FO_SYMBOLS.items():
+        suggestion = SymbolSuggestion(symbol=symbol, name=name)
+        if symbol.startswith(query):
+            prefix_matches.append(suggestion)
+        elif query in symbol:
+            substring_matches.append(suggestion)
+        elif query in name.upper():
+            name_matches.append(suggestion)
+
+    matches = (prefix_matches + substring_matches + name_matches)[:_MAX_SYMBOL_SUGGESTIONS]
+    return SymbolSearchResponse(matches=matches)
 
 
 @router.get("/instruments/{symbol}", response_model=InstrumentResponse)
@@ -142,7 +182,10 @@ async def get_margin(
 
 @router.websocket("/ws")
 async def market_ws(
-    websocket: WebSocket, token: str = Query(...), settings: Settings = Depends(get_settings)
+    websocket: WebSocket,
+    token: str = Query(...),
+    settings: Settings = Depends(get_settings),
+    blocklist: TokenBlocklist = Depends(get_token_blocklist),
 ) -> None:
     """Proxies live Fyers ticks to the browser.
 
@@ -156,6 +199,7 @@ async def market_ws(
     """
     try:
         payload = decode_token(token)
+        await ensure_not_revoked(payload, blocklist)
     except HTTPException:
         await websocket.close(code=4401)
         return
@@ -167,10 +211,18 @@ async def market_ws(
 
     stream = None
     if service is not None:
-        stream = service.get_market_stream(
-            quote_poll_interval_seconds=settings.market_quote_poll_interval_seconds
-        )
-        stream.bind_loop()
+        try:
+            stream = service.get_market_stream(
+                quote_poll_interval_seconds=settings.market_quote_poll_interval_seconds
+            )
+            stream.bind_loop()
+        except Exception:
+            # Do not let an unavailable broker stream abort an already
+            # accepted browser websocket.  An unhandled exception here makes
+            # Uvicorn drop the TCP connection, which the browser can only
+            # report as the unhelpful close code 1006.
+            logger.exception("Could not initialize market stream for %s", client_id)
+            stream = None
 
     subscribed: set[str] = set()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -181,6 +233,15 @@ async def market_ws(
     if stream is not None:
         stream.add_listener(on_tick)
 
+    async def send_error(message: str) -> None:
+        """Report recoverable broker failures without dropping the client socket."""
+        await websocket.send_json({"type": "error", "message": message})
+
+    if service is None:
+        await send_error("Active broker session not found. Reconnect your broker account.")
+    elif stream is None:
+        await send_error("Market stream is temporarily unavailable. Please try again shortly.")
+
     async def reader() -> None:
         while True:
             raw = await websocket.receive_text()
@@ -189,12 +250,27 @@ async def market_ws(
             except json.JSONDecodeError:
                 continue
             symbols = msg.get("symbols") or []
-            if not symbols or stream is None:
+            if not symbols:
+                continue
+            if stream is None:
+                await send_error(
+                    "Market stream is unavailable. Reconnect your broker account and retry."
+                )
                 continue
             fyers_symbols = [to_fyers_ws_symbol(s) for s in symbols]
             if msg.get("action") == "subscribe":
+                try:
+                    await asyncio.to_thread(stream.subscribe, fyers_symbols)
+                except Exception:
+                    # Connection / TLS / upstream Fyers errors are expected
+                    # operational failures.  Keep this browser websocket
+                    # open so its reconnect loop is not needlessly triggered.
+                    logger.exception("Failed to subscribe market stream for %s", symbols)
+                    await send_error(
+                        "Unable to subscribe to live market data. Please retry shortly."
+                    )
+                    continue
                 subscribed.update(fyers_symbols)
-                await asyncio.to_thread(stream.subscribe, fyers_symbols)
                 if service is not None:
                     try:
                         quotes = await service.get_quotes(symbols)
@@ -204,7 +280,10 @@ async def market_ws(
                         logger.exception("Failed to seed quotes after subscribe for %s", symbols)
             elif msg.get("action") == "unsubscribe":
                 subscribed.difference_update(fyers_symbols)
-                await asyncio.to_thread(stream.unsubscribe, fyers_symbols)
+                try:
+                    await asyncio.to_thread(stream.unsubscribe, fyers_symbols)
+                except Exception:
+                    logger.exception("Failed to unsubscribe market stream for %s", symbols)
 
     async def writer() -> None:
         while True:

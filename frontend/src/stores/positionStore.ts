@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { StrategyLeg } from "@/lib/strategy";
+import { PaperFill } from "@/lib/paperTrading";
 
 export type PositionStatus = "Open" | "Closed";
 
@@ -18,11 +19,17 @@ export interface Position {
   /** Net mark value of all legs at close time (same sign convention as entryCost). */
   closeValue?: number;
   realizedPnl?: number;
+  /** All Strategy Builder positions are simulated orders, never broker orders. */
+  mode: "paper";
+  /** Per-leg open fills captured at the instant the paper order was placed. */
+  fills: PaperFill[];
 }
+
+type NewPaperPosition = Omit<Position, "id" | "status" | "openedAt" | "mode">;
 
 interface PositionState {
   positions: Position[];
-  addPosition: (position: Omit<Position, "id" | "status" | "openedAt">) => void;
+  executePaperOrder: (position: NewPaperPosition) => void;
   closePosition: (id: string, closeValue: number) => void;
   removePosition: (id: string) => void;
   clearClosed: () => void;
@@ -33,13 +40,14 @@ export const usePositionStore = create<PositionState>()(
     (set) => ({
       positions: [],
 
-      addPosition: (data) => set((state) => ({
+      executePaperOrder: (data) => set((state) => ({
         positions: [
           {
             ...data,
             id: Math.random().toString(36).substr(2, 9),
             status: "Open",
             openedAt: new Date().toISOString(),
+            mode: "paper",
           },
           ...state.positions,
         ]
@@ -64,7 +72,19 @@ export const usePositionStore = create<PositionState>()(
       })),
     }),
     {
-      name: "position-storage"
+      name: "position-storage",
+      version: 2,
+      migrate: (persisted) => {
+        const state = persisted as Partial<PositionState>;
+        return {
+          ...state,
+          positions: (state.positions || []).map((position) => ({
+            ...position,
+            mode: "paper" as const,
+            fills: position.fills || [],
+          })),
+        };
+      },
     }
   )
 );

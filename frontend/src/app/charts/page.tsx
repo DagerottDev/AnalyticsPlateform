@@ -6,10 +6,14 @@ import { TradingChart } from "@/components/charts/TradingChart";
 import { Heatmap } from "@/components/charts/Heatmap";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
-import { apiClient } from "@/lib/api";
 import { OHLCVData } from "@/lib/indicators";
+import {
+  CHART_INDICATOR_DEFINITIONS,
+  ChartIndicatorId,
+  createDefaultChartIndicators,
+} from "@/lib/chartIndicators";
 import { Instrument } from "@/types/market";
-import { getInstruments } from "@/lib/market";
+import { getInstruments, getHistoricalCandles } from "@/lib/market";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { formatApiError } from "@/lib/apiError";
 import { Card } from "@/components/ui/Card";
@@ -27,7 +31,21 @@ export default function ChartsPage() {
   const [loading, setLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
 
-  const [indicators, setIndicators] = useState({ sma: false, ema: false, bbands: false, rsi: false, supertrend: false });
+  const [indicators, setIndicators] = useState(createDefaultChartIndicators);
+
+  const updateIndicatorParameter = (
+    indicatorId: ChartIndicatorId,
+    parameter: string,
+    value: number
+  ) => {
+    setIndicators((current) => ({
+      ...current,
+      [indicatorId]: {
+        ...current[indicatorId],
+        parameters: { ...current[indicatorId].parameters, [parameter]: value },
+      },
+    }));
+  };
   
   // For Heatmap
   const [instruments, setInstruments] = useState<Instrument[]>([]);
@@ -67,28 +85,27 @@ export default function ChartsPage() {
       setLoading(true);
       setChartError(null);
       try {
-        // Fetch historical data from backend
-        // Defaulting to base symbol for the main chart
-        const response = await apiClient.get(`/historical/ohlcv/${symbol}`);
+        // Pulled live from the broker (same path as Replay Mode) — the
+        // market_data DB table has no backfill job writing to it yet, so
+        // the DB-backed /historical/ohlcv endpoint is always empty.
+        const rangeTo = new Date();
+        const rangeFrom = new Date(rangeTo);
+        rangeFrom.setDate(rangeFrom.getDate() - 7);
+        const toIso = (d: Date) => d.toISOString().slice(0, 10);
+
+        const candles = await getHistoricalCandles(symbol, toIso(rangeFrom), toIso(rangeTo), "1");
         if (isMounted) {
-          // Response is expected to be array of OHLCV
-          if (Array.isArray(response.data) && response.data.length > 0) {
-            const formatted = response.data.map((item: {
-              timestamp: string;
-              open: number;
-              high: number;
-              low: number;
-              close: number;
-              volume: number;
-            }) => ({
-              time: item.timestamp,
-              open: item.open,
-              high: item.high,
-              low: item.low,
-              close: item.close,
-              volume: item.volume
-            }));
-            setHistoricalData(formatted);
+          if (candles.length > 0) {
+            setHistoricalData(
+              candles.map((c) => ({
+                time: c.timestamp,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+                volume: c.volume,
+              }))
+            );
           } else {
             setHistoricalData([]);
             setChartError("No historical data returned for this symbol.");
@@ -149,23 +166,51 @@ export default function ChartsPage() {
             onExpiryChange={setExpiry}
           />
 
-          <Card className="flex items-center gap-2 p-2">
-            <span className="px-2 text-xs font-semibold text-[var(--color-text-secondary)]">Indicators:</span>
-            <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
-              <input type="checkbox" checked={indicators.sma} onChange={() => setIndicators(s => ({...s, sma: !s.sma}))} className="accent-[var(--color-accent-blue)]" /> SMA
-            </label>
-            <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
-              <input type="checkbox" checked={indicators.ema} onChange={() => setIndicators(s => ({...s, ema: !s.ema}))} className="accent-[var(--color-accent-blue)]" /> EMA
-            </label>
-            <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
-              <input type="checkbox" checked={indicators.bbands} onChange={() => setIndicators(s => ({...s, bbands: !s.bbands}))} className="accent-[var(--color-accent-blue)]" /> Bollinger
-            </label>
-            <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
-              <input type="checkbox" checked={indicators.rsi} onChange={() => setIndicators(s => ({...s, rsi: !s.rsi}))} className="accent-[var(--color-accent-blue)]" /> RSI
-            </label>
-            <label className="flex items-center gap-2 text-sm text-[var(--color-text-primary)] cursor-pointer hover:text-[var(--color-text-bright)]">
-              <input type="checkbox" checked={indicators.supertrend} onChange={() => setIndicators(s => ({...s, supertrend: !s.supertrend}))} className="accent-[var(--color-accent-blue)]" /> Supertrend
-            </label>
+          <Card className="flex flex-1 flex-wrap items-center gap-x-4 gap-y-3 p-3">
+            <span className="text-xs font-semibold text-[var(--color-text-secondary)]">Indicators:</span>
+            {CHART_INDICATOR_DEFINITIONS.map((indicator) => (
+              <div key={indicator.id} className="flex items-center gap-2">
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text-primary)] hover:text-[var(--color-text-bright)]">
+                  <input
+                    type="checkbox"
+                    checked={indicators[indicator.id].enabled}
+                    onChange={() => setIndicators((current) => ({
+                      ...current,
+                      [indicator.id]: {
+                        ...current[indicator.id],
+                        enabled: !current[indicator.id].enabled,
+                      },
+                    }))}
+                    className="accent-[var(--color-accent-blue)]"
+                  />
+                  {indicator.label}
+                </label>
+                {indicators[indicator.id].enabled && indicator.parameters.map((parameter) => (
+                  <label key={parameter.key} className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)]">
+                    <span>{parameter.label}</span>
+                    <input
+                      aria-label={`${indicator.label} ${parameter.label}`}
+                      type="number"
+                      min={parameter.min}
+                      max={parameter.max}
+                      step={parameter.step}
+                      value={indicators[indicator.id].parameters[parameter.key]}
+                      onChange={(event) => {
+                        const value = event.target.valueAsNumber;
+                        if (Number.isFinite(value)) {
+                          updateIndicatorParameter(
+                            indicator.id,
+                            parameter.key,
+                            Math.min(parameter.max, Math.max(parameter.min, value))
+                          );
+                        }
+                      }}
+                      className="w-14 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-1.5 py-1 text-xs text-[var(--color-text-bright)] outline-none focus:border-[var(--color-accent-blue)]"
+                    />
+                  </label>
+                ))}
+              </div>
+            ))}
           </Card>
         </div>
 

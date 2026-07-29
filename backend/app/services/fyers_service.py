@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from fyers_apiv3 import fyersModel
@@ -337,6 +337,14 @@ class FyersService(BrokerService):
             self._instruments_cache[cache_key] = (time.monotonic(), instruments)
             return instruments
 
+    # Fyers rejects a single /history call spanning more than 366 days for
+    # these resolutions ("Date range cannot exceed 366 days for 1D, 1W, and
+    # 1M resolutions"), so multi-year requests must be split into chunks and
+    # merged client-side. Intraday resolutions aren't in this map and are
+    # left unchunked since callers already keep those ranges small.
+    _DAILY_PLUS_RESOLUTIONS = {"D", "1D", "1W", "1M"}
+    _MAX_RANGE_DAYS = 366
+
     async def get_historical_data(
         self, symbol: str, from_date: str, to_date: str, resolution: str
     ) -> list[dict[str, Any]]:
@@ -353,38 +361,74 @@ class FyersService(BrokerService):
             does not return historical open interest, so open_interest is
             always 0 here (a real limitation of the upstream API, not a stub).
         """
+        from_dt = datetime.strptime(from_date, "%Y-%m-%d")
+        to_dt = datetime.strptime(to_date, "%Y-%m-%d")
+
+        if (
+            resolution in self._DAILY_PLUS_RESOLUTIONS
+            and (to_dt - from_dt).days > self._MAX_RANGE_DAYS
+        ):
+            candles: list[dict[str, Any]] = []
+            chunk_start = from_dt
+            while chunk_start <= to_dt:
+                chunk_end = min(chunk_start + timedelta(days=self._MAX_RANGE_DAYS), to_dt)
+                candles.extend(
+                    await self._fetch_history_chunk(
+                        symbol,
+                        chunk_start.strftime("%Y-%m-%d"),
+                        chunk_end.strftime("%Y-%m-%d"),
+                        resolution,
+                    )
+                )
+                chunk_start = chunk_end + timedelta(days=1)
+            return candles
+
+        return await self._fetch_history_chunk(symbol, from_date, to_date, resolution)
+
+    async def _fetch_history_chunk(
+        self, symbol: str, from_date: str, to_date: str, resolution: str
+    ) -> list[dict[str, Any]]:
         try:
-            response = await asyncio.to_thread(
-                self.client.history,
-                {
-                    "symbol": symbol,
-                    "resolution": resolution,
-                    "date_format": 1,
-                    "range_from": from_date,
-                    "range_to": to_date,
-                    "cont_flag": 0,
-                },
+            payload = {
+                "symbol": symbol,
+                "resolution": resolution,
+                "date_format": 1,
+                "range_from": from_date,
+                "range_to": to_date,
+                "cont_flag": 0,
+            }
+            last_response: dict[str, Any] = {}
+            for attempt in range(self._MAX_FETCH_RETRIES):
+                response = await asyncio.to_thread(self.client.history, payload)
+                if response and response.get("s") == "ok":
+                    candles = response.get("candles", [])
+                    return [
+                        {
+                            "timestamp": datetime.fromtimestamp(candle[0], tz=UTC),
+                            "open": candle[1],
+                            "high": candle[2],
+                            "low": candle[3],
+                            "close": candle[4],
+                            "volume": int(candle[5]),
+                            "open_interest": 0,
+                        }
+                        for candle in candles
+                    ]
+                # 'no_data' is a legitimate "no candles in this range"
+                # response (for example, a holiday), not an error to retry.
+                if response and response.get("s") == "no_data":
+                    return []
+
+                last_response = response or {}
+                is_last_attempt = attempt == self._MAX_FETCH_RETRIES - 1
+                if last_response.get("code") not in self._RETRYABLE_CODES or is_last_attempt:
+                    break
+                await asyncio.sleep(
+                    compute_backoff_delay(attempt, self._RETRY_BASE_DELAY_SECONDS)
+                )
+            raise BrokerConnectionError(
+                f"Failed to retrieve history for {symbol}: {last_response}"
             )
-            if response and response.get('s') == 'ok':
-                candles = response.get('candles', [])
-                return [
-                    {
-                        "timestamp": datetime.fromtimestamp(candle[0], tz=UTC),
-                        "open": candle[1],
-                        "high": candle[2],
-                        "low": candle[3],
-                        "close": candle[4],
-                        "volume": int(candle[5]),
-                        "open_interest": 0,
-                    }
-                    for candle in candles
-                ]
-            # 'no_data' is a legitimate "no candles in this range" response
-            # (e.g. a holiday or a range before the symbol's listing date),
-            # not an error.
-            if response and response.get('s') == 'no_data':
-                return []
-            raise BrokerConnectionError(f"Failed to retrieve history for {symbol}: {response}")
         except BrokerConnectionError:
             raise
         except Exception as e:
@@ -423,6 +467,87 @@ class FyersService(BrokerService):
         if not response or response.get("s") != "ok":
             raise BrokerConnectionError(f"Fyers margin calculator request failed: {response}")
         return cast(dict[str, Any], response.get("data", {}))
+
+    async def get_positions(self) -> list[dict[str, Any]]:
+        """Currently open broker positions (intraday + carry-forward) from
+        Fyers' /positions. Includes rows Fyers reports at net-zero quantity
+        (squared off earlier today) — callers that only want the live book
+        should filter those out themselves rather than losing that
+        information here.
+        """
+        try:
+            response = await asyncio.to_thread(self.client.positions)
+        except Exception as e:
+            raise BrokerConnectionError(f"Failed to retrieve positions: {e}") from e
+        if not response or response.get("s") != "ok":
+            raise BrokerConnectionError(f"Failed to retrieve positions: {response}")
+
+        positions: list[dict[str, Any]] = []
+        for row in response.get("netPositions", []):
+            trading_symbol = row.get("symbol", "")
+            qty = row.get("netQty", row.get("qty", 0))
+            realized = row.get("realized_profit", 0.0)
+            unrealized = row.get("unrealized_profit", 0.0)
+            positions.append(
+                {
+                    "trading_symbol": trading_symbol,
+                    "symbol": from_fyers_ws_symbol(trading_symbol),
+                    "product_type": row.get("productType", ""),
+                    "quantity": qty,
+                    "side": "Buy" if qty > 0 else "Sell" if qty < 0 else "Flat",
+                    "avg_price": row.get("netAvg", row.get("avgPrice", 0.0)),
+                    "last_price": row.get("ltp", 0.0),
+                    "realized_pnl": realized,
+                    "unrealized_pnl": unrealized,
+                    "pnl": row.get("pl", realized + unrealized),
+                }
+            )
+        return positions
+
+    async def get_holdings(self) -> list[dict[str, Any]]:
+        """Delivery/long-term portfolio holdings from Fyers' /holdings."""
+        try:
+            response = await asyncio.to_thread(self.client.holdings)
+        except Exception as e:
+            raise BrokerConnectionError(f"Failed to retrieve holdings: {e}") from e
+        if not response or response.get("s") != "ok":
+            raise BrokerConnectionError(f"Failed to retrieve holdings: {response}")
+
+        holdings: list[dict[str, Any]] = []
+        for row in response.get("holdings", []):
+            trading_symbol = row.get("symbol", "")
+            holdings.append(
+                {
+                    "trading_symbol": trading_symbol,
+                    "symbol": from_fyers_ws_symbol(trading_symbol),
+                    "holding_type": row.get("holdingType", ""),
+                    "quantity": row.get("quantity", row.get("qty", 0)),
+                    "avg_price": row.get("costPrice", 0.0),
+                    "last_price": row.get("ltp", 0.0),
+                    "market_value": row.get("marketVal", 0.0),
+                    "pnl": row.get("pl", 0.0),
+                }
+            )
+        return holdings
+
+    async def get_funds(self) -> dict[str, Any]:
+        """Account funds/margin summary from Fyers' /funds.
+
+        Fyers documents this as a fixed list of titled rows ("Total
+        Balance", "Utilized Amount", "Available Balance", ...) rather than a
+        flat object, and — like the margin calculator — the exact title
+        strings aren't guaranteed stable across API versions, so the raw
+        rows are returned as-is here; tolerant title-matching into named
+        fields happens at the API layer (see app.api.v1.portfolio), same
+        division of labor as get_margin/MarginResponse.
+        """
+        try:
+            response = await asyncio.to_thread(self.client.funds)
+        except Exception as e:
+            raise BrokerConnectionError(f"Failed to retrieve funds: {e}") from e
+        if not response or response.get("s") != "ok":
+            raise BrokerConnectionError(f"Failed to retrieve funds: {response}")
+        return {"fund_limit": response.get("fund_limit", [])}
 
     async def close(self) -> None:
         if self._market_stream is not None:

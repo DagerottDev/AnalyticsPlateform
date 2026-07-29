@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     app_debug: bool = False
     app_title: str = "Option Analytics Platform"
     app_version: str = "0.1.0"
+    log_level: str = "INFO"
+    sentry_dsn: str | None = None
+    sentry_traces_sample_rate: float = 0.0
 
     # JWT
     jwt_secret: str = "change-this-to-a-secure-random-string-in-production"
@@ -33,6 +36,11 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/option_analytics"
+
+    # Backs the JWT revocation blocklist (see app.services.token_blocklist) so
+    # logout can actually invalidate a token instead of relying on the client
+    # to discard it. localhost:6380 matches docker-compose's host-exposed port.
+    redis_url: str = "redis://localhost:6380/0"
 
     # CORS
     cors_origins: str = "http://localhost:3001"
@@ -43,6 +51,35 @@ class Settings(BaseSettings):
     # pushed much below a few seconds, especially with several tickers/pages
     # open concurrently, each holding their own subscription.
     market_quote_poll_interval_seconds: float = 3.0
+
+    # API protection before requests can reach Fyers. Values are per client
+    # IP per fixed window; broker-heavy routes are intentionally tighter.
+    api_rate_limit_enabled: bool = True
+    api_rate_limit_window_seconds: float = 60.0
+    api_rate_limit_default_requests: int = 120
+    api_rate_limit_broker_requests: int = 30
+    api_rate_limit_auth_requests: int = 10
+
+    # Daily OHLCV persistence. The job starts on application startup and
+    # re-runs at this interval, using a small overlap to update the latest
+    # candle without duplicating rows.
+    market_data_backfill_enabled: bool = True
+    market_data_backfill_symbols: str = "NIFTY,BANKNIFTY"
+    market_data_backfill_interval_seconds: float = 3600.0
+    market_data_backfill_initial_lookback_days: int = 365
+    market_data_backfill_overlap_days: int = 7
+
+    # Durable alerts are evaluated by the API process even while no browser
+    # tab is open. Keep this comfortably above a broker quote burst interval.
+    alert_evaluation_enabled: bool = True
+    alert_evaluation_interval_seconds: float = 15.0
+
+    alert_smtp_host: str | None = None
+    alert_smtp_port: int = 587
+    alert_smtp_username: str | None = None
+    alert_smtp_password: str | None = None
+    alert_smtp_from: str | None = None
+    alert_smtp_starttls: bool = True
 
     # Broker auto-login
     # Fyers access tokens are valid ~24h; caching avoids re-hitting the
@@ -66,6 +103,15 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         """Check if running in development mode."""
         return self.app_env == "development"
+
+    @property
+    def market_data_backfill_symbol_list(self) -> list[str]:
+        """Configured UI symbols for scheduled daily-candle persistence."""
+        return [
+            symbol.strip().upper()
+            for symbol in self.market_data_backfill_symbols.split(",")
+            if symbol.strip()
+        ]
 
 
 @lru_cache

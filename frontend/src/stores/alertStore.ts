@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { Instrument } from "@/types/market";
+import {
+  clearAlertEvents,
+  createAlert as createAlertRequest,
+  deleteAlert as deleteAlertRequest,
+  fetchAlertEvents,
+  fetchAlerts,
+} from "@/lib/alerts";
 
 export type AlertMetric =
   | "Price"
@@ -48,13 +55,11 @@ const MAX_TRIGGER_LOG = 50;
 interface AlertState {
   alerts: Alert[];
   triggerLog: AlertTriggerEvent[];
-  addAlert: (alert: Omit<Alert, "id" | "status" | "createdAt">) => void;
-  removeAlert: (id: string) => void;
-  /** Called by the alert engine when a condition fires: logs the event, then either snoozes (cooldown > 0) or removes the (one-shot) alert. */
-  recordTrigger: (id: string, value: number) => void;
-  /** Called by the alert engine once a Snoozed alert's cooldown has elapsed. */
-  rearmAlert: (id: string) => void;
-  clearTriggerLog: () => void;
+  /** Refresh the local cache from the durable server-side alert ledger. */
+  refresh: () => Promise<void>;
+  addAlert: (alert: Omit<Alert, "id" | "status" | "createdAt">) => Promise<void>;
+  removeAlert: (id: string) => Promise<void>;
+  clearTriggerLog: () => Promise<void>;
 }
 
 export const useAlertStore = create<AlertState>()(
@@ -63,79 +68,38 @@ export const useAlertStore = create<AlertState>()(
       alerts: [],
       triggerLog: [],
 
-      addAlert: (alertData) => set((state) => ({
-        alerts: [
-          ...state.alerts,
-          {
-            ...alertData,
-            id: Math.random().toString(36).substr(2, 9),
-            status: "Active",
-            createdAt: new Date().toISOString()
-          }
-        ]
-      })),
+      refresh: async () => {
+        const [alerts, triggerLog] = await Promise.all([fetchAlerts(), fetchAlertEvents()]);
+        set({ alerts, triggerLog: triggerLog.slice(0, MAX_TRIGGER_LOG) });
+      },
 
-      removeAlert: (id) => set((state) => ({
-        alerts: state.alerts.filter(a => a.id !== id)
-      })),
+      addAlert: async (alertData) => {
+        const alert = await createAlertRequest(alertData);
+        set((state) => ({ alerts: [alert, ...state.alerts.filter(item => item.id !== alert.id)] }));
+      },
 
-      recordTrigger: (id, value) => set((state) => {
-        const alert = state.alerts.find(a => a.id === id);
-        if (!alert) return state;
+      removeAlert: async (id) => {
+        await deleteAlertRequest(id);
+        set((state) => ({ alerts: state.alerts.filter(alert => alert.id !== id) }));
+      },
 
-        const triggeredAt = new Date().toISOString();
-        const event: AlertTriggerEvent = {
-          id: Math.random().toString(36).substr(2, 9),
-          alertId: alert.id,
-          tradingSymbol: alert.instrument.trading_symbol,
-          metric: alert.metric,
-          operator: alert.operator,
-          threshold: alert.threshold,
-          value,
-          triggeredAt,
-        };
-
-        const shouldRearm = alert.cooldownMinutes > 0;
-
-        return {
-          triggerLog: [event, ...state.triggerLog].slice(0, MAX_TRIGGER_LOG),
-          alerts: shouldRearm
-            ? state.alerts.map(a => a.id === id ? {
-                ...a,
-                status: "Snoozed" as const,
-                triggeredAt,
-                snoozedUntil: new Date(Date.now() + alert.cooldownMinutes * 60_000).toISOString(),
-              } : a)
-            : state.alerts.filter(a => a.id !== id),
-        };
-      }),
-
-      rearmAlert: (id) => set((state) => ({
-        alerts: state.alerts.map(a =>
-          a.id === id ? { ...a, status: "Active" as const, snoozedUntil: undefined } : a
-        )
-      })),
-
-      clearTriggerLog: () => set({ triggerLog: [] }),
+      clearTriggerLog: async () => {
+        await clearAlertEvents();
+        set({ triggerLog: [] });
+      },
     }),
     {
       name: "alert-storage",
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as { alerts?: Array<Record<string, unknown>>; triggerLog?: unknown[] } | undefined;
         if (!state) return state;
-        if (version < 2) {
-          const alerts = Array.isArray(state.alerts) ? state.alerts : [];
+        if (version < 3) {
           return {
             ...state,
-            // Legacy one-shot "Triggered" alerts are now historical events, not live configs.
-            alerts: alerts
-              .filter((a) => a.status !== "Triggered")
-              .map((a) => ({
-                ...a,
-                cooldownMinutes: (a.cooldownMinutes as number) ?? 0,
-                status: a.status === "Disabled" ? "Disabled" : "Active",
-              })),
+            // Server data replaces this cache after authentication. Do not
+            // recreate old local-only alerts, which would duplicate orders.
+            alerts: [],
             triggerLog: [],
           };
         }

@@ -17,20 +17,27 @@ import { getLotSize } from "@/lib/dealerFlow";
 import { Instrument } from "@/types/market";
 import { usePositionStore } from "@/stores/positionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useAuth } from "@/hooks/useAuth";
+import { createPaperOrder } from "@/lib/paperTrading";
+import { simulateStrategyPnl } from "@/lib/monteCarlo";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
-import { Briefcase, Calculator, Loader2 } from "lucide-react";
+import { Briefcase, Calculator, FlaskConical, Loader2 } from "lucide-react";
 
 // Components
 import { LegManager } from "@/components/strategy-builder/LegManager";
 import { PayoffChart } from "@/components/strategy-builder/PayoffChart";
 import { StrategyMetrics } from "@/components/strategy-builder/StrategyMetrics";
+import { MonteCarloPanel } from "@/components/strategy-builder/MonteCarloPanel";
+import { StrategyBacktestPanel } from "@/components/strategy-builder/StrategyBacktestPanel";
 
 export default function StrategyBuilderPage() {
-  const addPosition = usePositionStore((state) => state.addPosition);
+  const executePaperOrder = usePositionStore((state) => state.executePaperOrder);
+  const { tradingMode } = useAuth();
 
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
@@ -142,6 +149,7 @@ export default function StrategyBuilderPage() {
       return sum + (leg.entryPrice * leg.quantity * sign);
     }, 0);
   }, [legs]);
+  const simulation = useMemo(() => simulateStrategyPnl(legs, spotPrice), [legs, spotPrice]);
 
   const validLegs = legs.filter(l => l.instrument !== null);
 
@@ -177,19 +185,29 @@ export default function StrategyBuilderPage() {
     }
   };
 
-  const handleSaveAsPosition = () => {
-    if (validLegs.length === 0) return;
+  const handlePaperTrade = () => {
+    if (tradingMode !== "paper" || validLegs.length === 0) return;
 
-    addPosition({
-      symbol,
-      label: `${symbol} • ${validLegs.length} leg${validLegs.length > 1 ? "s" : ""}`,
-      legs: validLegs,
-      entryCost: totalCost,
-    });
-
-    toast.success("Position saved", {
-      description: "Track it live on the Positions page.",
-    });
+    try {
+      const order = createPaperOrder(
+        validLegs,
+        (tradingSymbol) => getTick(tradingSymbol)?.last_price
+      );
+      executePaperOrder({
+        symbol,
+        label: `${symbol} • ${order.legs.length} leg${order.legs.length > 1 ? "s" : ""}`,
+        legs: order.legs,
+        entryCost: order.entryCost,
+        fills: order.fills,
+      });
+      toast.success("Paper order filled", {
+        description: `${order.fills.length} leg${order.fills.length === 1 ? "" : "s"} filled at the latest quoted premium.`,
+      });
+    } catch (error) {
+      toast.error("Paper order was not filled", {
+        description: error instanceof Error ? error.message : "Unable to obtain a live fill price.",
+      });
+    }
   };
 
   return (
@@ -198,9 +216,12 @@ export default function StrategyBuilderPage() {
         <div className="flex items-center justify-between gap-4">
           <SectionHeader
             title="Strategy Builder"
-            description="Construct multi-leg strategies and visualize risk profiles."
+            description="Construct multi-leg strategies, visualize risk, and simulate filled paper trades."
           />
           <div className="flex shrink-0 items-center gap-2">
+            <Badge tone={tradingMode === "paper" ? "blue" : "orange"}>
+              {tradingMode === "paper" ? "Paper mode" : "Live mode"}
+            </Badge>
             <Button
               variant="secondary"
               onClick={handleCheckMargin}
@@ -209,8 +230,13 @@ export default function StrategyBuilderPage() {
               {marginLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
               Check Margin
             </Button>
-            <Button onClick={handleSaveAsPosition} disabled={validLegs.length === 0}>
-              <Briefcase className="h-4 w-4" /> Save as Position
+            <Button
+              onClick={handlePaperTrade}
+              disabled={tradingMode !== "paper" || validLegs.length === 0}
+              title={tradingMode === "paper" ? "Fill each leg at its latest quoted price" : "Switch to Paper mode to simulate this strategy"}
+            >
+              {tradingMode === "paper" ? <FlaskConical className="h-4 w-4" /> : <Briefcase className="h-4 w-4" />}
+              {tradingMode === "paper" ? "Execute Paper Trade" : "Live execution unavailable"}
             </Button>
           </div>
         </div>
@@ -276,6 +302,8 @@ export default function StrategyBuilderPage() {
               </Card>
             )}
             <StrategyMetrics metrics={profileMetrics} netGreeks={netGreeks} cost={totalCost} />
+            <MonteCarloPanel result={simulation} />
+            <StrategyBacktestPanel symbol={symbol} currentSpot={spotPrice} legs={legs} />
             <PayoffChart data={payoffData} currentSpot={spotPrice} />
           </div>
 

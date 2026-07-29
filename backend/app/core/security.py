@@ -6,12 +6,14 @@ through the native Fyers SDK — no passwords are stored or managed.
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
 from app.config import Settings, get_settings
+from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
 
 # HTTP Bearer scheme for JWT tokens
 bearer_scheme = HTTPBearer(
@@ -43,6 +45,11 @@ def create_access_token(
     expire = datetime.now(UTC) + (
         expires_delta or timedelta(minutes=settings.jwt_expiry_minutes)
     )
+    # jti (JWT ID) — a unique per-token identifier, not tied to the user —
+    # is what the revocation blocklist keys on (see ensure_not_revoked):
+    # logging out one token shouldn't revoke every other token the same
+    # user might have issued elsewhere.
+    to_encode.setdefault("jti", uuid4().hex)
     to_encode.update({"exp": expire, "iat": datetime.now(UTC)})
 
     return str(
@@ -88,21 +95,40 @@ def decode_token(
         ) from e
 
 
+async def ensure_not_revoked(payload: dict[str, Any], blocklist: TokenBlocklist) -> None:
+    """Raise 401 if this token's jti was revoked (see /auth/logout).
+
+    A token with no jti (shouldn't happen for anything issued after this
+    feature landed, but covers any pre-existing token) can't be checked
+    against the blocklist and is let through — same as before this feature
+    existed, not a regression.
+    """
+    jti = payload.get("jti")
+    if jti and await blocklist.is_revoked(jti):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     settings: Settings = Depends(get_settings),
+    blocklist: TokenBlocklist = Depends(get_token_blocklist),
 ) -> dict[str, Any]:
     """FastAPI dependency to extract and validate the current user from JWT.
 
     Args:
         credentials: Bearer token from Authorization header.
         settings: Application settings.
+        blocklist: JWT revocation blocklist.
 
     Returns:
         Decoded user payload from the JWT.
 
     Raises:
-        HTTPException: If token is missing, invalid, or expired.
+        HTTPException: If token is missing, invalid, expired, or revoked.
     """
     payload = decode_token(credentials.credentials, settings)
 
@@ -113,5 +139,7 @@ async def get_current_user(
             detail="Token missing required 'sub' claim",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    await ensure_not_revoked(payload, blocklist)
 
     return payload

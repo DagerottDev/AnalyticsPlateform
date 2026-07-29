@@ -7,6 +7,7 @@ import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
 import { getHistoricalVolatility, getVolatilityMetrics, VolatilityHistoricalData, VolatilityMetrics } from "@/lib/volatility";
 import { calculateImpliedVolatility } from "@/lib/greeks";
+import { fitSvi, sviImpliedVolatility } from "@/lib/svi";
 import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
 import { Instrument } from "@/types/market";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -14,6 +15,7 @@ import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Tabs } from "@/components/ui/Tabs";
+import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { Activity, History } from "lucide-react";
 
 // Components
@@ -36,6 +38,7 @@ export default function VolatilityPage() {
   const [histData, setHistData] = useState<VolatilityHistoricalData[]>([]);
   const [metrics, setMetrics] = useState<VolatilityMetrics | null>(null);
   const [loadingHist, setLoadingHist] = useState(false);
+  const [histError, setHistError] = useState<unknown>(null);
 
   // Live Options State
   const [instruments, setInstruments] = useState<Instrument[]>([]);
@@ -46,10 +49,14 @@ export default function VolatilityPage() {
   // Load Historical Volatility
   useEffect(() => {
     let isMounted = true;
-    if (!symbol) return;
+    // Historical daily data is expensive and broker-rate-limited. Defer it
+    // until the user opens this tab instead of firing it on every visit to
+    // the live-volatility view.
+    if (!symbol || activeTab !== "historical") return;
 
     async function fetchHistorical() {
       setLoadingHist(true);
+      setHistError(null);
       try {
         const [hData, mData] = await Promise.all([
           getHistoricalVolatility(symbol),
@@ -61,13 +68,18 @@ export default function VolatilityPage() {
         }
       } catch (err) {
         console.error("Failed to fetch historical volatility", err);
+        if (isMounted) {
+          setHistData([]);
+          setMetrics(null);
+          setHistError(err);
+        }
       } finally {
         if (isMounted) setLoadingHist(false);
       }
     }
     fetchHistorical();
     return () => { isMounted = false; };
-  }, [symbol]);
+  }, [symbol, activeTab]);
 
   // Load ALL expiries for this symbol to build term structure and surface
   useEffect(() => {
@@ -113,7 +125,23 @@ export default function VolatilityPage() {
     });
   }, [instruments, getTick, S, r]);
 
-  // Smile Data (Filter by selected expiry)
+  // Fit a constrained SVI total-variance smile per expiry. This replaces the
+  // old raw call/put interpolation with a smooth parametric surface.
+  const sviByExpiry = useMemo(() => {
+    const models = new Map<string, ReturnType<typeof fitSvi>>();
+    const expiries = Array.from(new Set(liveIVData.map(item => item.expiry).filter((value): value is string => !!value)));
+    expiries.forEach(exp => {
+      const byStrike = new Map<number, number[]>();
+      liveIVData.filter(item => item.expiry === exp && item.strike && item.iv > 0).forEach(item => {
+        byStrike.set(item.strike!, [...(byStrike.get(item.strike!) || []), item.iv]);
+      });
+      const points = Array.from(byStrike, ([strike, values]) => ({ strike, iv: values.reduce((sum, value) => sum + value, 0) / values.length }));
+      models.set(exp, fitSvi(points, S, timeToExpiry(exp)));
+    });
+    return models;
+  }, [liveIVData, S]);
+
+  // Smile Data (fitted SVI values when calibration passes quality checks)
   const smileData = useMemo(() => {
     if (!expiry) return [];
     
@@ -127,10 +155,15 @@ export default function VolatilityPage() {
       if (inst.option_type === "PE") group.peIV = inst.iv;
     });
 
+    const model = sviByExpiry.get(expiry);
+    const T = timeToExpiry(expiry);
     return Array.from(map.entries())
-      .map(([strike, data]) => ({ strike, ceIV: data.ceIV, peIV: data.peIV }))
+      .map(([strike, data]) => {
+        const fitted = model ? sviImpliedVolatility(model, strike, S, T) : 0;
+        return { strike, ceIV: fitted || data.ceIV, peIV: fitted || data.peIV };
+      })
       .sort((a, b) => a.strike - b.strike);
-  }, [liveIVData, expiry]);
+  }, [liveIVData, expiry, sviByExpiry, S]);
 
   // Term Structure Data (ATM strikes across all expiries)
   const termStructureData = useMemo(() => {
@@ -162,7 +195,8 @@ export default function VolatilityPage() {
     });
   }, [instruments, liveIVData, S]);
 
-  // Surface Data (All strikes, all expiries, average IV of CE/PE)
+  // Surface Data from each expiry's calibrated SVI smile, with raw values as
+  // a deliberate fallback for sparse/invalid broker snapshots.
   const surfaceData = useMemo(() => {
     const map = new Map<string, number>(); // key: expiry_strike -> average IV
     
@@ -171,17 +205,19 @@ export default function VolatilityPage() {
       const key = `${inst.expiry}_${inst.strike}`;
       const existing = map.get(key) || 0;
       
-      // Rough average for surface
       map.set(key, existing === 0 ? inst.iv : (existing + inst.iv) / 2);
     });
 
     const result = [];
     for (const [key, iv] of map.entries()) {
       const [exp, strStr] = key.split("_");
-      result.push({ expiry: exp, strike: parseInt(strStr), iv });
+      const strike = parseInt(strStr);
+      const model = sviByExpiry.get(exp);
+      const fitted = model ? sviImpliedVolatility(model, strike, S, timeToExpiry(exp)) : 0;
+      result.push({ expiry: exp, strike, iv: fitted || iv });
     }
     return result;
-  }, [liveIVData]);
+  }, [liveIVData, sviByExpiry, S]);
 
   return (
     <DashboardLayout>
@@ -216,6 +252,8 @@ export default function VolatilityPage() {
 
         {activeTab === "historical" && (
           <>
+            {histError && <ApiErrorDisplay error={histError} />}
+
             {/* Metrics derived from 1Y of daily historical IV/RV data */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {loadingHist ? (

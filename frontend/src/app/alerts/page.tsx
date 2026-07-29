@@ -74,7 +74,7 @@ export default function AlertsPage() {
     };
   }
 
-  const handleAddAlert = () => {
+  const handleAddAlert = async () => {
     if (!threshold) return;
 
     // If it's a price alert, we can attach it to the underlying or a specific option
@@ -88,18 +88,16 @@ export default function AlertsPage() {
 
     if (!targetInst) return;
 
-    addAlert({
-      instrument: targetInst,
-      metric,
-      operator,
-      threshold: Number(threshold),
-      cooldownMinutes,
-    });
-
-    setThreshold("");
+    try {
+      await addAlert({ instrument: targetInst, metric, operator, threshold: Number(threshold), cooldownMinutes });
+      setThreshold("");
+      toast.success("Server-side alert created");
+    } catch {
+      toast.error("Could not save alert to the server.");
+    }
   };
 
-  const handleApplyTemplate = (template: AlertTemplate) => {
+  const handleApplyTemplate = async (template: AlertTemplate) => {
     let targetInst: Instrument | undefined;
 
     if (template.requiresContract) {
@@ -124,15 +122,12 @@ export default function AlertsPage() {
       }
     }
 
-    addAlert({
-      instrument: targetInst,
-      metric: template.metric,
-      operator: template.operator,
-      threshold: template.threshold,
-      cooldownMinutes: template.cooldownMinutes,
-    });
-
-    toast.success(`Preset applied: ${template.label}`);
+    try {
+      await addAlert({ instrument: targetInst, metric: template.metric, operator: template.operator, threshold: template.threshold, cooldownMinutes: template.cooldownMinutes });
+      toast.success(`Server-side preset applied: ${template.label}`);
+    } catch {
+      toast.error("Could not save alert to the server.");
+    }
   };
 
   const activeAlerts = alerts.filter(a => a.status === "Active" || a.status === "Snoozed");
@@ -144,7 +139,7 @@ export default function AlertsPage() {
           <h1 className="text-xl font-black tracking-tight text-[var(--color-text-bright)]">Alerts Dashboard</h1>
           <p className="text-sm text-[var(--color-text-secondary)]">
             Set conditional triggers for Price, IV, and Greeks.{" "}
-            <span className="text-[var(--color-accent-blue)]">Alerts run in the background while this application is open.</span>
+            <span className="text-[var(--color-accent-blue)]">Alerts are evaluated on the server, even when this tab is closed.</span>
           </p>
         </div>
 
@@ -301,7 +296,7 @@ export default function AlertsPage() {
                       </td>
                       <td className="tnum px-4 py-3 text-xs">{new Date(alert.createdAt).toLocaleString()}</td>
                       <td className="px-4 py-3">
-                        <Button variant="icon" onClick={() => removeAlert(alert.id)} aria-label="Remove alert">
+                        <Button variant="icon" onClick={() => void removeAlert(alert.id)} aria-label="Remove alert">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </td>
@@ -320,7 +315,7 @@ export default function AlertsPage() {
               <CheckCircle2 className="h-4 w-4 text-[var(--color-status-good)]" /> Triggered History
             </h3>
             {triggerLog.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={clearTriggerLog}>
+              <Button variant="ghost" size="sm" onClick={() => void clearTriggerLog()}>
                 Clear History
               </Button>
             )}

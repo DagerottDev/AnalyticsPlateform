@@ -3,10 +3,13 @@
 Provides structured error responses across the API.
 """
 
+import logging
 from typing import Any
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 
 class BrokerConnectionError(Exception):
@@ -35,6 +38,7 @@ async def broker_connection_error_handler(
         content={
             "detail": exc.message,
             "error_type": "broker_connection_error",
+            "request_id": getattr(request.state, "request_id", None),
         },
     )
 
@@ -49,6 +53,7 @@ async def broker_auth_error_handler(
         content={
             "detail": exc.message,
             "error_type": "broker_auth_error",
+            "request_id": getattr(request.state, "request_id", None),
         },
     )
 

@@ -48,6 +48,21 @@ class BrokerService(ABC):
         pass
 
     @abstractmethod
+    async def get_positions(self) -> list[dict[str, Any]]:
+        """Retrieve currently open broker positions (intraday + carry-forward)."""
+        pass
+
+    @abstractmethod
+    async def get_holdings(self) -> list[dict[str, Any]]:
+        """Retrieve delivery/long-term portfolio holdings."""
+        pass
+
+    @abstractmethod
+    async def get_funds(self) -> dict[str, Any]:
+        """Retrieve the account's funds/margin summary."""
+        pass
+
+    @abstractmethod
     async def close(self) -> None:
         """Close any open connections or sessions."""
         pass

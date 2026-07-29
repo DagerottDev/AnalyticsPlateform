@@ -1,9 +1,17 @@
 import { apiClient } from "./api";
-import type { InstrumentResponse, ExpiryList, MarketTick } from "@/types/market";
+import type { InstrumentResponse, ExpiryList, MarketTick, SymbolSuggestion } from "@/types/market";
 
 export async function getInstruments(symbol: string): Promise<InstrumentResponse> {
   const response = await apiClient.get<InstrumentResponse>(`/market/instruments/${symbol}`);
   return response.data;
+}
+
+/** Autocomplete matches for the "Or Stock Symbol" field (static NSE F&O list, see backend). */
+export async function searchSymbols(query: string): Promise<SymbolSuggestion[]> {
+  const response = await apiClient.get<{ matches: SymbolSuggestion[] }>("/market/symbols/search", {
+    params: { q: query },
+  });
+  return response.data.matches;
 }
 
 export async function getExpiries(symbol: string): Promise<ExpiryList> {
@@ -51,6 +59,24 @@ export interface HistoricalCandle {
   close: number;
   volume: number;
   open_interest: number;
+}
+
+/**
+ * OHLCV candles already persisted by the market-data backfill job.  Unlike
+ * getHistoricalCandles(), this does not make a broker request, which makes it
+ * suitable for multi-month backtests and repeatable analysis.
+ */
+export async function getStoredHistoricalCandles(
+  symbol: string,
+  start: string,
+  end: string,
+  limit: number = 5000
+): Promise<HistoricalCandle[]> {
+  const response = await apiClient.get<HistoricalCandle[]>(
+    `/historical/ohlcv/${encodeURIComponent(symbol)}`,
+    { params: { start: new Date(`${start}T00:00:00`).toISOString(), end: new Date(`${end}T23:59:59.999`).toISOString(), limit } }
+  );
+  return response.data;
 }
 
 /** Real historical OHLCV candles pulled live from the broker (see GET /market/history). */

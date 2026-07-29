@@ -1,5 +1,6 @@
 """Tests for the volatility router's real-OHLCV-based historical vol computation."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from math import log, sqrt
 from statistics import pstdev
@@ -8,6 +9,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.volatility import (
     IV_RISK_PREMIUM,
@@ -15,6 +18,8 @@ from app.api.v1.volatility import (
     TRADING_DAYS_PER_YEAR,
     _compute_vol_series,
 )
+from app.models.volatility_snapshot import DailyVolatilitySnapshot
+from app.services.volatility_snapshot_store import get_or_create_daily_snapshot
 
 
 def _closes(prices: list[float], start: datetime | None = None) -> list[tuple[datetime, float]]:
@@ -143,6 +148,71 @@ class TestVolatilityRouter:
         assert data["data_points"] > 0
 
     @pytest.mark.asyncio
+    async def test_historical_and_metrics_share_one_broker_history_fetch(
+        self, app: FastAPI, client: AsyncClient, access_token: str, active_broker_session: AsyncMock
+    ):
+        """The two historical-tab API calls must not double-hit Fyers."""
+        active_broker_session.get_historical_data.return_value = _candles(
+            [100.0 + (i % 11) - 5 for i in range(300)]
+        )
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        historical, metrics = await asyncio.gather(
+            client.get("/api/v1/volatility/NIFTY/historical", headers=headers),
+            client.get("/api/v1/volatility/NIFTY/metrics", headers=headers),
+        )
+
+        assert historical.status_code == 200
+        assert metrics.status_code == 200
+        assert active_broker_session.get_historical_data.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_historical_captures_one_real_atm_iv_snapshot_per_day(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        access_token: str,
+        active_broker_session: AsyncMock,
+        db_session: AsyncSession,
+    ):
+        active_broker_session.get_historical_data.return_value = _candles(
+            [22000.0 + (i % 11) - 5 for i in range(300)]
+        )
+        active_broker_session.get_instruments.return_value = [
+            {
+                "trading_symbol": "NSE:NIFTY27DEC22000CE",
+                "expiry": "30-Dec-2027",
+                "strike": 22000.0,
+                "option_type": "CE",
+            },
+            {
+                "trading_symbol": "NSE:NIFTY27DEC22000PE",
+                "expiry": "30-Dec-2027",
+                "strike": 22000.0,
+                "option_type": "PE",
+            },
+        ]
+        active_broker_session.get_quotes.side_effect = [
+            [{"trading_symbol": "NIFTY", "last_price": 22000.0}],
+            [
+                {"trading_symbol": "NSE:NIFTY27DEC22000CE", "last_price": 600.0},
+                {"trading_symbol": "NSE:NIFTY27DEC22000PE", "last_price": 500.0},
+            ],
+        ]
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        first = await client.get("/api/v1/volatility/NIFTY/historical", headers=headers)
+        second = await client.get("/api/v1/volatility/NIFTY/historical", headers=headers)
+
+        snapshots = list((await db_session.execute(select(DailyVolatilitySnapshot))).scalars())
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert len(snapshots) == 1
+        assert snapshots[0].symbol == "NIFTY"
+        assert snapshots[0].atm_iv > 0
+        assert active_broker_session.get_instruments.await_count == 1
+
+    @pytest.mark.asyncio
     async def test_metrics_404_when_not_enough_history(
         self, app: FastAPI, client: AsyncClient, access_token: str, active_broker_session: AsyncMock
     ):
@@ -152,3 +222,34 @@ class TestVolatilityRouter:
         response = await client.get("/api/v1/volatility/NIFTY/metrics", headers=headers)
 
         assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_daily_snapshot_is_immutable_and_stores_capture_time_rank(
+    db_session: AsyncSession,
+):
+    first = await get_or_create_daily_snapshot(
+        db_session,
+        symbol="NIFTY",
+        snapshot_date=datetime(2026, 7, 28, tzinfo=UTC).date(),
+        atm_iv=0.14,
+        realized_volatility=0.12,
+    )
+    second = await get_or_create_daily_snapshot(
+        db_session,
+        symbol="NIFTY",
+        snapshot_date=datetime(2026, 7, 29, tzinfo=UTC).date(),
+        atm_iv=0.20,
+        realized_volatility=0.13,
+    )
+    repeated = await get_or_create_daily_snapshot(
+        db_session,
+        symbol="NIFTY",
+        snapshot_date=datetime(2026, 7, 29, tzinfo=UTC).date(),
+        atm_iv=0.99,
+        realized_volatility=0.99,
+    )
+
+    assert first.iv_rank == 0
+    assert second.iv_rank == 100
+    assert repeated.atm_iv == 0.20

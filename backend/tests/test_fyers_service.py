@@ -71,6 +71,26 @@ async def test_get_historical_data_no_data_returns_empty_list() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_historical_data_retries_a_transient_rate_limit() -> None:
+    """The history API is rate-limited too; one 429 should not fail the chart."""
+    service = _make_service()
+    service.client.history = MagicMock(
+        side_effect=[
+            {"s": "error", "code": 429, "message": "request limit reached"},
+            {"s": "ok", "candles": [[1700000000, 100.0, 105.0, 99.0, 104.0, 1234]]},
+        ]
+    )
+
+    with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()):
+        rows = await service.get_historical_data(
+            "NSE:NIFTY50-INDEX", "2023-11-15", "2023-11-15", "D"
+        )
+
+    assert len(rows) == 1
+    assert service.client.history.call_count == 2
+
+
+@pytest.mark.asyncio
 async def test_get_historical_data_error_raises_broker_connection_error() -> None:
     """A genuine Fyers error status raises, rather than silently returning []."""
     service = _make_service()
@@ -345,3 +365,124 @@ def test_from_fyers_ws_symbol_passes_through_option_trading_symbols() -> None:
     """An option contract tick's symbol is exactly what the frontend
     subscribed with (its trading_symbol) — it must not be rewritten."""
     assert from_fyers_ws_symbol("NSE:NIFTY2681823200PE") == "NSE:NIFTY2681823200PE"
+
+
+@pytest.mark.asyncio
+async def test_get_positions_normalizes_rows_and_derives_side() -> None:
+    service = _make_service()
+    service.client.positions = MagicMock(
+        return_value={
+            "s": "ok",
+            "netPositions": [
+                {
+                    "symbol": "NSE:SBIN-EQ",
+                    "netQty": 1,
+                    "netAvg": 190.6,
+                    "productType": "INTRADAY",
+                    "ltp": 193.1,
+                    "realized_profit": 0.0,
+                    "unrealized_profit": 2.5,
+                    "pl": 2.5,
+                },
+                {
+                    "symbol": "NSE:TCS-EQ",
+                    "netQty": -2,
+                    "netAvg": 3500.0,
+                    "productType": "CNC",
+                    "ltp": 3480.0,
+                    "realized_profit": 10.0,
+                    "unrealized_profit": 40.0,
+                    "pl": 50.0,
+                },
+                {
+                    "symbol": "NSE:INFY-EQ",
+                    "netQty": 0,
+                    "netAvg": 0.0,
+                    "productType": "INTRADAY",
+                    "ltp": 1500.0,
+                    "realized_profit": 5.0,
+                    "unrealized_profit": 0.0,
+                    "pl": 5.0,
+                },
+            ],
+        }
+    )
+
+    positions = await service.get_positions()
+
+    assert len(positions) == 3  # net-zero rows are returned, not dropped
+    assert positions[0]["symbol"] == "SBIN"
+    assert positions[0]["side"] == "Buy"
+    assert positions[1]["symbol"] == "TCS"
+    assert positions[1]["side"] == "Sell"
+    assert positions[2]["side"] == "Flat"
+
+
+@pytest.mark.asyncio
+async def test_get_positions_raises_on_error_response() -> None:
+    service = _make_service()
+    service.client.positions = MagicMock(return_value={"s": "error", "message": "bad token"})
+
+    with pytest.raises(BrokerConnectionError):
+        await service.get_positions()
+
+
+@pytest.mark.asyncio
+async def test_get_holdings_normalizes_rows() -> None:
+    service = _make_service()
+    service.client.holdings = MagicMock(
+        return_value={
+            "s": "ok",
+            "holdings": [
+                {
+                    "symbol": "NSE:SBIN-EQ",
+                    "holdingType": "HLD",
+                    "quantity": 10,
+                    "costPrice": 190.0,
+                    "ltp": 193.0,
+                    "marketVal": 1930.0,
+                    "pl": 30.0,
+                }
+            ],
+        }
+    )
+
+    holdings = await service.get_holdings()
+
+    assert len(holdings) == 1
+    assert holdings[0]["symbol"] == "SBIN"
+    assert holdings[0]["quantity"] == 10
+    assert holdings[0]["market_value"] == 1930.0
+
+
+@pytest.mark.asyncio
+async def test_get_holdings_raises_on_error_response() -> None:
+    service = _make_service()
+    service.client.holdings = MagicMock(return_value={"s": "error"})
+
+    with pytest.raises(BrokerConnectionError):
+        await service.get_holdings()
+
+
+@pytest.mark.asyncio
+async def test_get_funds_returns_raw_fund_limit_rows() -> None:
+    service = _make_service()
+    service.client.funds = MagicMock(
+        return_value={
+            "s": "ok",
+            "fund_limit": [{"id": 1, "title": "Total Balance", "equityAmount": 100000.0}],
+        }
+    )
+
+    funds = await service.get_funds()
+
+    assert funds == {"fund_limit": [{"id": 1, "title": "Total Balance", "equityAmount": 100000.0}]}
+
+
+@pytest.mark.asyncio
+async def test_get_funds_raises_on_error_response() -> None:
+    service = _make_service()
+    service.client.funds = MagicMock(return_value={"s": "error"})
+
+    with pytest.raises(BrokerConnectionError):
+        await service.get_funds()

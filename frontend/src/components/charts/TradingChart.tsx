@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { OHLCVData, calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateSupertrend } from "@/lib/indicators";
+import { ChartIndicators, indicatorParameter } from "@/lib/chartIndicators";
 import { ChartLegend } from "./ChartLegend";
 
 // lightweight-charts renders to <canvas>, which cannot resolve CSS var() —
@@ -23,13 +24,7 @@ const COLOR_CAT_4 = "#00bcd4"; // --color-cat-4 (cyan)
 interface TradingChartProps {
   data: OHLCVData[];
   liveTick?: { price: number; timestamp: number } | null;
-  indicators?: {
-    sma?: boolean;
-    ema?: boolean;
-    bbands?: boolean;
-    rsi?: boolean;
-    supertrend?: boolean;
-  };
+  indicators?: ChartIndicators;
   symbol?: string;
 }
 
@@ -137,11 +132,11 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     // --- Indicators ---
 
     // SMA
-    if (indicators?.sma) {
+    if (indicators?.sma.enabled) {
       if (!smaSeriesRef.current) {
         smaSeriesRef.current = chartRef.current.addLineSeries({ color: COLOR_CAT_1, lineWidth: 2 });
       }
-      const smaData = calculateSMA(data, 20).map(d => ({
+      const smaData = calculateSMA(data, indicatorParameter(indicators, "sma", "period")).map(d => ({
         time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
         value: d.value
       }));
@@ -152,11 +147,11 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     }
 
     // EMA
-    if (indicators?.ema) {
+    if (indicators?.ema.enabled) {
       if (!emaSeriesRef.current) {
         emaSeriesRef.current = chartRef.current.addLineSeries({ color: COLOR_CAT_2, lineWidth: 2 });
       }
-      const emaData = calculateEMA(data, 20).map(d => ({
+      const emaData = calculateEMA(data, indicatorParameter(indicators, "ema", "period")).map(d => ({
         time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
         value: d.value
       }));
@@ -167,12 +162,16 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     }
 
     // Bollinger Bands
-    if (indicators?.bbands) {
+    if (indicators?.bbands.enabled) {
       if (!bbUpperRef.current) {
         bbUpperRef.current = chartRef.current.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
         bbLowerRef.current = chartRef.current.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
       }
-      const bbData = calculateBollingerBands(data, 20, 2);
+      const bbData = calculateBollingerBands(
+        data,
+        indicatorParameter(indicators, "bbands", "period"),
+        indicatorParameter(indicators, "bbands", "multiplier")
+      );
       bbUpperRef.current?.setData(bbData.map(d => ({ time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time, value: d.upper })));
       bbLowerRef.current?.setData(bbData.map(d => ({ time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time, value: d.lower })));
     } else if (bbUpperRef.current && bbLowerRef.current) {
@@ -183,7 +182,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     }
 
     // Supertrend
-    if (indicators?.supertrend) {
+    if (indicators?.supertrend.enabled) {
       if (!supertrendSeriesRef.current) {
         supertrendSeriesRef.current = chartRef.current.addLineSeries({
           color: COLOR_CAT_4,
@@ -191,7 +190,11 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
           lineStyle: 2,
         });
       }
-      const stData = calculateSupertrend(data, 10, 3).map(d => ({
+      const stData = calculateSupertrend(
+        data,
+        indicatorParameter(indicators, "supertrend", "period"),
+        indicatorParameter(indicators, "supertrend", "multiplier")
+      ).map(d => ({
         time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
         value: d.value,
       }));
@@ -201,11 +204,11 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       supertrendSeriesRef.current = null;
     }
 
-  }, [data, indicators?.sma, indicators?.ema, indicators?.bbands, indicators?.supertrend]);
+  }, [data, indicators]);
 
   // RSI Pane Setup
   useEffect(() => {
-    if (indicators?.rsi && rsiContainerRef.current) {
+    if (indicators?.rsi.enabled && rsiContainerRef.current) {
       if (!rsiChartRef.current) {
         rsiChartRef.current = createChart(rsiContainerRef.current, {
           height: 150,
@@ -232,7 +235,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       }
 
       if (data && data.length > 0 && rsiSeriesRef.current) {
-        const rsiData = calculateRSI(data, 14).map(d => ({
+        const rsiData = calculateRSI(data, indicatorParameter(indicators, "rsi", "period")).map(d => ({
           time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
           value: d.value
         }));
@@ -242,12 +245,12 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
           
         rsiSeriesRef.current.setData(uniqueRsi);
       }
-    } else if (!indicators?.rsi && rsiChartRef.current) {
+    } else if (!indicators?.rsi.enabled && rsiChartRef.current) {
       rsiChartRef.current.remove();
       rsiChartRef.current = null;
       rsiSeriesRef.current = null;
     }
-  }, [indicators?.rsi, data]);
+  }, [indicators, data]);
 
   // Live Tick Updates
   useEffect(() => {
@@ -271,10 +274,10 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
   }, [liveTick]); // Deliberately omit data to avoid full redraws on ticks
 
   const legendItems = [
-    indicators?.sma && { label: "SMA (20)", color: COLOR_CAT_1 },
-    indicators?.ema && { label: "EMA (20)", color: COLOR_CAT_2 },
-    indicators?.bbands && { label: "Bollinger Bands", color: COLOR_CAT_3 },
-    indicators?.supertrend && { label: "Supertrend", color: COLOR_CAT_4 },
+    indicators?.sma.enabled && { label: `SMA (${indicatorParameter(indicators, "sma", "period")})`, color: COLOR_CAT_1 },
+    indicators?.ema.enabled && { label: `EMA (${indicatorParameter(indicators, "ema", "period")})`, color: COLOR_CAT_2 },
+    indicators?.bbands.enabled && { label: `Bollinger (${indicatorParameter(indicators, "bbands", "period")}, ${indicatorParameter(indicators, "bbands", "multiplier")})`, color: COLOR_CAT_3 },
+    indicators?.supertrend.enabled && { label: `Supertrend (${indicatorParameter(indicators, "supertrend", "period")}, ${indicatorParameter(indicators, "supertrend", "multiplier")})`, color: COLOR_CAT_4 },
   ].filter((item): item is { label: string; color: string } => Boolean(item));
 
   return (
@@ -282,9 +285,9 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       {symbol && <div className="px-2 pt-2 text-sm font-bold text-[var(--color-text-bright)]">{symbol} <span className="font-normal text-[var(--color-text-muted)] text-xs ml-2">1m Timeframe</span></div>}
       <ChartLegend items={legendItems} />
       <div ref={chartContainerRef} className="h-[400px] w-full" />
-      {indicators?.rsi && (
+      {indicators?.rsi.enabled && (
         <div className="relative mt-2 border-t border-[var(--color-border-default)]">
-          <div className="absolute left-2 top-2 z-10 text-xs font-medium" style={{ color: COLOR_CAT_1 }}>RSI (14)</div>
+          <div className="absolute left-2 top-2 z-10 text-xs font-medium" style={{ color: COLOR_CAT_1 }}>RSI ({indicatorParameter(indicators, "rsi", "period")})</div>
           <div ref={rsiContainerRef} className="h-[150px] w-full" />
         </div>
       )}

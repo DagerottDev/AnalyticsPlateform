@@ -58,3 +58,13 @@ class ExpiryList(BaseModel):
 class InstrumentResponse(BaseModel):
     """Response containing a list of instruments."""
     instruments: list[Instrument]
+
+
+class SymbolSuggestion(BaseModel):
+    """One autocomplete match against the static NSE F&O symbol list."""
+    symbol: str
+    name: str
+
+
+class SymbolSearchResponse(BaseModel):
+    matches: list[SymbolSuggestion]

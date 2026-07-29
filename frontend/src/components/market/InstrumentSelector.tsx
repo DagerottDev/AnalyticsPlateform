@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getExpiries } from "@/lib/market";
+import { getExpiries, searchSymbols } from "@/lib/market";
 import { formatApiError } from "@/lib/apiError";
-import { ChevronDown, RefreshCw, Search } from "lucide-react";
+import { ChevronDown, RefreshCw, Search, Star, StarOff } from "lucide-react";
 import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
+import { Button } from "@/components/ui/Button";
+import { useWatchlistStore } from "@/stores/tickerStore";
+import type { SymbolSuggestion } from "@/types/market";
+
+const SUGGESTION_DEBOUNCE_MS = 200;
 
 interface InstrumentSelectorProps {
   symbol: string;
@@ -22,6 +27,9 @@ export function InstrumentSelector({
   expiry,
   onExpiryChange,
 }: InstrumentSelectorProps) {
+  const watchlist = useWatchlistStore((state) => state.tickers);
+  const addToWatchlist = useWatchlistStore((state) => state.addTicker);
+  const removeFromWatchlist = useWatchlistStore((state) => state.removeTicker);
   const [expiries, setExpiries] = useState<string[]>([]);
   const [loadingExpiries, setLoadingExpiries] = useState(false);
   const [expiriesError, setExpiriesError] = useState<string | null>(null);
@@ -60,14 +68,80 @@ export function InstrumentSelector({
 
   const [customSymbol, setCustomSymbol] = useState("");
   const isCustomSymbol = !INDICES.includes(symbol);
+  const isInWatchlist = watchlist.includes(symbol);
 
   const submitCustomSymbol = () => {
     const trimmed = customSymbol.trim().toUpperCase();
     if (trimmed) onSymbolChange(trimmed);
   };
 
+  const [suggestions, setSuggestions] = useState<SymbolSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    const query = customSymbol.trim();
+    if (!query) {
+      setSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const matches = await searchSymbols(query);
+        if (!cancelled) setSuggestions(matches);
+      } catch {
+        if (!cancelled) setSuggestions([]);
+      }
+    }, SUGGESTION_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [customSymbol]);
+
+  const selectSuggestion = (suggestion: SymbolSuggestion) => {
+    setCustomSymbol(suggestion.symbol);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    onSymbolChange(suggestion.symbol);
+  };
+
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+      {/* Global Watchlist */}
+      <div className="w-48">
+        <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
+          Watchlist
+        </label>
+        <div className="flex gap-1.5">
+          <Select
+            aria-label="Choose from global watchlist"
+            value={isInWatchlist ? symbol : ""}
+            onChange={(event) => {
+              if (event.target.value) onSymbolChange(event.target.value);
+            }}
+            className="min-w-0 flex-1"
+          >
+            <option value="" disabled>Choose a symbol</option>
+            {watchlist.map((watchlistSymbol) => (
+              <option key={watchlistSymbol} value={watchlistSymbol}>{watchlistSymbol}</option>
+            ))}
+          </Select>
+          <Button
+            type="button"
+            variant="icon"
+            onClick={() => isInWatchlist ? removeFromWatchlist(symbol) : addToWatchlist(symbol)}
+            disabled={isInWatchlist && watchlist.length <= 1}
+            aria-label={isInWatchlist ? `Remove ${symbol} from watchlist` : `Add ${symbol} to watchlist`}
+            title={isInWatchlist ? "Remove from watchlist" : "Add to watchlist"}
+          >
+            {isInWatchlist ? <StarOff className="h-4 w-4" /> : <Star className="h-4 w-4" />}
+          </Button>
+        </div>
+      </div>
+
       {/* Symbol Selector */}
       <div className="relative w-48">
         <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
@@ -104,14 +178,47 @@ export function InstrumentSelector({
             type="text"
             value={customSymbol}
             onChange={(e) => setCustomSymbol(e.target.value)}
+            onFocus={() => setShowSuggestions(true)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") submitCustomSymbol();
+              if (e.key === "Enter") {
+                submitCustomSymbol();
+                setShowSuggestions(false);
+              } else if (e.key === "Escape") {
+                setShowSuggestions(false);
+              }
             }}
-            onBlur={submitCustomSymbol}
+            onBlur={() => {
+              submitCustomSymbol();
+              setShowSuggestions(false);
+            }}
             placeholder="e.g. RELIANCE"
             className="pl-9"
+            autoComplete="off"
           />
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
+          {showSuggestions && suggestions.length > 0 && (
+            <ul className="absolute left-0 right-0 top-full z-10 mt-1 max-h-56 overflow-auto rounded-md border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-1 shadow-lg">
+              {suggestions.map((suggestion) => (
+                <li key={suggestion.symbol}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      // Fires before the input's onBlur, so selection wins
+                      // instead of the raw typed text being committed.
+                      e.preventDefault();
+                      selectSuggestion(suggestion);
+                    }}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]"
+                  >
+                    <span className="font-medium">{suggestion.symbol}</span>
+                    <span className="truncate text-xs text-[var(--color-text-muted)]">
+                      {suggestion.name}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 
