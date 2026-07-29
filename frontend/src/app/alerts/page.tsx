@@ -180,8 +180,8 @@ export default function AlertsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-12 md:items-end">
-            <div className="md:col-span-3">
+          <div className="grid grid-cols-1 gap-4 border-t border-[var(--color-border-subtle)] pt-4 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
+            <div className="lg:col-span-3">
               <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">Contract</label>
               <Select
                 value={selectedInstrumentToken}
@@ -197,7 +197,7 @@ export default function AlertsPage() {
               </Select>
             </div>
 
-            <div className="md:col-span-2">
+            <div className="lg:col-span-2">
               <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">Metric</label>
               <Select value={metric} onChange={e => setMetric(e.target.value as AlertMetric)}>
                 <option value="Price">Price</option>
@@ -213,7 +213,7 @@ export default function AlertsPage() {
               </Select>
             </div>
 
-            <div className="md:col-span-2">
+            <div className="lg:col-span-2">
               <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">Condition</label>
               <Select value={operator} onChange={e => setOperator(e.target.value as AlertOperator)}>
                 <option value=">">&gt;</option>
@@ -223,7 +223,7 @@ export default function AlertsPage() {
               </Select>
             </div>
 
-            <div className="md:col-span-2">
+            <div className="lg:col-span-2">
               <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">Threshold</label>
               <Input
                 type="number"
@@ -233,7 +233,7 @@ export default function AlertsPage() {
               />
             </div>
 
-            <div className="md:col-span-2">
+            <div className="lg:col-span-2">
               <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">Cooldown</label>
               <Select value={cooldownMinutes} onChange={e => setCooldownMinutes(Number(e.target.value))}>
                 {COOLDOWN_OPTIONS.map(opt => (
@@ -242,9 +242,10 @@ export default function AlertsPage() {
               </Select>
             </div>
 
-            <div className="md:col-span-1">
+            <div className="sm:col-span-2 lg:col-span-1">
               <Button onClick={handleAddAlert} disabled={!threshold} className="h-10 w-full" aria-label="Add alert">
                 <Plus className="h-5 w-5" />
+                <span className="lg:hidden">Create Alert</span>
               </Button>
             </div>
           </div>
@@ -256,8 +257,39 @@ export default function AlertsPage() {
             <Clock className="h-4 w-4 text-[var(--color-text-secondary)]" /> Active Alerts
           </h3>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-[var(--color-text-secondary)]">
+          {activeAlerts.length === 0 ? (
+            <EmptyState title="No active alerts." />
+          ) : (
+            <div className="divide-y divide-[var(--color-border-subtle)] lg:hidden">
+              {activeAlerts.map((alert) => (
+                <article key={alert.id} className="py-3 first:pt-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[var(--color-text-bright)]">{alert.instrument.trading_symbol}</p>
+                      <p className="tnum mt-1 text-xs text-[var(--color-text-secondary)]">
+                        <span className="text-[var(--color-accent-blue)]">{alert.metric}</span> {alert.operator} <span className="font-mono">{alert.threshold}</span>
+                      </p>
+                    </div>
+                    <Button variant="icon" onClick={() => void removeAlert(alert.id)} aria-label={`Remove ${alert.instrument.trading_symbol} alert`}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-[var(--color-text-muted)]">
+                    <span>{alert.cooldownMinutes > 0 ? `Cooldown ${alert.cooldownMinutes}m` : "Fire once"}</span>
+                    {alert.status === "Snoozed" ? (
+                      <Badge tone="orange" title={alert.snoozedUntil ? `Rearms at ${new Date(alert.snoozedUntil).toLocaleTimeString()}` : undefined}>
+                        <Moon className="h-2.5 w-2.5" /> Snoozed
+                      </Badge>
+                    ) : <Badge tone="profit">Live</Badge>}
+                    <span className="tnum">{new Date(alert.createdAt).toLocaleString()}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          <div className="hidden overflow-x-auto lg:block">
+            <table className="min-w-[700px] w-full text-left text-sm text-[var(--color-text-secondary)]">
               <thead className="bg-[var(--color-bg-hover)] text-xs uppercase text-[var(--color-text-muted)]">
                 <tr>
                   <th className="rounded-tl-lg px-4 py-3">Instrument</th>
@@ -269,14 +301,7 @@ export default function AlertsPage() {
                 </tr>
               </thead>
               <tbody>
-                {activeAlerts.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>
-                      <EmptyState title="No active alerts." />
-                    </td>
-                  </tr>
-                ) : (
-                  activeAlerts.map(alert => (
+                {activeAlerts.map(alert => (
                     <tr key={alert.id} className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[var(--color-bg-hover)]">
                       <td className="px-4 py-3 font-medium text-[var(--color-text-bright)]">{alert.instrument.trading_symbol}</td>
                       <td className="tnum px-4 py-3">
@@ -301,8 +326,7 @@ export default function AlertsPage() {
                         </Button>
                       </td>
                     </tr>
-                  ))
-                )}
+                  ))}
               </tbody>
             </table>
           </div>
@@ -321,8 +345,25 @@ export default function AlertsPage() {
             )}
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-[var(--color-text-secondary)]">
+          {triggerLog.length === 0 ? (
+            <EmptyState title="No triggered alerts history." />
+          ) : (
+            <div className="divide-y divide-[var(--color-border-subtle)] lg:hidden">
+              {triggerLog.map((event) => (
+                <article key={event.id} className="py-3 first:pt-0">
+                  <p className="text-sm font-semibold text-[var(--color-text-bright)]">{event.tradingSymbol}</p>
+                  <p className="tnum mt-1 text-xs text-[var(--color-text-secondary)]">{event.metric} {event.operator} {event.threshold}</p>
+                  <div className="mt-3 flex items-center justify-between gap-3 text-[11px]">
+                    <span className="tnum font-mono text-[var(--color-text-primary)]">Value {event.value.toFixed(4)}</span>
+                    <span className="tnum text-right text-[var(--color-status-good)]">{new Date(event.triggeredAt).toLocaleString()}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          <div className="hidden overflow-x-auto lg:block">
+            <table className="min-w-[620px] w-full text-left text-sm text-[var(--color-text-secondary)]">
               <thead className="bg-[var(--color-bg-hover)] text-xs uppercase text-[var(--color-text-muted)]">
                 <tr>
                   <th className="rounded-tl-lg px-4 py-3">Instrument</th>
@@ -332,14 +373,7 @@ export default function AlertsPage() {
                 </tr>
               </thead>
               <tbody>
-                {triggerLog.length === 0 ? (
-                  <tr>
-                    <td colSpan={4}>
-                      <EmptyState title="No triggered alerts history." />
-                    </td>
-                  </tr>
-                ) : (
-                  triggerLog.map(event => (
+                {triggerLog.map(event => (
                     <tr key={event.id} className="border-b border-[var(--color-border-subtle)] last:border-0 hover:bg-[var(--color-bg-hover)]">
                       <td className="px-4 py-3 font-medium text-[var(--color-text-bright)]">{event.tradingSymbol}</td>
                       <td className="tnum px-4 py-3 opacity-75">
@@ -350,8 +384,7 @@ export default function AlertsPage() {
                         {new Date(event.triggeredAt).toLocaleString()}
                       </td>
                     </tr>
-                  ))
-                )}
+                  ))}
               </tbody>
             </table>
           </div>

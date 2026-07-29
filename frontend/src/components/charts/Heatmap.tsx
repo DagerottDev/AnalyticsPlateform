@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ChartDataTable } from "./ChartDataTable";
 
 interface HeatmapProps {
   data: { strike: number; ceValue: number; peValue: number }[];
@@ -71,6 +72,12 @@ export function Heatmap({ data, maxValue, title }: HeatmapProps) {
           );
         })}
       </div>
+      <ChartDataTable
+        title={title ?? "options heatmap"}
+        summary={`${data.length} strikes with call and put values. Bar length represents the value relative to the largest value in this heatmap.`}
+        columns={[{ key: "strike", label: "Strike" }, { key: "ceValue", label: "Call value" }, { key: "peValue", label: "Put value" }]}
+        rows={data.map((row) => ({ strike: row.strike.toLocaleString(), ceValue: row.ceValue.toLocaleString(), peValue: row.peValue.toLocaleString() }))}
+      />
     </div>
   );
 }

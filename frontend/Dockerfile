@@ -6,6 +6,22 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --ignore-scripts
 
+# Development image. Source is bind-mounted by docker-compose.dev.yml while
+# node_modules stays in a named volume, so Next can hot-reload without a
+# rebuild after every edit.
+FROM node:20-alpine AS development
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci --ignore-scripts
+
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=development
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev", "--", "--hostname", "0.0.0.0", "--port", "3000"]
+
 # Stage 2: Build
 FROM node:20-alpine AS builder
 WORKDIR /app

@@ -18,7 +18,7 @@ from app.schemas.market import (
     SymbolSearchResponse,
     SymbolSuggestion,
 )
-from app.services.fyers_service import from_fyers_ws_symbol, to_fyers_ws_symbol
+from app.services.fyers_service import FyersService, from_fyers_ws_symbol, to_fyers_ws_symbol
 from app.services.session_manager import session_manager
 from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
 
@@ -257,10 +257,14 @@ async def market_ws(
                     "Market stream is unavailable. Reconnect your broker account and retry."
                 )
                 continue
-            fyers_symbols = [to_fyers_ws_symbol(s) for s in symbols]
+            stream_symbols = (
+                [to_fyers_ws_symbol(s) for s in symbols]
+                if isinstance(service, FyersService)
+                else symbols
+            )
             if msg.get("action") == "subscribe":
                 try:
-                    await asyncio.to_thread(stream.subscribe, fyers_symbols)
+                    await asyncio.to_thread(stream.subscribe, stream_symbols)
                 except Exception:
                     # Connection / TLS / upstream Fyers errors are expected
                     # operational failures.  Keep this browser websocket
@@ -270,7 +274,7 @@ async def market_ws(
                         "Unable to subscribe to live market data. Please retry shortly."
                     )
                     continue
-                subscribed.update(fyers_symbols)
+                subscribed.update(stream_symbols)
                 if service is not None:
                     try:
                         quotes = await service.get_quotes(symbols)
@@ -279,16 +283,16 @@ async def market_ws(
                     except Exception:
                         logger.exception("Failed to seed quotes after subscribe for %s", symbols)
             elif msg.get("action") == "unsubscribe":
-                subscribed.difference_update(fyers_symbols)
+                subscribed.difference_update(stream_symbols)
                 try:
-                    await asyncio.to_thread(stream.unsubscribe, fyers_symbols)
+                    await asyncio.to_thread(stream.unsubscribe, stream_symbols)
                 except Exception:
                     logger.exception("Failed to unsubscribe market stream for %s", symbols)
 
     async def writer() -> None:
         while True:
             message = await queue.get()
-            if "symbol" in message and "ltp" in message:
+            if isinstance(service, FyersService) and "symbol" in message and "ltp" in message:
                 # Raw live-tick shape from the Fyers websocket — translate the
                 # upstream-qualified symbol back to what the frontend
                 # subscribed with. Quote-shaped messages from get_quotes()

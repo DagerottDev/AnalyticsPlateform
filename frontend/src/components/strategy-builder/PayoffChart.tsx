@@ -16,6 +16,7 @@ import {
 import { PayoffPoint } from "@/lib/strategy";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LineChart as LineChartIcon } from "lucide-react";
+import { ChartDataTable } from "@/components/charts/ChartDataTable";
 
 interface PayoffChartProps {
   data: PayoffPoint[];
@@ -61,7 +62,7 @@ export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
       <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
         <LineChartIcon className="h-4 w-4 text-[var(--color-accent-blue)]" /> Payoff Profile
       </h3>
-      <div className="h-[400px] w-full">
+      <div role="img" aria-label={`Strategy payoff profile across ${chartData.length} price points. Current spot is ${currentSpot.toFixed(2)}. Exact expiry and current-theoretical profit and loss values are available in the following data table.`} className="h-[400px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <defs>
@@ -124,6 +125,12 @@ export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+      <ChartDataTable
+        title="strategy payoff"
+        summary={`${chartData.length} price points. Current spot is ${currentSpot.toFixed(2)}.`}
+        columns={[{ key: "spot", label: "Spot" }, { key: "PnL at Expiry", label: "P&L at expiry" }, { key: "T+Today", label: "P&L today" }]}
+        rows={chartData}
+      />
     </div>
   );
 }

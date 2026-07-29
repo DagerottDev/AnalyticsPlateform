@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { StrikeExposure } from "@/lib/dealerFlow";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ChartDataTable } from "@/components/charts/ChartDataTable";
 
 interface GEXProfileChartProps {
   data: StrikeExposure[];
@@ -49,7 +50,7 @@ export function GEXProfileChart({ data, spotPrice }: GEXProfileChartProps) {
   return (
     <div className="panel flex flex-col gap-2">
       <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Gamma Exposure (GEX) Profile</h3>
-      <div className="h-[400px] w-full">
+      <div role="img" aria-label={`Gamma exposure profile across ${chartData.length} strikes. Spot price is ${spotPrice.toFixed(2)}. Exact call and put exposure values are available in the following data table.`} className="h-[400px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} layout="vertical">
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" horizontal={true} vertical={false} />
@@ -92,6 +93,12 @@ export function GEXProfileChart({ data, spotPrice }: GEXProfileChartProps) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+      <ChartDataTable
+        title="gamma exposure profile"
+        summary={`${chartData.length} strikes. Exposure values are shown in millions; spot price is ${spotPrice.toFixed(2)}.`}
+        columns={[{ key: "strike", label: "Strike" }, { key: "Call GEX (M)", label: "Call GEX (M)" }, { key: "Put GEX (M)", label: "Put GEX (M)" }, { key: "Net GEX (M)", label: "Net GEX (M)" }]}
+        rows={chartData}
+      />
     </div>
   );
 }

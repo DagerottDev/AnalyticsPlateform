@@ -2,12 +2,13 @@
  * Authentication TypeScript type definitions.
  *
  * Shared types for auth state, API requests/responses, and user profile
- * across the frontend. Fyers is the only supported broker, and only one
- * broker session is active at a time.
+ * across the frontend. Fyers and Dhan are supported; only one broker
+ * session is active at a time.
  */
 
 /** Trading mode — paper (sandbox) or live (real money) */
 export type TradingMode = "paper" | "live";
+export type BrokerName = "fyers" | "dhan";
 
 /** User profile from the backend */
 export interface UserProfile {
@@ -21,13 +22,12 @@ export interface UserProfile {
 /**
  * Login request payload.
  *
- * Provide exactly one auth method:
- * - OAuth redirect: `auth_code`
- * - Headless TOTP auto-login: `client_id` + `totp_secret` + `pin`
+ * Fyers uses OAuth or TOTP. Dhan uses `client_id` + `access_token`.
  */
 export interface LoginRequest {
-  app_id: string;
-  api_secret: string;
+  broker?: BrokerName;
+  app_id?: string;
+  api_secret?: string;
   redirect_uri?: string;
   trading_mode: TradingMode;
 
@@ -38,6 +38,9 @@ export interface LoginRequest {
   client_id?: string;
   totp_secret?: string;
   pin?: string;
+
+  // Dhan access-token flow
+  access_token?: string;
 }
 
 /** Successful login response */

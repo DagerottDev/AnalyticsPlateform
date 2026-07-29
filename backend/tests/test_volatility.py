@@ -96,6 +96,66 @@ class TestComputeVolSeries:
 
 class TestVolatilityRouter:
     @pytest.mark.asyncio
+    async def test_relative_value_compares_iv_skew_and_gex(
+        self, app: FastAPI, client: AsyncClient, access_token: str, active_broker_session: AsyncMock
+    ):
+        active_broker_session.get_instruments.return_value = [
+            {
+                "trading_symbol": "NFO:NIFTY30DEC22000CE",
+                "expiry": "30-Dec-2027",
+                "strike": 22000.0,
+                "option_type": "CE",
+                "oi": 1000,
+            },
+            {
+                "trading_symbol": "NFO:NIFTY30DEC22000PE",
+                "expiry": "30-Dec-2027",
+                "strike": 22000.0,
+                "option_type": "PE",
+                "oi": 1200,
+            },
+            {
+                "trading_symbol": "NFO:NIFTY30DEC22500CE",
+                "expiry": "30-Dec-2027",
+                "strike": 22500.0,
+                "option_type": "CE",
+                "oi": 800,
+            },
+            {
+                "trading_symbol": "NFO:NIFTY30DEC21500PE",
+                "expiry": "30-Dec-2027",
+                "strike": 21500.0,
+                "option_type": "PE",
+                "oi": 900,
+            },
+        ]
+        active_broker_session.get_quotes.side_effect = [
+            [{"trading_symbol": "NIFTY", "last_price": 22000.0, "change_percent": 0.4}],
+            [
+                {"trading_symbol": "NFO:NIFTY30DEC22000CE", "last_price": 1800.0},
+                {"trading_symbol": "NFO:NIFTY30DEC22000PE", "last_price": 1700.0},
+                {"trading_symbol": "NFO:NIFTY30DEC22500CE", "last_price": 1500.0},
+                {"trading_symbol": "NFO:NIFTY30DEC21500PE", "last_price": 1450.0},
+            ],
+        ]
+
+        response = await client.get(
+            "/api/v1/volatility/compare?symbols=NIFTY",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == 200
+        row = response.json()["comparisons"][0]
+        assert row["symbol"] == "NIFTY"
+        assert row["atm_iv"] > 0
+        assert row["put_iv"] is not None
+        assert row["call_iv"] is not None
+        assert isinstance(row["net_gex"], float)
+        assert row["iv_rank"] is None
+        assert active_broker_session.get_instruments.await_count == 1
+        assert active_broker_session.get_quotes.await_count == 2
+
+    @pytest.mark.asyncio
     async def test_historical_requires_active_broker_session(
         self, app: FastAPI, client: AsyncClient, access_token: str
     ):

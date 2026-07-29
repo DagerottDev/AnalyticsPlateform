@@ -109,9 +109,9 @@ export function InstrumentSelector({
   };
 
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+    <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
       {/* Global Watchlist */}
-      <div className="w-48">
+      <div className="w-full sm:w-48">
         <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
           Watchlist
         </label>
@@ -143,7 +143,7 @@ export function InstrumentSelector({
       </div>
 
       {/* Symbol Selector */}
-      <div className="relative w-48">
+      <div className="relative w-full sm:w-48">
         <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
           Instrument
         </label>
@@ -169,7 +169,7 @@ export function InstrumentSelector({
       </div>
 
       {/* Custom Stock F&O Symbol Entry */}
-      <div className="relative w-48">
+      <div className="relative w-full sm:w-48">
         <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
           Or Stock Symbol
         </label>
@@ -223,7 +223,7 @@ export function InstrumentSelector({
       </div>
 
       {/* Expiry Selector */}
-      <div className="relative w-48">
+      <div className="relative w-full sm:w-48">
         <label className="mb-1 flex items-center gap-2 text-xs font-medium text-[var(--color-text-muted)]">
           Expiry
           {loadingExpiries && <RefreshCw className="h-3 w-3 animate-spin" />}

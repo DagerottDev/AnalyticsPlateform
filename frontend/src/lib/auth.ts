@@ -1,5 +1,5 @@
 import { apiClient } from "./api";
-import type { LoginRequest, LoginResponse, TradingMode } from "@/types/auth";
+import type { BrokerName, LoginRequest, LoginResponse, TradingMode } from "@/types/auth";
 
 export async function loginWithBroker(request: LoginRequest): Promise<LoginResponse> {
   const response = await apiClient.post<LoginResponse>("/auth/login", request);
@@ -13,6 +13,7 @@ export async function loginWithBroker(request: LoginRequest): Promise<LoginRespo
  * in sync on key names.
  */
 export const SAVED_LOGIN_KEYS = {
+  broker: "broker_name",
   loginType: "fy_login_type",
   appId: "fy_app_id",
   apiSecret: "fy_api_secret",
@@ -21,9 +22,11 @@ export const SAVED_LOGIN_KEYS = {
   pin: "fy_pin",
   redirectUri: "fy_redirect_uri",
   tradingMode: "fy_trading_mode",
+  dhanAccessToken: "dhan_access_token",
 } as const;
 
 export interface SavedLoginCredentials {
+  broker: BrokerName;
   appId: string;
   apiSecret: string;
   clientId: string;
@@ -31,11 +34,13 @@ export interface SavedLoginCredentials {
   pin: string;
   redirectUri: string;
   tradingMode: TradingMode;
+  dhanAccessToken: string;
 }
 
 export function getSavedLoginCredentials(): SavedLoginCredentials | null {
   if (typeof window === "undefined") return null;
   return {
+    broker: (localStorage.getItem(SAVED_LOGIN_KEYS.broker) as BrokerName) || "fyers",
     appId: localStorage.getItem(SAVED_LOGIN_KEYS.appId) || "",
     apiSecret: localStorage.getItem(SAVED_LOGIN_KEYS.apiSecret) || "",
     clientId: localStorage.getItem(SAVED_LOGIN_KEYS.clientId) || "",
@@ -43,6 +48,7 @@ export function getSavedLoginCredentials(): SavedLoginCredentials | null {
     pin: localStorage.getItem(SAVED_LOGIN_KEYS.pin) || "",
     redirectUri: localStorage.getItem(SAVED_LOGIN_KEYS.redirectUri) || "http://127.0.0.1:3000",
     tradingMode: (localStorage.getItem(SAVED_LOGIN_KEYS.tradingMode) as TradingMode) || "paper",
+    dhanAccessToken: localStorage.getItem(SAVED_LOGIN_KEYS.dhanAccessToken) || "",
   };
 }
 

@@ -1,0 +1,26 @@
+"""Store the broker type with the persisted active session.
+
+Revision ID: 0009
+Revises: 0008
+"""
+from collections.abc import Sequence
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = "0009"
+down_revision: str | None = "0008"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    op.add_column(
+        "broker_sessions",
+        sa.Column("broker", sa.String(length=20), nullable=False, server_default="fyers"),
+    )
+    op.alter_column("broker_sessions", "broker", server_default=None)
+
+
+def downgrade() -> None:
+    op.drop_column("broker_sessions", "broker")

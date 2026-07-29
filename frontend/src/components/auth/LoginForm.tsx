@@ -22,7 +22,7 @@ import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { TradingModeToggle } from "@/components/ui/TradingModeToggle";
 import { SAVED_LOGIN_KEYS } from "@/lib/auth";
-import type { TradingMode } from "@/types/auth";
+import type { BrokerName, TradingMode } from "@/types/auth";
 import { cn } from "@/lib/utils";
 import {
   Activity,
@@ -45,6 +45,7 @@ export function LoginForm() {
 
   // Tabs: "totp" (headless auto-login) vs "oauth" (OAuth redirect wizard)
   const [loginType, setLoginType] = useState<"totp" | "oauth">("totp");
+  const [broker, setBroker] = useState<BrokerName>("fyers");
 
   const [appId, setAppId] = useState("");
   const [apiSecret, setApiSecret] = useState("");
@@ -54,6 +55,7 @@ export function LoginForm() {
   const [clientId, setClientId] = useState("");
   const [totpSecret, setTotpSecret] = useState("");
   const [pin, setPin] = useState("");
+  const [dhanAccessToken, setDhanAccessToken] = useState("");
 
   // OAuth wizard fields
   const [authCode, setAuthCode] = useState("");
@@ -68,12 +70,15 @@ export function LoginForm() {
     if (typeof window !== "undefined") {
       const savedLoginType = localStorage.getItem(SAVED_LOGIN_KEYS.loginType);
       if (savedLoginType) setLoginType(savedLoginType as "totp" | "oauth");
+      const savedBroker = localStorage.getItem(SAVED_LOGIN_KEYS.broker);
+      if (savedBroker === "fyers" || savedBroker === "dhan") setBroker(savedBroker);
 
       setAppId(localStorage.getItem(SAVED_LOGIN_KEYS.appId) || "");
       setApiSecret(localStorage.getItem(SAVED_LOGIN_KEYS.apiSecret) || "");
       setClientId(localStorage.getItem(SAVED_LOGIN_KEYS.clientId) || "");
       setTotpSecret(localStorage.getItem(SAVED_LOGIN_KEYS.totpSecret) || "");
       setPin(localStorage.getItem(SAVED_LOGIN_KEYS.pin) || "");
+      setDhanAccessToken(localStorage.getItem(SAVED_LOGIN_KEYS.dhanAccessToken) || "");
       setRedirectUri(localStorage.getItem(SAVED_LOGIN_KEYS.redirectUri) || "http://127.0.0.1:3000");
 
       const savedTradingMode = localStorage.getItem(SAVED_LOGIN_KEYS.tradingMode);
@@ -85,22 +90,32 @@ export function LoginForm() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem(SAVED_LOGIN_KEYS.loginType, loginType);
+      localStorage.setItem(SAVED_LOGIN_KEYS.broker, broker);
       localStorage.setItem(SAVED_LOGIN_KEYS.appId, appId);
       localStorage.setItem(SAVED_LOGIN_KEYS.apiSecret, apiSecret);
       localStorage.setItem(SAVED_LOGIN_KEYS.clientId, clientId);
       localStorage.setItem(SAVED_LOGIN_KEYS.totpSecret, totpSecret);
       localStorage.setItem(SAVED_LOGIN_KEYS.pin, pin);
+      localStorage.setItem(SAVED_LOGIN_KEYS.dhanAccessToken, dhanAccessToken);
       localStorage.setItem(SAVED_LOGIN_KEYS.redirectUri, redirectUri);
       localStorage.setItem(SAVED_LOGIN_KEYS.tradingMode, tradingMode);
     }
-  }, [loginType, appId, apiSecret, clientId, totpSecret, pin, redirectUri, tradingMode]);
+  }, [loginType, broker, appId, apiSecret, clientId, totpSecret, pin, dhanAccessToken, redirectUri, tradingMode]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     clearError();
     try {
-      if (loginType === "totp") {
+      if (broker === "dhan") {
         await login({
+          broker: "dhan",
+          client_id: clientId,
+          access_token: dhanAccessToken,
+          trading_mode: tradingMode,
+        });
+      } else if (loginType === "totp") {
+        await login({
+          broker: "fyers",
           app_id: appId,
           api_secret: apiSecret,
           redirect_uri: redirectUri,
@@ -111,6 +126,7 @@ export function LoginForm() {
         });
       } else {
         await login({
+          broker: "fyers",
           app_id: appId,
           api_secret: apiSecret,
           redirect_uri: redirectUri,
@@ -127,11 +143,9 @@ export function LoginForm() {
 
   const isSubmitDisabled =
     isLoading ||
-    !appId ||
-    !apiSecret ||
-    (loginType === "totp"
-      ? !clientId || !totpSecret || !pin
-      : !authCode);
+    (broker === "dhan"
+      ? !clientId || !dhanAccessToken
+      : !appId || !apiSecret || (loginType === "totp" ? !clientId || !totpSecret || !pin : !authCode));
 
   return (
     <div className="w-full max-w-md animate-fade-in">
@@ -144,15 +158,33 @@ export function LoginForm() {
           Option Analytics
         </h1>
         <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-          Connect your Fyers account to continue
+          Connect your {broker === "dhan" ? "Dhan" : "Fyers"} account to continue
         </p>
       </div>
 
       {/* Login Card */}
       <Card variant="glass">
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Tab Selector */}
           <div className="flex gap-2 rounded-lg bg-[var(--color-bg-primary)] p-1">
+            {(["fyers", "dhan"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setBroker(option)}
+                className={cn(
+                  "flex flex-1 items-center justify-center rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-all",
+                  broker === option
+                    ? "bg-[var(--color-accent-blue)] text-white shadow-md"
+                    : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                )}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab Selector */}
+          {broker === "fyers" && <div className="flex gap-2 rounded-lg bg-[var(--color-bg-primary)] p-1">
             <button
               type="button"
               onClick={() => setLoginType("totp")}
@@ -179,10 +211,35 @@ export function LoginForm() {
               <KeyRound className="h-3.5 w-3.5" />
               OAuth Redirect
             </button>
-          </div>
+          </div>}
+
+          {broker === "dhan" && (
+            <div className="space-y-4 animate-fade-in">
+              <p className="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                Generate an access token in DhanHQ, then paste it here. Dhan individual tokens expire after 24 hours.
+              </p>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  <User className="h-3.5 w-3.5" /> Dhan Client ID
+                </label>
+                <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Your Dhan Client ID" required />
+              </div>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  <KeyRound className="h-3.5 w-3.5" /> Dhan Access Token
+                </label>
+                <div className="relative">
+                  <Input type={showApiSecret ? "text" : "password"} value={dhanAccessToken} onChange={(e) => setDhanAccessToken(e.target.value)} placeholder="Paste current Dhan access token" required className="pr-10" />
+                  <button type="button" onClick={() => setShowApiSecret(!showApiSecret)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">
+                    {showApiSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* TOTP AUTO-LOGIN FIELDS */}
-          {loginType === "totp" && (
+          {broker === "fyers" && loginType === "totp" && (
             <div className="space-y-4 animate-fade-in">
               {/* Client ID */}
               <div className="space-y-2">
@@ -284,7 +341,7 @@ export function LoginForm() {
           )}
 
           {/* OAUTH WIZARD FIELDS */}
-          {loginType === "oauth" && (
+          {broker === "fyers" && loginType === "oauth" && (
             <div className="space-y-4 animate-fade-in">
               {/* App ID */}
               <div className="space-y-2">
@@ -425,7 +482,12 @@ export function LoginForm() {
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Connecting to Fyers...
+                Connecting to {broker === "dhan" ? "Dhan" : "Fyers"}...
+              </>
+            ) : broker === "dhan" ? (
+              <>
+                <Activity className="h-4 w-4" />
+                Connect Dhan
               </>
             ) : loginType === "oauth" ? (
               <>
@@ -444,7 +506,7 @@ export function LoginForm() {
 
       {/* Footer */}
       <p className="mt-6 text-center text-xs text-[var(--color-text-muted)]">
-        Secured directly by the Fyers API
+        Secured directly by the {broker === "dhan" ? "Dhan" : "Fyers"} API
       </p>
     </div>
   );

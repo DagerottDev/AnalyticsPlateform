@@ -12,6 +12,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ChartDataTable } from "@/components/charts/ChartDataTable";
 
 interface IVSmileChartProps {
   data: {
@@ -43,7 +44,7 @@ export function IVSmileChart({ data }: IVSmileChartProps) {
   return (
     <div className="panel flex flex-col gap-2">
       <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Volatility Smile</h3>
-      <div className="h-[300px] w-full">
+      <div role="img" aria-label={`Volatility smile line chart across ${chartData.length} strikes. Exact call and put implied volatility values are available in the following data table.`} className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" vertical={false} />
@@ -90,6 +91,12 @@ export function IVSmileChart({ data }: IVSmileChartProps) {
           </LineChart>
         </ResponsiveContainer>
       </div>
+      <ChartDataTable
+        title="volatility smile"
+        summary={`${chartData.length} strikes with call and put implied volatility percentages.`}
+        columns={[{ key: "strike", label: "Strike" }, { key: "Call IV", label: "Call IV" }, { key: "Put IV", label: "Put IV" }]}
+        rows={chartData.map((point) => ({ ...point, "Call IV": point["Call IV"] == null ? null : `${point["Call IV"]}%`, "Put IV": point["Put IV"] == null ? null : `${point["Put IV"]}%` }))}
+      />
     </div>
   );
 }

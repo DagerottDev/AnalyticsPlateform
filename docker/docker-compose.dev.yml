@@ -1,0 +1,21 @@
+# Local developer override. Compose this on top of docker-compose.yml:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build
+#
+# The production compose file intentionally keeps its standalone frontend
+# image. This override replaces it with Next's development server and mounts
+# source code, so save events are hot-reloaded instead of requiring rebuilds.
+services:
+  frontend:
+    build:
+      target: development
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ../frontend:/app
+      - frontend_node_modules:/app/node_modules
+      - frontend_next:/app/.next
+
+volumes:
+  frontend_node_modules:
+  frontend_next:

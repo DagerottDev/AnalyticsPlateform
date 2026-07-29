@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { StrikeExposure } from "@/lib/dealerFlow";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ChartDataTable } from "@/components/charts/ChartDataTable";
 
 interface ExposureChartProps {
   title: string;
@@ -43,7 +44,7 @@ export function ExposureChart({ title, data, spotPrice }: ExposureChartProps) {
   return (
     <div className="panel flex flex-col gap-2">
       <h3 className="text-sm font-bold text-[var(--color-text-bright)]">{title}</h3>
-      <div className="h-[300px] w-full">
+      <div role="img" aria-label={`${title} bar chart across ${chartData.length} strikes. Spot price is ${spotPrice.toFixed(2)}. Exact call and put exposure values are available in the following data table.`} className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} layout="vertical">
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" horizontal={true} vertical={false} />
@@ -84,6 +85,12 @@ export function ExposureChart({ title, data, spotPrice }: ExposureChartProps) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+      <ChartDataTable
+        title={title}
+        summary={`${chartData.length} strikes. Exposure values are shown in millions; spot price is ${spotPrice.toFixed(2)}.`}
+        columns={[{ key: "strike", label: "Strike" }, { key: "Call (M)", label: "Call (M)" }, { key: "Put (M)", label: "Put (M)" }]}
+        rows={chartData}
+      />
     </div>
   );
 }

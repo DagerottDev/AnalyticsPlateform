@@ -98,6 +98,31 @@ async def test_login_totp_success(
 
 
 @pytest.mark.asyncio
+async def test_login_dhan_success(
+    client: AsyncClient,
+    mock_broker_service: AsyncMock,
+) -> None:
+    """Dhan accepts its Client ID and access token without Fyers fields."""
+    with patch("app.api.v1.auth.DhanService", return_value=mock_broker_service) as dhan_service:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={
+                "broker": "dhan",
+                "client_id": "1100000001",
+                "access_token": "dhan-access-token",
+                "trading_mode": "paper",
+            },
+        )
+
+    assert response.status_code == 200
+    dhan_service.assert_called_once_with(
+        client_id="1100000001",
+        access_token="dhan-access-token",
+        trading_mode=TradingMode.PAPER,
+    )
+
+
+@pytest.mark.asyncio
 async def test_auto_login_not_configured(client: AsyncClient) -> None:
     """Auto-login should 503 when no TOTP login has ever succeeded (nothing
     persisted in broker_credentials yet)."""

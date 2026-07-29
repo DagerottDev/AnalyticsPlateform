@@ -5,6 +5,7 @@ import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { OHLCVData, calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateSupertrend } from "@/lib/indicators";
 import { ChartIndicators, indicatorParameter } from "@/lib/chartIndicators";
 import { ChartLegend } from "./ChartLegend";
+import { ChartDataTable } from "./ChartDataTable";
 
 // lightweight-charts renders to <canvas>, which cannot resolve CSS var() —
 // these hex literals mirror the design tokens in globals.css (documented in
@@ -280,15 +281,55 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     indicators?.supertrend.enabled && { label: `Supertrend (${indicatorParameter(indicators, "supertrend", "period")}, ${indicatorParameter(indicators, "supertrend", "multiplier")})`, color: COLOR_CAT_4 },
   ].filter((item): item is { label: string; color: string } => Boolean(item));
 
+  const formatTime = (time: OHLCVData["time"]) => {
+    const date = new Date(typeof time === "string" ? time : time < 1e11 ? time * 1000 : time);
+    return Number.isNaN(date.getTime()) ? String(time) : date.toLocaleString();
+  };
+  const chartRows = data.map((point) => ({
+    time: formatTime(point.time),
+    open: point.open.toFixed(2),
+    high: point.high.toFixed(2),
+    low: point.low.toFixed(2),
+    close: point.close.toFixed(2),
+    volume: point.volume?.toLocaleString() ?? "—",
+  }));
+
   return (
     <div className="panel flex w-full flex-col gap-1 p-2">
       {symbol && <div className="px-2 pt-2 text-sm font-bold text-[var(--color-text-bright)]">{symbol} <span className="font-normal text-[var(--color-text-muted)] text-xs ml-2">1m Timeframe</span></div>}
       <ChartLegend items={legendItems} />
-      <div ref={chartContainerRef} className="h-[400px] w-full" />
+      <div
+        ref={chartContainerRef}
+        role="img"
+        aria-label={`${symbol ?? "Instrument"} one-minute candlestick chart with ${data.length} candles. Use the following data table for exact OHLC and volume values.`}
+        className="h-[400px] w-full"
+      />
+      <ChartDataTable
+        className="px-2"
+        title={`${symbol ?? "Instrument"} OHLCV`}
+        summary={`${data.length} one-minute candles. Values are ordered from oldest to newest.`}
+        columns={[
+          { key: "time", label: "Time" }, { key: "open", label: "Open" }, { key: "high", label: "High" },
+          { key: "low", label: "Low" }, { key: "close", label: "Close" }, { key: "volume", label: "Volume" },
+        ]}
+        rows={chartRows}
+      />
       {indicators?.rsi.enabled && (
         <div className="relative mt-2 border-t border-[var(--color-border-default)]">
           <div className="absolute left-2 top-2 z-10 text-xs font-medium" style={{ color: COLOR_CAT_1 }}>RSI ({indicatorParameter(indicators, "rsi", "period")})</div>
-          <div ref={rsiContainerRef} className="h-[150px] w-full" />
+          <div
+            ref={rsiContainerRef}
+            role="img"
+            aria-label={`RSI chart using a ${indicatorParameter(indicators, "rsi", "period")}-period calculation. Exact values are available in the following data table.`}
+            className="h-[150px] w-full"
+          />
+          <ChartDataTable
+            className="px-2 pb-2"
+            title="RSI"
+            summary={`RSI values for the same ${data.length} candles.`}
+            columns={[{ key: "time", label: "Time" }, { key: "rsi", label: "RSI" }]}
+            rows={calculateRSI(data, indicatorParameter(indicators, "rsi", "period")).map((point) => ({ time: formatTime(point.time), rsi: point.value.toFixed(2) }))}
+          />
         </div>
       )}
     </div>

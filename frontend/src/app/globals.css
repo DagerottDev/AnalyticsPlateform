@@ -325,6 +325,14 @@ body {
   outline-offset: 2px;
 }
 
+/* Shared controls use .focus-ring, but pages also contain native controls and
+   direct navigation buttons. Keep every keyboard-focusable element visibly
+   locatable even when a component resets the browser outline. */
+:where(button, a[href], input, select, textarea, [role="button"], [role="tab"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
+}
+
 /* Note: text/password/url inputs are NOT styled here — every usage (the
  * shared Input component, and the few ad-hoc ones) fully specifies its own
  * Tailwind classes. A global unlayered rule here would beat ALL of them

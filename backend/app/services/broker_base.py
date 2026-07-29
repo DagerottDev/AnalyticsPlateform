@@ -63,6 +63,26 @@ class BrokerService(ABC):
         pass
 
     @abstractmethod
+    async def get_orders(self) -> list[dict[str, Any]]:
+        """Retrieve broker orders for the current trading day."""
+        pass
+
+    @abstractmethod
+    async def place_order(self, order: dict[str, Any]) -> dict[str, Any]:
+        """Submit one validated order to the broker."""
+        pass
+
+    @abstractmethod
+    async def modify_order(self, order_id: str, order: dict[str, Any]) -> dict[str, Any]:
+        """Modify one pending broker order."""
+        pass
+
+    @abstractmethod
+    async def cancel_order(self, order_id: str) -> dict[str, Any]:
+        """Cancel one pending broker order."""
+        pass
+
+    @abstractmethod
     async def close(self) -> None:
         """Close any open connections or sessions."""
         pass

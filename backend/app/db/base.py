@@ -5,3 +5,4 @@ from app.models.market_data import MarketData  # noqa
 from app.models.volatility_snapshot import DailyVolatilitySnapshot  # noqa
 from app.models.alert import AlertRecord, AlertTriggerRecord  # noqa
 from app.models.alert_delivery import AlertDeliverySettingsRecord  # noqa
+from app.models.trade_journal import TradeJournalRecord  # noqa

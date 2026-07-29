@@ -37,24 +37,24 @@ export function Header() {
   const clearTriggerLog = useAlertStore((state) => state.clearTriggerLog);
 
   return (
-    <header className="glass-strong sticky top-0 z-50 flex h-14 items-center justify-between border-b border-[var(--color-border-default)] px-4">
+    <header className="glass-strong sticky top-0 z-50 flex h-14 items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 sm:px-4">
       {/* Left — Brand */}
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--color-accent-blue)] to-[var(--color-accent-cyan)]">
           <Activity className="h-4 w-4 text-white" />
         </div>
-        <div>
-          <h1 className="text-sm font-bold text-[var(--color-text-bright)]">
+        <div className="min-w-0">
+          <h1 className="truncate text-sm font-bold text-[var(--color-text-bright)]">
             Option Analytics
           </h1>
-          <p className="text-[10px] text-[var(--color-text-muted)]">
+          <p className="hidden text-[10px] text-[var(--color-text-muted)] sm:block">
             {brokerName}
           </p>
         </div>
       </div>
 
       {/* Center — Trading Mode */}
-      <div className="flex items-center gap-3">
+      <div className="hidden items-center gap-3 sm:flex">
         {isAuthenticated && (
           <Badge tone={isPaperMode ? "blue" : "loss"} className="px-3 py-1 text-xs">
             {isPaperMode ? <Shield className="h-3 w-3" /> : <Zap className="h-3 w-3" />}
@@ -93,7 +93,7 @@ export function Header() {
       </div>
 
       {/* Right — Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         {/* Notifications */}
         <div className="relative">
           <Button
@@ -175,7 +175,7 @@ export function Header() {
               setShowUserMenu((v) => !v);
               setShowNotifications(false);
             }}
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
+            className="flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] sm:px-2"
             aria-label="User menu"
           >
             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-bg-surface)]">
@@ -184,7 +184,7 @@ export function Header() {
             <span className="hidden text-xs sm:inline">
               {user?.client_id || "User"}
             </span>
-            <ChevronDown className="h-3 w-3" />
+            <ChevronDown className="hidden h-3 w-3 sm:block" />
           </button>
 
           {/* Dropdown */}

@@ -11,6 +11,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ChartDataTable } from "@/components/charts/ChartDataTable";
 
 interface TermStructureChartProps {
   data: {
@@ -40,7 +41,7 @@ export function TermStructureChart({ data }: TermStructureChartProps) {
   return (
     <div className="panel flex flex-col gap-2">
       <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Volatility Term Structure</h3>
-      <div className="h-[300px] w-full">
+      <div role="img" aria-label={`Volatility term structure line chart across ${chartData.length} expiries. Exact at-the-money implied volatility values are available in the following data table.`} className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 30 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" vertical={false} />
@@ -78,6 +79,12 @@ export function TermStructureChart({ data }: TermStructureChartProps) {
           </LineChart>
         </ResponsiveContainer>
       </div>
+      <ChartDataTable
+        title="volatility term structure"
+        summary={`${chartData.length} expiries with at-the-money implied volatility percentages.`}
+        columns={[{ key: "expiry", label: "Expiry" }, { key: "ATM IV", label: "ATM IV" }]}
+        rows={chartData.map((point) => ({ ...point, "ATM IV": `${point["ATM IV"]}%` }))}
+      />
     </div>
   );
 }

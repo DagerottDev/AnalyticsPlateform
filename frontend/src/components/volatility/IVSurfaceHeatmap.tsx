@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ChartDataTable } from "@/components/charts/ChartDataTable";
 
 interface IVSurfaceHeatmapProps {
   data: {
@@ -90,7 +91,7 @@ export function IVSurfaceHeatmap({ data }: IVSurfaceHeatmapProps) {
     <div className="panel flex flex-col gap-2 overflow-x-auto">
       <h3 className="mb-2 text-sm font-bold text-[var(--color-text-bright)]">IV Surface (Strike vs Expiry)</h3>
 
-      <div className="flex w-max min-w-full">
+      <div role="img" aria-label={`Implied-volatility surface across ${strikes.length} strikes and ${expirations.length} expiries. Exact values are available in the following data table.`} className="flex w-max min-w-full">
         {/* Y-Axis: Strikes */}
         <div className="flex flex-col justify-end pt-[28px]">
           {strikes.map(strike => (
@@ -131,6 +132,13 @@ export function IVSurfaceHeatmap({ data }: IVSurfaceHeatmapProps) {
           ))}
         </div>
       </div>
+
+      <ChartDataTable
+        title="implied volatility surface"
+        summary={`${data.length} strike and expiry combinations. Implied volatility is shown as a percentage.`}
+        columns={[{ key: "expiry", label: "Expiry" }, { key: "strike", label: "Strike" }, { key: "iv", label: "Implied volatility" }]}
+        rows={data.filter((point) => point.iv > 0).map((point) => ({ expiry: point.expiry, strike: point.strike.toLocaleString(), iv: `${(point.iv * 100).toFixed(2)}%` }))}
+      />
 
       {/* Legend */}
       <div className="mt-4 flex items-center justify-center gap-2 text-[10px] text-[var(--color-text-muted)]">

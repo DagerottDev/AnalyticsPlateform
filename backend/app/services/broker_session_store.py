@@ -14,6 +14,7 @@ from app.config import Settings
 from app.core.crypto import decrypt_token, encrypt_token
 from app.models.broker_session import BrokerSessionRecord
 from app.models.user import TradingMode
+from app.services.dhan_service import DhanService
 from app.services.fyers_service import FyersService
 from app.services.session_manager import session_manager
 
@@ -29,6 +30,7 @@ async def save_broker_session(
     client_id: str,
     app_id: str,
     access_token: str,
+    broker: str = "fyers",
     trading_mode: TradingMode,
     account_name: str,
 ) -> None:
@@ -39,6 +41,7 @@ async def save_broker_session(
     # see the auto-generated kwargs `__init__` — assign attributes instead.
     record = BrokerSessionRecord()
     record.id = _SINGLETON_ID
+    record.broker = broker
     record.client_id = client_id
     record.app_id = app_id
     record.access_token = encrypt_token(access_token, settings)
@@ -87,11 +90,20 @@ async def restore_broker_session(db: AsyncSession, settings: Settings) -> None:
         await clear_broker_session(db)
         return
 
-    service = FyersService(
-        app_id=record.app_id,
-        access_token=decrypt_token(record.access_token, settings),
-        trading_mode=TradingMode(record.trading_mode),
-        account_name=record.account_name,
-    )
+    access_token = decrypt_token(record.access_token, settings)
+    if record.broker == "dhan":
+        service = DhanService(
+            client_id=record.client_id,
+            access_token=access_token,
+            trading_mode=TradingMode(record.trading_mode),
+            account_name=record.account_name,
+        )
+    else:
+        service = FyersService(
+            app_id=record.app_id,
+            access_token=access_token,
+            trading_mode=TradingMode(record.trading_mode),
+            account_name=record.account_name,
+        )
     await session_manager.set_session(record.client_id, service)
     logger.info("Restored broker session for %s from persisted state.", record.client_id)

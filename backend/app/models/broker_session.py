@@ -9,8 +9,8 @@ from app.db.base_class import Base
 class BrokerSessionRecord(Base):
     """Persisted broker session.
 
-    SessionManager itself stays purely in-memory (a live FyersService holds
-    an SDK client object that can't be serialized), but everything needed to
+    SessionManager itself stays purely in-memory (a live broker client cannot
+    be serialized), but everything needed to
     *reconstruct* one — app_id, access_token, trading_mode, account_name —
     is plain data. Persisting just that lets app startup silently restore
     the session instead of forcing a fresh broker login every time the
@@ -24,6 +24,7 @@ class BrokerSessionRecord(Base):
     __tablename__ = "broker_sessions"  # type: ignore[assignment]
 
     id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    broker: Mapped[str] = mapped_column(String(20), default="fyers")
     client_id: Mapped[str] = mapped_column(String(50))
     app_id: Mapped[str] = mapped_column(String(50))
     # Text, not a bounded varchar: Fernet-encrypted ciphertext (see

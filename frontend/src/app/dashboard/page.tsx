@@ -96,7 +96,7 @@ function ModuleCard({
       </div>
 
       {metric && (
-        <div className="mt-4 flex items-center justify-between border-t border-[var(--color-border-subtle)] pt-3 text-[11px]">
+        <div className="mt-4 flex flex-col gap-1 border-t border-[var(--color-border-subtle)] pt-3 text-[11px] sm:flex-row sm:items-center sm:justify-between">
           <span className="font-medium text-[var(--color-text-muted)]">Status / Active Info:</span>
           <span className="font-semibold" style={{ color }}>
             {metric}
@@ -228,8 +228,8 @@ export default function DashboardPage() {
         <Card variant="glass">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl font-black tracking-tight text-[var(--color-text-bright)]">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="min-w-0 break-words text-xl font-black tracking-tight text-[var(--color-text-bright)]">
                   Welcome back, {user?.client_id || "Trader"}
                 </h2>
                 <Badge tone={tradingMode === "paper" ? "blue" : "loss"}>
@@ -249,7 +249,7 @@ export default function DashboardPage() {
                 </p>
               )}
             </div>
-            <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5">
+            <div className="w-fit flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5">
               <span className="relative flex h-2.5 w-2.5">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-status-good)] opacity-75" />
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-status-good)]" />
@@ -263,7 +263,7 @@ export default function DashboardPage() {
 
         {/* Real-time Tickers Header & Action */}
         <div>
-          <div className="mb-3 flex items-center justify-between border-b border-[var(--color-border-default)] pb-2">
+          <div className="mb-3 flex items-center justify-between gap-3 border-b border-[var(--color-border-default)] pb-2">
             <Eyebrow>Live Market Tickers & Stats</Eyebrow>
             <Button
               onClick={() => setIsModalOpen(true)}
@@ -290,7 +290,7 @@ export default function DashboardPage() {
 
         {/* Alerts Overview */}
         <div>
-          <div className="mb-3 flex items-center justify-between border-b border-[var(--color-border-default)] pb-2">
+          <div className="mb-3 flex items-center justify-between gap-3 border-b border-[var(--color-border-default)] pb-2">
             <Eyebrow>Alerts</Eyebrow>
             <Button
               onClick={() => router.push("/alerts")}
@@ -370,4 +370,3 @@ export default function DashboardPage() {
     </DashboardLayout>
   );
 }
-

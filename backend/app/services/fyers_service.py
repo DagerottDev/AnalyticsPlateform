@@ -83,6 +83,8 @@ class FyersService(BrokerService):
     # 4=StopLimit) even though no order is actually placed here — Market
     # gives a same-side-agnostic estimate without needing a limit price.
     _MARGIN_ORDER_TYPE = 2
+    _ORDER_TYPE_CODES = {"LIMIT": 1, "MARKET": 2, "STOP": 3, "STOP_LIMIT": 4}
+    _ORDER_TYPE_NAMES = {value: key for key, value in _ORDER_TYPE_CODES.items()}
 
     def __init__(
         self,
@@ -548,6 +550,103 @@ class FyersService(BrokerService):
         if not response or response.get("s") != "ok":
             raise BrokerConnectionError(f"Failed to retrieve funds: {response}")
         return {"fund_limit": response.get("fund_limit", [])}
+
+    @staticmethod
+    def _require_order_success(response: dict[str, Any] | None, action: str) -> dict[str, Any]:
+        if not response or response.get("s") != "ok":
+            raise BrokerConnectionError(f"Fyers {action} request failed: {response}")
+        return response
+
+    async def get_orders(self) -> list[dict[str, Any]]:
+        """Today's order book, normalized without exposing Fyers' raw shape."""
+        try:
+            response = await asyncio.to_thread(self.client.orderbook)
+        except Exception as e:
+            raise BrokerConnectionError(f"Failed to retrieve orders: {e}") from e
+        response = self._require_order_success(response, "order book")
+
+        orders: list[dict[str, Any]] = []
+        for row in response.get("orderBook", response.get("data", [])):
+            type_code = row.get("type", 2)
+            status = str(row.get("status", row.get("statusMessage", "Unknown")))
+            quantity = int(row.get("qty", row.get("quantity", 0)) or 0)
+            filled = int(row.get("filledQty", row.get("filledQuantity", 0)) or 0)
+            remaining = int(row.get("remainingQuantity", max(quantity - filled, 0)) or 0)
+            orders.append(
+                {
+                    "id": str(row.get("id", "")),
+                    "trading_symbol": str(row.get("symbol", "")),
+                    "side": "Buy" if int(row.get("side", 1)) == 1 else "Sell",
+                    "order_type": self._ORDER_TYPE_NAMES.get(type_code, "MARKET"),
+                    "product_type": str(row.get("productType", "")),
+                    "quantity": quantity,
+                    "filled_quantity": filled,
+                    "remaining_quantity": remaining,
+                    "limit_price": float(row.get("limitPrice", 0) or 0),
+                    "stop_price": float(row.get("stopPrice", 0) or 0),
+                    "status": status,
+                    "status_message": row.get("statusMessage") or row.get("message"),
+                    "order_time": row.get("orderDateTime") or row.get("orderTime"),
+                }
+            )
+        return [order for order in orders if order["id"]]
+
+    async def place_order(self, order: dict[str, Any]) -> dict[str, Any]:
+        """Submit a request whose shape has already been validated at the API boundary."""
+        payload = {
+            "symbol": order["symbol"],
+            "qty": order["quantity"],
+            "type": self._ORDER_TYPE_CODES[order["order_type"]],
+            "side": 1 if order["side"] == "Buy" else -1,
+            "productType": order["product_type"],
+            "limitPrice": order["limit_price"],
+            "stopPrice": order["stop_price"],
+            "validity": order["validity"],
+            "disclosedQty": order["disclosed_quantity"],
+            "offlineOrder": order["offline_order"],
+            "stopLoss": order["stop_loss"],
+            "takeProfit": order["take_profit"],
+        }
+        if order.get("order_tag"):
+            payload["orderTag"] = order["order_tag"]
+        try:
+            response = await asyncio.to_thread(self.client.place_order, payload)
+        except Exception as e:
+            raise BrokerConnectionError(f"Fyers place order request failed: {e}") from e
+        response = self._require_order_success(response, "place order")
+        return {
+            "id": response.get("id"),
+            "message": str(response.get("message", "Order submitted")),
+        }
+
+    async def modify_order(self, order_id: str, order: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "id": order_id,
+            "qty": order["quantity"],
+            "type": self._ORDER_TYPE_CODES[order["order_type"]],
+            "limitPrice": order["limit_price"],
+            "stopPrice": order["stop_price"],
+        }
+        try:
+            response = await asyncio.to_thread(self.client.modify_order, payload)
+        except Exception as e:
+            raise BrokerConnectionError(f"Fyers modify order request failed: {e}") from e
+        response = self._require_order_success(response, "modify order")
+        return {
+            "id": str(response.get("id") or order_id),
+            "message": str(response.get("message", "Order modified")),
+        }
+
+    async def cancel_order(self, order_id: str) -> dict[str, Any]:
+        try:
+            response = await asyncio.to_thread(self.client.cancel_order, {"id": order_id})
+        except Exception as e:
+            raise BrokerConnectionError(f"Fyers cancel order request failed: {e}") from e
+        response = self._require_order_success(response, "cancel order")
+        return {
+            "id": str(response.get("id") or order_id),
+            "message": str(response.get("message", "Order cancelled")),
+        }
 
     async def close(self) -> None:
         if self._market_stream is not None:

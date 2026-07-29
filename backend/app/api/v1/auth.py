@@ -1,9 +1,8 @@
 """Authentication endpoints.
 
-Handles login via Fyers — either the OAuth redirect flow or headless TOTP
-auto-login — plus token verification, user profile retrieval, and logout.
-No passwords are stored; authentication is delegated to Fyers' own APIs,
-and only one broker session is active at a time (see session_manager).
+Handles Fyers OAuth/TOTP and Dhan Client ID/access-token login, token
+verification, user profile retrieval, and logout. Only one broker session is
+active at a time (see session_manager).
 """
 
 import asyncio
@@ -28,6 +27,7 @@ from app.schemas.auth import (
 )
 from app.services.broker_credentials_store import load_broker_credentials, save_broker_credentials
 from app.services.broker_session_store import clear_broker_session, save_broker_session
+from app.services.dhan_service import DhanService
 from app.services.fyers_headless import get_fyers_access_token_headless
 from app.services.fyers_service import FyersService
 from app.services.market_data_backfill import request_market_data_backfill
@@ -40,7 +40,12 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
 async def _resolve_access_token(request: LoginRequest, settings: Settings) -> str:
-    """Resolve a Fyers access_token from whichever auth method was chosen."""
+    """Resolve an access token from the selected broker's auth flow."""
+    if request.broker == "dhan":
+        assert request.access_token
+        return request.access_token
+
+    assert request.app_id and request.api_secret
     if request.auth_code:
         # API v3 requires the -100 appType suffix on the client_id
         client_id = request.app_id if request.app_id.endswith("-100") else f"{request.app_id}-100"
@@ -73,14 +78,24 @@ async def _resolve_access_token(request: LoginRequest, settings: Settings) -> st
 
 
 async def _complete_login(
-    access_token: str, app_id: str, trading_mode: TradingMode, settings: Settings, db: AsyncSession
+    access_token: str,
+    broker: str,
+    app_id: str,
+    client_id: str | None,
+    trading_mode: TradingMode,
+    settings: Settings,
+    db: AsyncSession,
 ) -> LoginResponse:
-    """Verify a resolved Fyers access_token and establish the broker session.
+    """Verify a resolved access token and establish the broker session.
 
     Shared by both /login and /auto-login once each has independently
     resolved an access_token via its own auth method.
     """
-    service = FyersService(app_id=app_id, access_token=access_token, trading_mode=trading_mode)
+    service = (
+        DhanService(client_id=client_id or "", access_token=access_token, trading_mode=trading_mode)
+        if broker == "dhan"
+        else FyersService(app_id=app_id, access_token=access_token, trading_mode=trading_mode)
+    )
 
     try:
         profile = await service.get_profile()
@@ -93,6 +108,7 @@ async def _complete_login(
             client_id=profile.client_id,
             app_id=app_id,
             access_token=access_token,
+            broker=broker,
             trading_mode=trading_mode,
             account_name=profile.account_name,
         )
@@ -125,10 +141,10 @@ async def _complete_login(
     "/login",
     response_model=LoginResponse,
     status_code=status.HTTP_200_OK,
-    summary="Login with Fyers",
+    summary="Login with Fyers or Dhan",
     description=(
-        "Authenticate with Fyers via OAuth redirect (auth_code) or headless "
-        "TOTP auto-login (client_id + totp_secret + pin). Returns a JWT for "
+        "Authenticate with Fyers via OAuth/TOTP or Dhan via Client ID plus "
+        "access token. Returns a JWT for "
         "subsequent requests. Only one broker session is active at a time — "
         "logging in replaces any existing session."
     ),
@@ -142,7 +158,7 @@ async def login(
     settings: Settings = Depends(get_settings),
     db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
-    """Authenticate with Fyers and establish the single active broker session.
+    """Authenticate the selected broker and establish the active session.
 
     1. Resolves an access_token via OAuth code exchange or headless TOTP login.
     2. Verifies the token by fetching the Fyers profile.
@@ -162,7 +178,15 @@ async def login(
     except BrokerAuthError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
 
-    response = await _complete_login(access_token, request.app_id, trading_mode, settings, db)
+    response = await _complete_login(
+        access_token,
+        request.broker,
+        request.app_id or "",
+        request.client_id,
+        trading_mode,
+        settings,
+        db,
+    )
 
     if request.totp_secret:
         # A successful headless TOTP login gives us everything /auto-login
@@ -172,8 +196,8 @@ async def login(
         await save_broker_credentials(
             db,
             settings,
-            app_id=request.app_id,
-            api_secret=request.api_secret,
+            app_id=request.app_id or "",
+            api_secret=request.api_secret or "",
             client_id=request.client_id,
             totp_secret=request.totp_secret,
             pin=request.pin,
@@ -235,7 +259,9 @@ async def auto_login(
 
     return await _complete_login(
         access_token,
+        "fyers",
         creds.app_id,
+        creds.client_id,
         TradingMode(creds.trading_mode),
         settings,
         db,

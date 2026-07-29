@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { VolatilityHistoricalData } from "@/lib/volatility";
 import { ChartLegend } from "@/components/charts/ChartLegend";
+import { ChartDataTable } from "@/components/charts/ChartDataTable";
 
 // lightweight-charts renders to <canvas>, which cannot resolve CSS var() —
 // these hex literals mirror the design tokens in globals.css. Fixed
@@ -95,6 +96,10 @@ export function HistoricalVolChart({ data }: HistoricalVolChartProps) {
     chartRef.current.timeScale().fitContent();
   }, [data]);
 
+  const tableRows = [...data]
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .map((point) => ({ date: point.date, iv: `${(point.iv * 100).toFixed(2)}%`, rv: `${(point.rv * 100).toFixed(2)}%` }));
+
   return (
     <div className="panel flex w-full flex-col gap-2">
       <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Historical IV vs RV (1 Year)</h3>
@@ -104,7 +109,18 @@ export function HistoricalVolChart({ data }: HistoricalVolChartProps) {
           { label: "Realized Volatility", color: COLOR_CAT_2 },
         ]}
       />
-      <div ref={chartContainerRef} className="h-[300px] w-full" />
+      <div
+        ref={chartContainerRef}
+        role="img"
+        aria-label={`Historical implied versus realized volatility line chart with ${data.length} daily observations. Exact values are available in the following data table.`}
+        className="h-[300px] w-full"
+      />
+      <ChartDataTable
+        title="historical volatility"
+        summary={`${data.length} daily implied-volatility and realized-volatility observations.`}
+        columns={[{ key: "date", label: "Date" }, { key: "iv", label: "Implied volatility" }, { key: "rv", label: "Realized volatility" }]}
+        rows={tableRows}
+      />
     </div>
   );
 }

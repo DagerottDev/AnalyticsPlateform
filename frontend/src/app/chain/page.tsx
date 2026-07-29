@@ -16,10 +16,10 @@ export default function OptionChainPage() {
   return (
     <DashboardLayout>
       <PageContainer className="max-w-[1400px]">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <SectionHeader title="Option Chain" description="Live options data and Greeks" />
 
-          <Card className="p-3">
+          <Card className="w-full p-3 lg:w-auto">
             <InstrumentSelector
               symbol={symbol}
               onSymbolChange={setSymbol}

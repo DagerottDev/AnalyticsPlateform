@@ -9,6 +9,7 @@
 
 import { cn } from "@/lib/utils";
 import {
+  ArrowUpDown,
   BarChart3,
   Blocks,
   Boxes,
@@ -52,6 +53,7 @@ const navigation: NavGroup[] = [
     items: [
       { icon: LineChart, label: "Charts", href: "/charts" },
       { icon: Waves, label: "Volatility", href: "/volatility" },
+      { icon: BarChart3, label: "Relative Value", href: "/relative-value" },
       { icon: BarChart3, label: "Dealer Flow", href: "/dealer-flow" },
     ],
   },
@@ -59,6 +61,8 @@ const navigation: NavGroup[] = [
     title: "Trading",
     items: [
       { icon: Zap, label: "Alerts", href: "/alerts" },
+      { icon: ArrowUpDown, label: "Orders", href: "/orders" },
+      { icon: History, label: "Trade Journal", href: "/journal" },
       { icon: Briefcase, label: "Positions", href: "/positions" },
       { icon: History, label: "Replay Mode", href: "/replay" },
       { icon: Blocks, label: "Strategy Builder", href: "/strategy" },
@@ -81,14 +85,14 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "flex h-full flex-col border-r border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] transition-all duration-300",
+        "hidden h-full flex-col border-r border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] transition-all duration-300 md:flex",
         collapsed ? "w-16" : "w-56"
       )}
     >
       {/* Collapse Toggle */}
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="flex h-10 items-center justify-center border-b border-[var(--color-border-subtle)] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]"
+        className="focus-ring flex h-10 items-center justify-center border-b border-[var(--color-border-subtle)] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]"
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
         <Boxes className="h-4 w-4" />
@@ -115,7 +119,7 @@ export function Sidebar() {
                       disabled={item.disabled}
                       title={collapsed ? item.label : undefined}
                       className={cn(
-                        "group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all",
+                        "focus-ring group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all",
                         isActive
                           ? "bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]"
                           : item.disabled
