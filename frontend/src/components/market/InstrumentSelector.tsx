@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getExpiries, searchSymbols } from "@/lib/market";
 import { formatApiError } from "@/lib/apiError";
 import { ChevronDown, RefreshCw, Search, Star, StarOff } from "lucide-react";
@@ -33,6 +33,13 @@ export function InstrumentSelector({
   const [expiries, setExpiries] = useState<string[]>([]);
   const [loadingExpiries, setLoadingExpiries] = useState(false);
   const [expiriesError, setExpiriesError] = useState<string | null>(null);
+  const selectedExpiryRef = useRef(expiry);
+  const onExpiryChangeRef = useRef(onExpiryChange);
+
+  useEffect(() => {
+    selectedExpiryRef.current = expiry;
+    onExpiryChangeRef.current = onExpiryChange;
+  }, [expiry, onExpiryChange]);
 
   useEffect(() => {
     let isMounted = true;
@@ -44,8 +51,11 @@ export function InstrumentSelector({
         if (isMounted) {
           setExpiriesError(null);
           setExpiries(data.expiries);
-          if (data.expiries.length > 0 && !data.expiries.includes(expiry || "")) {
-            onExpiryChange(data.expiries[0]);
+          if (
+            data.expiries.length > 0 &&
+            !data.expiries.includes(selectedExpiryRef.current || "")
+          ) {
+            onExpiryChangeRef.current(data.expiries[0]);
           }
         }
       } catch (err) {
@@ -64,7 +74,7 @@ export function InstrumentSelector({
     return () => {
       isMounted = false;
     };
-  }, [symbol]); // Deliberately omit expiry/onExpiryChange to only fetch on symbol change
+  }, [symbol]);
 
   const [customSymbol, setCustomSymbol] = useState("");
   const isCustomSymbol = !INDICES.includes(symbol);

@@ -13,9 +13,10 @@ export function useMarketData(symbols: string[]) {
   const replayIsActive = useReplayStore(state => state.isActive);
   const replayTicks = useReplayStore(state => state.currentTicks);
 
-  // Use ref to avoid re-running effects on symbols change if not necessary,
-  // but we do want to resubscribe when symbols change.
-  const prevSymbols = useRef<string[]>([]);
+  // Tracks the symbols currently registered with the shared websocket. Keeping
+  // this separate from the render input lets us update subscriptions by diff
+  // instead of tearing down every live symbol whenever one is added or removed.
+  const subscribedSymbols = useRef<string[]>([]);
 
   // Stable across effect re-runs (only closes over setTicks, itself stable
   // from useState) so subscribe/unsubscribe always operate on the same
@@ -32,36 +33,21 @@ export function useMarketData(symbols: string[]) {
   // on every render. Keying the effect off the array's *content* instead of
   // its reference means the effect only actually re-runs when the symbol set
   // changes, not on every parent re-render.
-  const symbolsKey = symbols.join(",");
+  const symbolsKey = Array.from(new Set(symbols)).join(",");
 
   useEffect(() => {
-    // If Replay Mode is active, we disconnect/ignore live websocket
-    if (replayIsActive) return;
-
-    if (!user?.client_id) return;
-
     const ws = getWebSocket();
+    const requestedSymbols = user?.client_id && !replayIsActive
+      ? (symbolsKey ? symbolsKey.split(",") : [])
+      : [];
+    const previousSymbols = subscribedSymbols.current;
+    const addedSymbols = requestedSymbols.filter((symbol) => !previousSymbols.includes(symbol));
+    const removedSymbols = previousSymbols.filter((symbol) => !requestedSymbols.includes(symbol));
 
-    // Always (re)subscribe the full current symbol list on the shared
-    // websocket client — it already refcounts symbol->handler membership
-    // internally, so resubscribing a symbol that's already registered is a
-    // harmless no-op (no duplicate wire message). Gating this call behind
-    // an "is this symbol new" check computed from a ref, as a previous
-    // version did, broke under React 18 StrictMode's dev-mode double-invoke
-    // (mount -> cleanup -> mount): the cleanup unsubscribed the handler, but
-    // the ref already reflected the post-subscribe state, so the second
-    // mount's diff saw "nothing added" and never re-registered the handler —
-    // ticks then silently stopped reaching this hook for the rest of the
-    // component's lifetime (a one-time REST seed fetch would still show a
-    // value, making it look like a stale/frozen price rather than a dead
-    // subscription).
-    ws.subscribeMany(symbols, handleTick);
+    if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
+    if (addedSymbols.length > 0) ws.subscribeMany(addedSymbols, handleTick);
+    subscribedSymbols.current = requestedSymbols;
 
-    // Seed ticks immediately via REST quote snapshot, but only for symbols
-    // we haven't already seeded — a pure optimization (avoids re-fetching
-    // quotes for a symbol set that hasn't changed), not load-bearing for
-    // correctness like the subscribe call above is.
-    const addedSymbols = symbols.filter(s => !prevSymbols.current.includes(s));
     if (addedSymbols.length > 0) {
       getMarketQuotes(addedSymbols)
         .then((res) => {
@@ -79,14 +65,17 @@ export function useMarketData(symbols: string[]) {
         })
         .catch(() => {});
     }
+  }, [symbolsKey, user?.client_id, replayIsActive, handleTick]);
 
-    prevSymbols.current = symbols;
-
+  useEffect(() => {
     return () => {
-      ws.unsubscribeMany(symbols, handleTick);
+      const activeSymbols = subscribedSymbols.current;
+      if (activeSymbols.length > 0) {
+        getWebSocket().unsubscribeMany(activeSymbols, handleTick);
+        subscribedSymbols.current = [];
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- symbolsKey is the intentional stable proxy for `symbols`
-  }, [symbolsKey, user, replayIsActive, handleTick]);
+  }, [handleTick]);
 
   const getTick = useCallback((symbol: string): MarketTick | null => {
     if (replayIsActive) {

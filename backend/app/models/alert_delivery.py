@@ -9,7 +9,7 @@ from app.db.base_class import Base
 
 
 class AlertDeliverySettingsRecord(Base):
-    __tablename__ = "alert_delivery_settings"  # type: ignore[assignment]
+    __tablename__ = "alert_delivery_settings"
 
     owner_id: Mapped[str] = mapped_column(String(50), primary_key=True)
     email_enabled: Mapped[bool] = mapped_column(Boolean, default=False)

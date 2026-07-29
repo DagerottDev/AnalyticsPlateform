@@ -27,7 +27,7 @@ import { useState } from "react";
 
 export function Header() {
   const router = useRouter();
-  const { user, isAuthenticated, tradingMode, logout, isPaperMode, brokerName, sessionLive } =
+  const { user, isAuthenticated, logout, isPaperMode, brokerName, sessionLive } =
     useAuth();
   const isConnected = isAuthenticated && sessionLive;
   const [showUserMenu, setShowUserMenu] = useState(false);

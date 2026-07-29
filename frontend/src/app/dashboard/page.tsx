@@ -23,6 +23,7 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { Eyebrow } from "@/components/ui/SectionHeader";
 import { AddTickerModal } from "@/components/market/AddTickerModal";
 import { MarketTick } from "@/types/market";
+import { DataFreshness } from "@/components/market/DataFreshness";
 import {
   BarChart3,
   CandlestickChart,
@@ -142,6 +143,8 @@ function IndexTickerCard({
           </button>
         )}
       </div>
+
+      <div className="mt-2"><DataFreshness tick={tick} /></div>
 
       {!tick ? (
         <div className="mt-2 h-8 w-28 animate-pulse rounded bg-[var(--color-bg-hover)]" />

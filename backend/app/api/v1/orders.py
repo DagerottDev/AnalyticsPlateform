@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.security import get_current_user
 from app.schemas.orders import (
+    BrokerOrder,
     ModifyOrderRequest,
     OrderActionResponse,
     OrdersResponse,
@@ -42,7 +43,8 @@ async def get_orders(current_user: dict[str, Any] = Depends(get_current_user)) -
     service = session_manager.get_session(current_user["sub"])
     if not service:
         raise HTTPException(status_code=401, detail="Active broker session not found")
-    return OrdersResponse(orders=await service.get_orders())
+    orders = await service.get_orders()
+    return OrdersResponse(orders=[BrokerOrder.model_validate(order) for order in orders])
 
 
 @router.post("", response_model=OrderActionResponse, status_code=status.HTTP_201_CREATED)

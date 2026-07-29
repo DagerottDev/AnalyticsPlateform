@@ -60,3 +60,27 @@ async def test_broker_bucket_is_stricter_and_health_is_exempt() -> None:
         assert (await client.get("/api/v1/market/quotes")).status_code == 429
         assert (await client.get("/api/v1/health")).status_code == 200
         assert (await client.get("/api/v1/health")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_logout_bypasses_auth_bucket_while_login_remains_limited() -> None:
+    app = FastAPI()
+    app.add_middleware(
+        RateLimitMiddleware,
+        settings=Settings(api_rate_limit_auth_requests=1, api_rate_limit_default_requests=1),
+    )
+
+    @app.post("/api/v1/auth/login")
+    async def login() -> dict[str, bool]:
+        return {"ok": True}
+
+    @app.post("/api/v1/auth/logout")
+    async def logout() -> dict[str, bool]:
+        return {"ok": True}
+
+    transport = ASGITransport(app=app, client=("198.51.100.3", 50000))
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.post("/api/v1/auth/login")).status_code == 200
+        assert (await client.post("/api/v1/auth/login")).status_code == 429
+        assert (await client.post("/api/v1/auth/logout")).status_code == 200
+        assert (await client.post("/api/v1/auth/logout")).status_code == 200

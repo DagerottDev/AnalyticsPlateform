@@ -19,7 +19,6 @@ import {
   History,
   LayoutDashboard,
   LineChart,
-  Milestone,
   Settings,
   Waves,
   Zap,
@@ -71,7 +70,6 @@ const navigation: NavGroup[] = [
   {
     title: "Product",
     items: [
-      { icon: Milestone, label: "Roadmap", href: "/roadmap" },
       { icon: Settings, label: "Settings", href: "/settings" },
     ],
   },

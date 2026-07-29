@@ -16,6 +16,7 @@ from app.models.alert import AlertRecord, AlertTriggerRecord
 from app.models.alert_delivery import AlertDeliverySettingsRecord
 from app.schemas.alert_delivery import AlertDeliverySettingsResponse, AlertDeliverySettingsUpdate
 from app.schemas.alerts import AlertCreate, AlertResponse, AlertTriggerResponse
+from app.schemas.market import Instrument
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
@@ -41,17 +42,19 @@ def _delivery_response(
 
 
 def _response(alert: AlertRecord) -> AlertResponse:
-    return AlertResponse(
-        id=alert.id,
-        instrument=alert.instrument,
-        metric=alert.metric,
-        operator=alert.operator,
-        threshold=alert.threshold,
-        cooldown_minutes=alert.cooldown_minutes,
-        status=alert.status,
-        created_at=alert.created_at,
-        triggered_at=alert.triggered_at,
-        snoozed_until=alert.snoozed_until,
+    return AlertResponse.model_validate(
+        {
+            "id": alert.id,
+            "instrument": Instrument.model_validate(alert.instrument),
+            "metric": alert.metric,
+            "operator": alert.operator,
+            "threshold": alert.threshold,
+            "cooldown_minutes": alert.cooldown_minutes,
+            "status": alert.status,
+            "created_at": alert.created_at,
+            "triggered_at": alert.triggered_at,
+            "snoozed_until": alert.snoozed_until,
+        }
     )
 
 
@@ -75,13 +78,13 @@ async def create_alert(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AlertResponse:
-    trading_symbol = request.instrument.get("trading_symbol")
-    if not isinstance(trading_symbol, str) or not trading_symbol:
+    trading_symbol = request.instrument.trading_symbol.strip()
+    if not trading_symbol:
         raise HTTPException(status_code=422, detail="instrument.trading_symbol is required")
     record = AlertRecord(
         id=str(uuid4()),
         owner_id=current_user["sub"],
-        instrument=request.instrument,
+        instrument=request.instrument.model_dump(),
         trading_symbol=trading_symbol,
         metric=request.metric,
         operator=request.operator,

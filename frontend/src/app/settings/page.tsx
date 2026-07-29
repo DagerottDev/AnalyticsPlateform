@@ -10,6 +10,7 @@ import { Select } from "@/components/ui/Select";
 import { Switch } from "@/components/ui/Switch";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { INDICES } from "@/components/market/InstrumentSelector";
 import { useSettingsStore, ThemeMode } from "@/stores/settingsStore";
 import { requestNotificationPermission } from "@/lib/notifications";
@@ -63,9 +64,10 @@ export default function SettingsPage() {
   const [delivery, setDelivery] = useState<AlertDeliverySettings | null>(null);
   const [telegramToken, setTelegramToken] = useState("");
   const [savingDelivery, setSavingDelivery] = useState(false);
+  const [deliveryError, setDeliveryError] = useState<unknown>(null);
 
   useEffect(() => {
-    void getAlertDeliverySettings().then(setDelivery).catch(() => {});
+    void getAlertDeliverySettings().then(setDelivery).catch(setDeliveryError);
   }, []);
 
   const updateDelivery = <K extends keyof AlertDeliverySettings>(key: K, value: AlertDeliverySettings[K]) => {
@@ -75,12 +77,14 @@ export default function SettingsPage() {
   const saveDelivery = async () => {
     if (!delivery) return;
     setSavingDelivery(true);
+    setDeliveryError(null);
     try {
       const saved = await saveAlertDeliverySettings({ ...delivery, telegramBotToken: telegramToken || undefined });
       setDelivery(saved);
       setTelegramToken("");
       toast.success("Alert delivery settings saved");
-    } catch {
+    } catch (cause) {
+      setDeliveryError(cause);
       toast.error("Could not save alert delivery settings.");
     } finally {
       setSavingDelivery(false);
@@ -167,6 +171,7 @@ export default function SettingsPage() {
             </div>
             <div><Button onClick={saveDelivery} disabled={savingDelivery}>{savingDelivery ? "Saving…" : "Save delivery settings"}</Button></div>
           </>}
+          {deliveryError ? <ApiErrorDisplay error={deliveryError} /> : null}
         </Card>
 
         {/* General */}

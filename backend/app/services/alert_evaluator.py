@@ -4,16 +4,23 @@ import asyncio
 import logging
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.config import Settings, get_settings
 from app.db.session import async_session_maker
 from app.models.alert import AlertRecord, AlertTriggerRecord
+from app.schemas.alerts import AlertResponse
+from app.schemas.market import Instrument
 from app.services.alert_delivery import DeliveryEvent, dispatch_alert_delivery
 from app.services.greeks import calculate_greeks, calculate_implied_volatility
 from app.services.session_manager import session_manager
+
+if TYPE_CHECKING:
+    from app.services.option_math import OptionType
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +60,30 @@ def _lot_size(symbol: str) -> int:
 def _quote_price(quote: dict[str, object] | None) -> float | None:
     value = quote.get("last_price") if quote else None
     return float(value) if isinstance(value, int | float) and value > 0 else None
+
+
+def _validate_persisted_alert(alert: AlertRecord) -> bool:
+    """Disable legacy/corrupt records before they can enter the evaluator."""
+    try:
+        AlertResponse.model_validate(
+            {
+                "id": alert.id,
+                "instrument": Instrument.model_validate(alert.instrument),
+                "metric": alert.metric,
+                "operator": alert.operator,
+                "threshold": alert.threshold,
+                "cooldown_minutes": alert.cooldown_minutes,
+                "status": alert.status,
+                "created_at": alert.created_at,
+                "triggered_at": alert.triggered_at,
+                "snoozed_until": alert.snoozed_until,
+            }
+        )
+    except ValidationError:
+        logger.warning("Disabling invalid persisted alert %s", alert.id)
+        alert.status = "Disabled"
+        return False
+    return True
 
 
 async def _value_for_alert(
@@ -97,13 +128,14 @@ async def _value_for_alert(
             if premium is None:
                 continue
             saw_contract = True
+            contract_option_type: OptionType = "CE" if option_type == "CE" else "PE"
             iv = calculate_implied_volatility(
-                option_type, spot, float(strike), _time_to_expiry(expiry), 0.10, premium
+                contract_option_type, spot, float(strike), _time_to_expiry(expiry), 0.10, premium
             )
             if iv <= 0:
                 continue
             gamma = calculate_greeks(
-                option_type, spot, float(strike), _time_to_expiry(expiry), 0.10, iv
+                contract_option_type, spot, float(strike), _time_to_expiry(expiry), 0.10, iv
             ).gamma
             quote_oi = contract_quote.get("open_interest") if contract_quote else None
             oi = (
@@ -117,7 +149,7 @@ async def _value_for_alert(
                     * float(oi)
                     * _lot_size(underlying)
                     * spot
-                    * (1 if option_type == "CE" else -1)
+                    * (1 if contract_option_type == "CE" else -1)
                 )
         return net_gex if saw_contract else None
 
@@ -136,28 +168,40 @@ async def _value_for_alert(
     if spot is None:
         return None
     time_to_expiry = _time_to_expiry(expiry)
-    iv = calculate_implied_volatility(option_type, spot, float(strike), time_to_expiry, 0.10, price)
+    typed_option_type: OptionType = "CE" if option_type == "CE" else "PE"
+    iv = calculate_implied_volatility(
+        typed_option_type, spot, float(strike), time_to_expiry, 0.10, price
+    )
     if alert.metric == "IV":
         return iv * 100
     if iv <= 0:
         return None
-    greeks = calculate_greeks(option_type, spot, float(strike), time_to_expiry, 0.10, iv)
+    greeks = calculate_greeks(typed_option_type, spot, float(strike), time_to_expiry, 0.10, iv)
     values = {
         "Delta": greeks.delta,
         "Gamma": greeks.gamma,
         "Theta": greeks.theta,
         "Vega": greeks.vega,
+        "Rho": greeks.rho,
+        "Vanna": greeks.vanna,
+        "Vomma": greeks.vomma,
+        "Charm": greeks.charm,
+        "Speed": greeks.speed,
+        "Color": greeks.color,
+        "Zomma": greeks.zomma,
+        "Ultima": greeks.ultima,
     }
     if alert.metric in values:
         return values[alert.metric]
     if alert.metric in {"Call GEX", "Put GEX"}:
         oi = quote.get("open_interest") if quote else None
+        open_interest = float(oi) if isinstance(oi, int | float) else 0.0
         return (
             greeks.gamma
-            * float(oi or 0)
+            * open_interest
             * _lot_size(underlying)
             * spot
-            * (1 if option_type == "CE" else -1)
+            * (1 if typed_option_type == "CE" else -1)
         )
     return None
 
@@ -178,6 +222,7 @@ async def run_alert_evaluation(session_factory: object = async_session_maker) ->
                 alert.status, alert.snoozed_until = "Active", None
         await db.flush()
         active = (await db.scalars(select(AlertRecord).where(AlertRecord.status == "Active"))).all()
+        active = [alert for alert in active if _validate_persisted_alert(alert)]
         by_owner: dict[str, list[AlertRecord]] = {}
         for alert in active:
             by_owner.setdefault(alert.owner_id, []).append(alert)

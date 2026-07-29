@@ -19,7 +19,15 @@ export type AlertMetric =
   | "Call GEX"
   | "Put GEX"
   | "Net GEX"
-  | "VWAP Breakout";
+  | "VWAP Breakout"
+  | "Rho"
+  | "Vanna"
+  | "Vomma"
+  | "Charm"
+  | "Speed"
+  | "Color"
+  | "Zomma"
+  | "Ultima";
 export type AlertOperator = ">" | "<" | ">=" | "<=";
 export type AlertStatus = "Active" | "Snoozed" | "Disabled";
 

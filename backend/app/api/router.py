@@ -6,7 +6,18 @@ mounted at /api in the main application.
 
 from fastapi import APIRouter
 
-from app.api.v1 import alerts, auth, greeks, health, historical, market, orders, portfolio, trade_journal, volatility
+from app.api.v1 import (
+    alerts,
+    auth,
+    greeks,
+    health,
+    historical,
+    market,
+    orders,
+    portfolio,
+    trade_journal,
+    volatility,
+)
 
 api_router = APIRouter()
 

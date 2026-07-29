@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
@@ -14,6 +14,7 @@ import {
   calculateContractCharmExposure,
   calculateZeroGamma,
   findGammaWalls,
+  resolveOpenInterest,
   StrikeExposure
 } from "@/lib/dealerFlow";
 import { Instrument } from "@/types/market";
@@ -29,6 +30,11 @@ import { ExposureChart } from "@/components/dealer-flow/ExposureChart";
 export default function DealerFlowPage() {
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
+  const selectedExpiryRef = useRef(expiry);
+
+  useEffect(() => {
+    selectedExpiryRef.current = expiry;
+  }, [expiry]);
   
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const tradingSymbols = useMemo(() => instruments.map((i) => i.trading_symbol), [instruments]);
@@ -48,7 +54,7 @@ export default function DealerFlowPage() {
           const expiries = Array.from(
             new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
           ).sort();
-          if (!expiry && expiries.length > 0) {
+          if (!selectedExpiryRef.current && expiries.length > 0) {
             setExpiry(expiries[0]);
           }
         }
@@ -58,7 +64,7 @@ export default function DealerFlowPage() {
     }
     fetchContracts();
     return () => { isMounted = false; };
-  }, [symbol]); // Deliberately let it re-run when symbol changes
+  }, [symbol]);
 
   const underlyingTick = getTick(symbol);
   const S = underlyingTick?.last_price || defaultSpotFallback(symbol);
@@ -89,7 +95,7 @@ export default function DealerFlowPage() {
       if (iv === 0) return;
 
       const greeks = calculateGreeks(optionType, S, inst.strike, T, r, iv);
-      const oi = tick.open_interest || 0;
+      const oi = resolveOpenInterest(tick.open_interest, inst.oi);
 
       // Exposures
       const gex = calculateContractGEX(greeks.gamma, oi, S, lotSize, inst.option_type as "CE"|"PE");

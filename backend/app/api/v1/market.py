@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
 from app.config import Settings, get_settings
 from app.core.security import decode_token, ensure_not_revoked, get_current_user
@@ -15,6 +16,8 @@ from app.schemas.market import (
     InstrumentResponse,
     MarginRequest,
     MarginResponse,
+    MarketQuote,
+    QuotesResponse,
     SymbolSearchResponse,
     SymbolSuggestion,
 )
@@ -66,7 +69,12 @@ async def get_instruments(
         raise HTTPException(status_code=401, detail="Active broker session not found")
 
     raw_instruments = await service.get_instruments(symbol.upper())
-    instruments = [Instrument(**instr) for instr in raw_instruments]
+    instruments: list[Instrument] = []
+    for raw_instrument in raw_instruments:
+        try:
+            instruments.append(Instrument.model_validate(raw_instrument))
+        except ValidationError:
+            logger.warning("Ignoring malformed broker instrument for %s", symbol)
     return InstrumentResponse(instruments=instruments)
 
 
@@ -80,10 +88,15 @@ async def get_expiries(
         raise HTTPException(status_code=401, detail="Active broker session not found")
 
     raw_instruments = await service.get_instruments(symbol.upper())
-    expiries = set()
-    for instr in raw_instruments:
-        if instr.get("expiry"):
-            expiries.add(instr["expiry"])
+    expiries: set[str] = set()
+    for raw_instrument in raw_instruments:
+        try:
+            instrument = Instrument.model_validate(raw_instrument)
+        except ValidationError:
+            logger.warning("Ignoring malformed broker instrument for %s", symbol)
+            continue
+        if instrument.expiry:
+            expiries.add(instrument.expiry)
 
     # Sort expiries by date (assuming DD-MMM-YYYY format)
     def parse_expiry(date_str: str) -> datetime.datetime:
@@ -96,19 +109,24 @@ async def get_expiries(
     return ExpiryList(expiries=sorted_expiries)
 
 
-@router.get("/quotes")
+@router.get("/quotes", response_model=QuotesResponse)
 async def get_quotes(
     symbols: str = Query(..., description="Comma-separated list of symbols"),
     current_user: dict[str, Any] = Depends(get_current_user),
-) -> dict[str, Any]:
+) -> QuotesResponse:
     """Get live REST price quotes from Fyers for given symbols."""
     service = session_manager.get_session(current_user["sub"])
     if not service:
         raise HTTPException(status_code=401, detail="Active broker session not found")
 
     symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
-    quotes = await service.get_quotes(symbol_list)
-    return {"quotes": quotes}
+    quotes: list[MarketQuote] = []
+    for raw_quote in await service.get_quotes(symbol_list):
+        try:
+            quotes.append(MarketQuote.model_validate(raw_quote))
+        except ValidationError:
+            logger.warning("Ignoring malformed broker quote for symbols=%s", symbol_list)
+    return QuotesResponse(quotes=quotes)
 
 
 @router.get("/history")

@@ -15,7 +15,7 @@ class DailyVolatilitySnapshot(Base):
     the current rank is recomputed from this growing series by the API.
     """
 
-    __tablename__ = "daily_volatility_snapshots"  # type: ignore[assignment]
+    __tablename__ = "daily_volatility_snapshots"
 
     symbol: Mapped[str] = mapped_column(String(50), primary_key=True)
     snapshot_date: Mapped[date] = mapped_column(Date, primary_key=True)

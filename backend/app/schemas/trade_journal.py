@@ -41,9 +41,14 @@ class TradeResponse(TradeCreate):
     updated_at: datetime
 
 
+class EquityCurvePoint(BaseModel):
+    date: str
+    equity: float
+
+
 class JournalSummary(BaseModel):
     closed_trades: int
     win_rate: float | None
     average_risk_reward: float | None
     net_pnl: float
-    equity_curve: list[dict[str, float | str]]
+    equity_curve: list[EquityCurvePoint]

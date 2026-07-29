@@ -6,7 +6,7 @@ import { getInstruments } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
 import { formatApiError } from "@/lib/apiError";
 import { cn, formatINR } from "@/lib/utils";
-import { Download, Settings2, TrendingUp } from "lucide-react";
+import { BarChart3, Check, Download, Settings2, TrendingUp } from "lucide-react";
 import { calculateImpliedVolatility, calculateGreeks, Greeks } from "@/lib/greeks";
 import { classifyBuildup } from "@/lib/buildup";
 import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
@@ -22,8 +22,10 @@ import { Select } from "@/components/ui/Select";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
+import { DataFreshness } from "@/components/market/DataFreshness";
 
 const REFRESH_INTERVAL_MS = 30_000;
+const MAX_ANALYSIS_CONTRACTS = 10;
 
 interface OptionChainProps {
   symbol: string;
@@ -39,6 +41,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   const [moneyness, setMoneyness] = useState<MoneynessFilter>("all");
   const [strikesEachSide, setStrikesEachSide] = useState<number | null>(10);
   const [previousOiBySymbol, setPreviousOiBySymbol] = useState<Map<string, number>>(new Map());
+  const [selectedAnalysisSymbols, setSelectedAnalysisSymbols] = useState<string[]>([]);
   const latestOiBySymbol = useRef<Map<string, number>>(new Map());
 
   // Fetch instruments when symbol or expiry changes, then keep OI/buildup
@@ -67,6 +70,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
             )
           );
           setInstruments(filtered);
+          if (!isBackground) setSelectedAnalysisSymbols([]);
           if (isBackground) setError(null);
         }
       } catch (err) {
@@ -133,6 +137,30 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
     return previous == null ? null : instrument.oi - previous;
   };
 
+  const toggleAnalysisContract = (instrument: Instrument | undefined) => {
+    if (!instrument) return;
+    setSelectedAnalysisSymbols((current) => {
+      if (current.includes(instrument.trading_symbol)) {
+        return current.filter((symbol) => symbol !== instrument.trading_symbol);
+      }
+      return current.length >= MAX_ANALYSIS_CONTRACTS
+        ? current
+        : [...current, instrument.trading_symbol];
+    });
+  };
+
+  const openStrikeAnalysis = () => {
+    if (selectedAnalysisSymbols.length === 0) return;
+    const params = new URLSearchParams({
+      symbol,
+      expiry: expiry ?? "",
+      contracts: selectedAnalysisSymbols.join(","),
+    });
+    const href = `/chain/analysis?${params.toString()}`;
+    const analysisWindow = window.open(href, "strike-analysis");
+    if (!analysisWindow) window.location.assign(href);
+  };
+
   const downloadCsv = () => {
     const header = [
       "Symbol", "Expiry", "Strike", "Call OI", "Call OI snapshot change", "Call LTP", "Call volume", "Call change %",
@@ -187,6 +215,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
           <span className="text-sm font-medium text-[var(--color-text-secondary)]">
             DTE: <span className="tnum font-bold text-[var(--color-text-bright)]">{Math.round(T * 365)} days</span>
           </span>
+          <DataFreshness tick={underlyingTick} />
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
           <Select
@@ -221,6 +250,18 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
           <Button className="col-span-2 w-full justify-center sm:w-auto" variant="outline" size="sm" onClick={() => setShowGreeks(!showGreeks)}>
             <Settings2 className="h-4 w-4" />
             {showGreeks ? "Hide Greeks" : "Show Greeks"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+        <p className="text-xs text-[var(--color-text-secondary)]">
+          Select up to {MAX_ANALYSIS_CONTRACTS} call or put contracts to compare option Greeks, higher-order Greeks, and Greek ratios.
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="tnum text-xs font-semibold text-[var(--color-text-muted)]">{selectedAnalysisSymbols.length}/{MAX_ANALYSIS_CONTRACTS} selected</span>
+          <Button variant="secondary" size="sm" onClick={openStrikeAnalysis} disabled={selectedAnalysisSymbols.length === 0}>
+            <BarChart3 className="h-4 w-4" /> Analyze Greeks
           </Button>
         </div>
       </div>
@@ -280,6 +321,16 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                       {showGreeks && <span className="tnum">Δ {side.delta?.toFixed(2) ?? "—"}</span>}
                     </div>
                     {showBuildup && side.buildup && <div className="mt-2"><Badge tone={side.buildup.tone}>{side.buildup.shortLabel}</Badge></div>}
+                    {side.instrument && <Button
+                      className="mt-3 w-full"
+                      variant={selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() => toggleAnalysisContract(side.instrument)}
+                      disabled={!selectedAnalysisSymbols.includes(side.instrument.trading_symbol) && selectedAnalysisSymbols.length >= MAX_ANALYSIS_CONTRACTS}
+                    >
+                      {selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? <Check className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />}
+                      {selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? "Selected" : "Select"}
+                    </Button>}
                   </div>
                 ))}
               </div>
@@ -415,7 +466,16 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                     {ceTick ? `${ceTick.change_percent > 0 ? '+' : ''}${ceTick.change_percent.toFixed(2)}%` : "-"}
                   </td>
                   <td className={cn("border-r border-[var(--color-border-default)] px-3 py-2 font-semibold", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
-                    {ceTick ? formatINR(ceTick.last_price) : "-"}
+                    <div className="flex items-center justify-end gap-1.5">
+                      {ceTick ? formatINR(ceTick.last_price) : "-"}
+                      {row.CE && <button
+                        type="button"
+                        aria-label={`${selectedAnalysisSymbols.includes(row.CE.trading_symbol) ? "Remove" : "Select"} ${row.CE.trading_symbol} for Greek analysis`}
+                        onClick={() => toggleAnalysisContract(row.CE)}
+                        disabled={!selectedAnalysisSymbols.includes(row.CE.trading_symbol) && selectedAnalysisSymbols.length >= MAX_ANALYSIS_CONTRACTS}
+                        className={cn("rounded p-1", selectedAnalysisSymbols.includes(row.CE.trading_symbol) ? "bg-[var(--color-accent-blue)] text-white" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]", "disabled:cursor-not-allowed disabled:opacity-40")}
+                      >{selectedAnalysisSymbols.includes(row.CE.trading_symbol) ? <Check className="h-3 w-3" /> : <BarChart3 className="h-3 w-3" />}</button>}
+                    </div>
                   </td>
 
                   {/* STRIKE */}
@@ -425,7 +485,16 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
 
                   {/* PUTS */}
                   <td className={cn("border-l border-[var(--color-border-default)] px-3 py-2 font-semibold", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
-                    {peTick ? formatINR(peTick.last_price) : "-"}
+                    <div className="flex items-center gap-1.5">
+                      {row.PE && <button
+                        type="button"
+                        aria-label={`${selectedAnalysisSymbols.includes(row.PE.trading_symbol) ? "Remove" : "Select"} ${row.PE.trading_symbol} for Greek analysis`}
+                        onClick={() => toggleAnalysisContract(row.PE)}
+                        disabled={!selectedAnalysisSymbols.includes(row.PE.trading_symbol) && selectedAnalysisSymbols.length >= MAX_ANALYSIS_CONTRACTS}
+                        className={cn("rounded p-1", selectedAnalysisSymbols.includes(row.PE.trading_symbol) ? "bg-[var(--color-accent-blue)] text-white" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]", "disabled:cursor-not-allowed disabled:opacity-40")}
+                      >{selectedAnalysisSymbols.includes(row.PE.trading_symbol) ? <Check className="h-3 w-3" /> : <BarChart3 className="h-3 w-3" />}</button>}
+                      {peTick ? formatINR(peTick.last_price) : "-"}
+                    </div>
                   </td>
                   <td className={cn("px-3 py-2", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "", peTick && peTick.change_percent > 0 ? "text-[var(--color-profit)]" : peTick && peTick.change_percent < 0 ? "text-[var(--color-loss)]" : "")}>
                     {peTick ? `${peTick.change_percent > 0 ? '+' : ''}${peTick.change_percent.toFixed(2)}%` : "-"}

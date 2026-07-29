@@ -17,7 +17,7 @@ from app.config import Settings, get_settings
 from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import get_db
-from app.main import app as fastapi_app
+from app.main import create_app
 from app.models.user import TradingMode
 from app.services.session_manager import session_manager
 from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
@@ -88,18 +88,17 @@ def token_blocklist() -> FakeTokenBlocklist:
 def app(
     test_settings: Settings, db_session: AsyncSession, token_blocklist: FakeTokenBlocklist
 ) -> FastAPI:
-    """Provide the FastAPI app with settings and DB session overridden for the test."""
-    fastapi_app.dependency_overrides[get_settings] = lambda: test_settings
+    """Provide an isolated FastAPI app with test-specific dependencies."""
+    test_app = create_app(test_settings)
+    test_app.dependency_overrides[get_settings] = lambda: test_settings
 
     async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
-    fastapi_app.dependency_overrides[get_db] = _override_get_db
-    fastapi_app.dependency_overrides[get_token_blocklist] = lambda: token_blocklist
-    yield fastapi_app
-    fastapi_app.dependency_overrides.pop(get_settings, None)
-    fastapi_app.dependency_overrides.pop(get_db, None)
-    fastapi_app.dependency_overrides.pop(get_token_blocklist, None)
+    test_app.dependency_overrides[get_db] = _override_get_db
+    test_app.dependency_overrides[get_token_blocklist] = lambda: token_blocklist
+    yield test_app
+    test_app.dependency_overrides.clear()
 
 
 @pytest.fixture

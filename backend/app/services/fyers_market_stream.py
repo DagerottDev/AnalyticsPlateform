@@ -43,7 +43,12 @@ os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 # should always go directly to Fyers, so those vars are dropped outright
 # (both casings — different libraries check different ones).
 _PROXY_ENV_VARS = (
-    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
 )
 for _proxy_var in _PROXY_ENV_VARS:
     os.environ.pop(_proxy_var, None)
@@ -66,8 +71,15 @@ _default_threading_excepthook = threading.excepthook
 
 
 def _fyers_ping_excepthook(args: threading.ExceptHookArgs) -> None:
-    if args.exc_type is BrokenPipeError and args.thread is not None and "__ping" in args.thread.name:
-        logger.debug("Fyers ping thread lost its connection (will auto-reconnect): %s", args.exc_value)
+    if (
+        args.exc_type is BrokenPipeError
+        and args.thread is not None
+        and "__ping" in args.thread.name
+    ):
+        logger.debug(
+            "Fyers ping thread lost its connection (will auto-reconnect): %s",
+            args.exc_value,
+        )
         return
     _default_threading_excepthook(args)
 

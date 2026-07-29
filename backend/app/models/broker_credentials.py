@@ -17,7 +17,7 @@ class BrokerCredentialsRecord(Base):
     hardcoded id, matching the app's single-broker-account design.
     """
 
-    __tablename__ = "broker_credentials"  # type: ignore[assignment]
+    __tablename__ = "broker_credentials"
 
     id: Mapped[str] = mapped_column(String(20), primary_key=True)
     app_id: Mapped[str] = mapped_column(String(50))

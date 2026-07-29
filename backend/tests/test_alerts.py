@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.alert import AlertRecord, AlertTriggerRecord
+from app.services.alert_delivery import DeliveryEvent, _deliver_with_retry
 from app.services.alert_evaluator import run_alert_evaluation
 from app.services.session_manager import session_manager
 
@@ -26,6 +27,25 @@ def _payload() -> dict:
         "threshold": 22000,
         "cooldownMinutes": 5,
     }
+
+
+@pytest.mark.asyncio
+async def test_alert_delivery_retries_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = 0
+
+    async def operation() -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError("temporary outage")
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.services.alert_delivery.asyncio.sleep", no_sleep)
+    event = DeliveryEvent("owner-1", "NIFTY", "Price", ">", 1, 2, datetime.now(UTC))
+    await _deliver_with_retry("webhook", event, operation)
+    assert attempts == 2
 
 
 @pytest.mark.asyncio
@@ -48,6 +68,30 @@ async def test_alert_api_persists_user_alerts_and_trigger_history(
 
     deleted = await client.delete(f"/api/v1/alerts/{alert['id']}", headers=auth_headers)
     assert deleted.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_alert_api_accepts_higher_order_option_greek(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    payload = {
+        "instrument": {
+            "trading_symbol": "NSE:NIFTY26DEC22000CE",
+            "symbol": "NIFTY",
+            "instrument_type": "OPTIDX",
+            "expiry": "31-Dec-2026",
+            "strike": 22000,
+            "option_type": "CE",
+            "exchange": "NFO",
+        },
+        "metric": "Vanna",
+        "operator": ">",
+        "threshold": 0.01,
+        "cooldownMinutes": 5,
+    }
+    created = await client.post("/api/v1/alerts", json=payload, headers=auth_headers)
+    assert created.status_code == 201
+    assert created.json()["metric"] == "Vanna"
 
 
 @pytest.mark.asyncio
@@ -90,6 +134,32 @@ async def test_scheduler_records_trigger_and_snoozes_alert(db_session: AsyncSess
         assert events[0].value == 22100.0
     finally:
         await session_manager.remove_session("TEST_CLIENT_001")
+
+
+@pytest.mark.asyncio
+async def test_scheduler_disables_invalid_persisted_alert(db_session: AsyncSession) -> None:
+    alert = AlertRecord(
+        id="invalid-alert",
+        owner_id="TEST_CLIENT_001",
+        instrument={"trading_symbol": "NIFTY"},
+        trading_symbol="NIFTY",
+        metric="Not a metric",
+        operator="?",
+        threshold=22000,
+        cooldown_minutes=0,
+        status="Active",
+        created_at=datetime.now(UTC),
+    )
+    db_session.add(alert)
+    await db_session.commit()
+
+    assert db_session.bind is not None
+    factory = async_sessionmaker(db_session.bind, class_=AsyncSession, expire_on_commit=False)
+    assert await run_alert_evaluation(factory) == 0
+    async with factory() as check:
+        persisted = await check.get(AlertRecord, "invalid-alert")
+    assert persisted is not None
+    assert persisted.status == "Disabled"
 
 
 @pytest.mark.asyncio

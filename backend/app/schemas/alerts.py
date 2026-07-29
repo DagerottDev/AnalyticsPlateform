@@ -1,9 +1,11 @@
 """Request and response schemas for durable market alerts."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.market import Instrument
 
 
 def _camel(name: str) -> str:
@@ -14,7 +16,7 @@ def _camel(name: str) -> str:
 class AlertBase(BaseModel):
     model_config = ConfigDict(alias_generator=_camel, populate_by_name=True)
 
-    instrument: dict[str, Any]
+    instrument: Instrument
     metric: Literal[
         "Price",
         "IV",
@@ -26,6 +28,14 @@ class AlertBase(BaseModel):
         "Put GEX",
         "Net GEX",
         "VWAP Breakout",
+        "Rho",
+        "Vanna",
+        "Vomma",
+        "Charm",
+        "Speed",
+        "Color",
+        "Zomma",
+        "Ultima",
     ]
     operator: Literal[">", "<", ">=", "<="]
     threshold: float

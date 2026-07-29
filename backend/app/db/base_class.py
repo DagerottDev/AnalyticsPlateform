@@ -1,14 +1,7 @@
-from typing import Any
-
-from sqlalchemy.orm import as_declarative, declared_attr
+from sqlalchemy.orm import DeclarativeBase
 
 
-@as_declarative()
-class Base:
-    id: Any
-    __name__: str
+class Base(DeclarativeBase):
+    """Typed SQLAlchemy declarative base for all persisted records."""
 
-    # Generate __tablename__ automatically
-    @declared_attr  # type: ignore[arg-type]
-    def __tablename__(cls) -> str:  # noqa: N805 - SQLAlchemy declared_attr convention
-        return cls.__name__.lower()
+    pass

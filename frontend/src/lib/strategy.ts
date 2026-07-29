@@ -1,5 +1,5 @@
 import { Instrument } from "@/types/market";
-import { calculateOptionPrice, calculateGreeks, Greeks } from "./greeks";
+import { calculateOptionPrice, calculateGreeks } from "./greeks";
 import { timeToExpiry, DEFAULT_RISK_FREE_RATE } from "./optionMath";
 
 export interface StrategyLeg {
@@ -156,8 +156,6 @@ export function deriveMetricsFromProfile(profile: PayoffPoint[]): StrategyMetric
     }
   }
 
-  const startP = profile[0].profitAtExpiry;
-  const endP = profile[profile.length - 1].profitAtExpiry;
   const startSlope = profile[1].profitAtExpiry - profile[0].profitAtExpiry;
   const endSlope = profile[profile.length - 1].profitAtExpiry - profile[profile.length - 2].profitAtExpiry;
 
@@ -192,4 +190,3 @@ export function deriveMetricsFromProfile(profile: PayoffPoint[]): StrategyMetric
     winProbability: winProbability || 35,
   };
 }
-

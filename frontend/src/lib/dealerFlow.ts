@@ -21,6 +21,21 @@ export function getLotSize(symbol: string): number {
   return 50;
 }
 
+/**
+ * Fyers live ticks and quote snapshots do not include option OI. Prefer a
+ * positive live value when a broker provides one, otherwise use the OI
+ * captured with the option-chain instrument snapshot.
+ */
+export function resolveOpenInterest(liveOi: number | null | undefined, snapshotOi: number | null | undefined): number {
+  if (typeof liveOi === "number" && Number.isFinite(liveOi) && liveOi > 0) {
+    return liveOi;
+  }
+  if (typeof snapshotOi === "number" && Number.isFinite(snapshotOi) && snapshotOi > 0) {
+    return snapshotOi;
+  }
+  return 0;
+}
+
 export function calculateContractGEX(
   gamma: number,
   oi: number,
@@ -87,4 +102,3 @@ export function calculateZeroGamma(profile: StrikeExposure[]): number {
 
   return zeroGammaStrike;
 }
-

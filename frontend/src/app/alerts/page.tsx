@@ -15,6 +15,7 @@ import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Bell, Trash2, CheckCircle2, Clock, Plus, Sparkles, Moon } from "lucide-react";
 
@@ -33,12 +34,17 @@ export default function AlertsPage() {
   const [operator, setOperator] = useState<AlertOperator>(">");
   const [threshold, setThreshold] = useState<string>("");
   const [cooldownMinutes, setCooldownMinutes] = useState<number>(15);
+  const [loadingInstruments, setLoadingInstruments] = useState<boolean>(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
   const isUnderlyingScoped = UNDERLYING_SCOPED_METRICS.includes(metric);
 
   useEffect(() => {
     let isMounted = true;
     async function fetchContracts() {
+      setLoadingInstruments(true);
+      setError(null);
       try {
         const data = await getInstruments(symbol);
         if (isMounted) {
@@ -49,8 +55,10 @@ export default function AlertsPage() {
           if (expiries.length > 0) setExpiry(expiries[0]);
           setSelectedInstrumentToken(""); // Reset selection
         }
-      } catch (err) {
-        console.error("Failed to fetch instruments", err);
+      } catch (cause) {
+        if (isMounted) setError(cause);
+      } finally {
+        if (isMounted) setLoadingInstruments(false);
       }
     }
     fetchContracts();
@@ -75,7 +83,10 @@ export default function AlertsPage() {
   }
 
   const handleAddAlert = async () => {
-    if (!threshold) return;
+    if (!threshold || !Number.isFinite(Number(threshold))) {
+      toast.error("Enter a numeric threshold before creating an alert.");
+      return;
+    }
 
     // If it's a price alert, we can attach it to the underlying or a specific option
     let targetInst: Instrument | undefined;
@@ -86,14 +97,22 @@ export default function AlertsPage() {
       targetInst = instruments.find(i => i.trading_symbol === selectedInstrumentToken);
     }
 
-    if (!targetInst) return;
+    if (!targetInst) {
+      toast.error("Select a valid contract or use the underlying instrument.");
+      return;
+    }
 
+    setSaving(true);
+    setError(null);
     try {
       await addAlert({ instrument: targetInst, metric, operator, threshold: Number(threshold), cooldownMinutes });
       setThreshold("");
       toast.success("Server-side alert created");
-    } catch {
+    } catch (cause) {
+      setError(cause);
       toast.error("Could not save alert to the server.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -122,11 +141,16 @@ export default function AlertsPage() {
       }
     }
 
+    setSaving(true);
+    setError(null);
     try {
       await addAlert({ instrument: targetInst, metric: template.metric, operator: template.operator, threshold: template.threshold, cooldownMinutes: template.cooldownMinutes });
       toast.success(`Server-side preset applied: ${template.label}`);
-    } catch {
+    } catch (cause) {
+      setError(cause);
       toast.error("Could not save alert to the server.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -243,13 +267,16 @@ export default function AlertsPage() {
             </div>
 
             <div className="sm:col-span-2 lg:col-span-1">
-              <Button onClick={handleAddAlert} disabled={!threshold} className="h-10 w-full" aria-label="Add alert">
+              <Button onClick={handleAddAlert} disabled={!threshold || saving || loadingInstruments} className="h-10 w-full" aria-label="Add alert">
                 <Plus className="h-5 w-5" />
                 <span className="lg:hidden">Create Alert</span>
               </Button>
             </div>
           </div>
         </Card>
+
+        {Boolean(loadingInstruments) && <p className="text-xs text-[var(--color-text-muted)]">Loading contracts for {symbol}…</p>}
+        {error ? <ApiErrorDisplay error={error} /> : null}
 
         {/* Active Alerts List */}
         <Card className="flex flex-col gap-4">

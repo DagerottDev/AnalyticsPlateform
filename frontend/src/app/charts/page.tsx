@@ -22,6 +22,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
+import { DataFreshness } from "@/components/market/DataFreshness";
 
 export default function ChartsPage() {
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
@@ -155,7 +156,10 @@ export default function ChartsPage() {
   return (
     <DashboardLayout>
       <PageContainer>
-        <SectionHeader title="Advanced Charting" description="Historical OHLCV, live overlays, and heatmaps." />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <SectionHeader title="Advanced Charting" description="Historical OHLCV, live overlays, and heatmaps." />
+          <DataFreshness tick={underlyingTick} />
+        </div>
 
         {/* Controls */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

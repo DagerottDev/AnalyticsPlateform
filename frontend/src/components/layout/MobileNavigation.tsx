@@ -11,7 +11,6 @@ import {
   History,
   LayoutDashboard,
   Menu,
-  Milestone,
   PlayCircle,
   Settings,
   Waves,
@@ -39,7 +38,6 @@ const allItems = [
   { label: "Positions", href: "/positions", icon: Briefcase },
   { label: "Replay", href: "/replay", icon: PlayCircle },
   { label: "Strategy Builder", href: "/strategy", icon: Blocks },
-  { label: "Roadmap", href: "/roadmap", icon: Milestone },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 

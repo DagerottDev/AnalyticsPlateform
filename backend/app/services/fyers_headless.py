@@ -48,7 +48,11 @@ _VAGATOR_HEADERS = {
 
 
 def _post_with_retry(
-    ses: requests.Session, url: str, payload: dict, step: str, max_retries: int = 3
+    ses: requests.Session,
+    url: str,
+    payload: dict[str, object],
+    step: str,
+    max_retries: int = 3,
 ) -> requests.Response:
     """POST with exponential backoff + jitter when Cloudflare returns 429 or a
     non-JSON challenge page. Retrying immediately just gets rate-limited again;
@@ -69,7 +73,7 @@ def _post_with_retry(
     return res
 
 
-def _check_json(res: requests.Response, step: str) -> dict:
+def _check_json(res: requests.Response, step: str) -> dict[str, object]:
     """Assert the response is JSON and return parsed data, raising BrokerAuthError otherwise."""
     ct = res.headers.get("content-type", "")
     if res.status_code == 429 or "application/json" not in ct:
@@ -83,7 +87,28 @@ def _check_json(res: requests.Response, step: str) -> dict:
             "server's IP. Use the OAuth redirect login method instead — it "
             "runs entirely in your browser with no server-side requests to Fyers."
         )
-    return res.json()
+    payload = res.json()
+    if not isinstance(payload, dict):
+        raise BrokerAuthError(f"Fyers {step} returned a non-object JSON payload")
+    return {str(key): value for key, value in payload.items()}
+
+
+def _required_string(payload: dict[str, object], key: str, step: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise BrokerAuthError(f"Fyers {step} response is missing a valid {key}")
+    return value
+
+
+def _required_nested_string(
+    payload: dict[str, object], parent: str, key: str, step: str
+) -> str:
+    nested = payload.get(parent)
+    if not isinstance(nested, dict):
+        raise BrokerAuthError(f"Fyers {step} response is missing a valid {parent} object")
+    return _required_string(
+        {str(nested_key): value for nested_key, value in nested.items()}, key, step
+    )
 
 
 async def get_fyers_access_token_headless(
@@ -168,7 +193,7 @@ def _headless_login_sync(
     d1 = _check_json(res1, "send_login_otp_v2")
     if d1.get("s") != "ok":
         raise BrokerAuthError(f"Fyers send OTP failed: {d1}")
-    request_key = d1["request_key"]
+    request_key = _required_string(d1, "request_key", "send_login_otp_v2")
 
     # ── Step 2: Verify TOTP ───────────────────────────────────────────────────
     # Guard: if we're in the last 3 seconds of a 30-second TOTP window, wait for
@@ -188,7 +213,7 @@ def _headless_login_sync(
     d2 = _check_json(res2, "verify_otp")
     if d2.get("s") != "ok":
         raise BrokerAuthError(f"Fyers verify TOTP failed: {d2}")
-    request_key_2 = d2["request_key"]
+    request_key_2 = _required_string(d2, "request_key", "verify_otp")
 
     # ── Step 3: Verify PIN ────────────────────────────────────────────────────
     logger.info("[Fyers headless] Step 3: verify_pin_v2")
@@ -206,7 +231,7 @@ def _headless_login_sync(
     if d3.get("s") != "ok":
         raise BrokerAuthError(f"Fyers verify PIN failed: {d3}")
 
-    session_token = d3["data"]["access_token"]
+    session_token = _required_nested_string(d3, "data", "access_token", "verify_pin_v2")
 
     # ── Step 4: Generate auth_code via /api/v3/token ──────────────────────────
     # CRITICAL: use the SAME session so cookies from step 3 flow through.
@@ -231,16 +256,19 @@ def _headless_login_sync(
     d4 = _check_json(res4, "token")
 
     # Parse the redirect URL to extract auth_code
-    if d4.get("code") == 308 and d4.get("Url"):
-        parsed = urlparse(d4["Url"])
+    redirect_url = d4.get("Url")
+    if d4.get("code") == 308 and isinstance(redirect_url, str):
+        parsed = urlparse(redirect_url)
         qs = parse_qs(parsed.query)
-        auth_code = (qs.get("auth_code") or qs.get("code") or [None])[0]
+        auth_code = next(iter(qs.get("auth_code") or qs.get("code") or []), "")
         if not auth_code:
-            raise BrokerAuthError(f"Fyers step 4 redirect URL is missing auth_code: {d4['Url']}")
+            raise BrokerAuthError(
+                f"Fyers step 4 redirect URL is missing auth_code: {redirect_url}"
+            )
     elif d4.get("s") == "error" or d4.get("code") not in (200, 308):
         raise BrokerAuthError(f"Fyers auth code generation failed: {d4}")
     elif "data" in d4:
-        auth_code = d4["data"]["auth"]  # legacy response format
+        auth_code = _required_nested_string(d4, "data", "auth", "token")
     else:
         raise BrokerAuthError(f"Unexpected Fyers step 4 response format: {d4}")
 

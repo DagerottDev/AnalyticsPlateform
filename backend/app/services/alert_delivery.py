@@ -3,19 +3,23 @@
 import asyncio
 import logging
 import smtplib
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.message import EmailMessage
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.core.crypto import decrypt_token
+from app.core.retry import compute_backoff_delay
 from app.models.alert_delivery import AlertDeliverySettingsRecord
 
 logger = logging.getLogger(__name__)
+DeliveryChannel = Literal["email", "webhook", "slack", "telegram"]
+_MAX_DELIVERY_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -64,7 +68,8 @@ def _message(event: DeliveryEvent) -> str:
 
 
 async def _send_email(settings: Settings, recipient: str, event: DeliveryEvent) -> None:
-    if not settings.alert_smtp_host or not settings.alert_smtp_from:
+    smtp_host = settings.alert_smtp_host
+    if not smtp_host or not settings.alert_smtp_from:
         logger.warning("Skipping email delivery: ALERT_SMTP_HOST/FROM are not configured")
         return
     message = EmailMessage()
@@ -76,7 +81,7 @@ async def _send_email(settings: Settings, recipient: str, event: DeliveryEvent) 
     message.set_content(_message(event))
 
     def send() -> None:
-        with smtplib.SMTP(settings.alert_smtp_host, settings.alert_smtp_port, timeout=10) as smtp:
+        with smtplib.SMTP(smtp_host, settings.alert_smtp_port, timeout=10) as smtp:
             if settings.alert_smtp_starttls:
                 smtp.starttls()
             if settings.alert_smtp_username and settings.alert_smtp_password:
@@ -92,6 +97,63 @@ async def _post_json(url: str, payload: dict[str, Any]) -> None:
         response.raise_for_status()
 
 
+def _is_retryable_delivery_error(error: Exception) -> bool:
+    transient_errors = (
+        httpx.TransportError | httpx.TimeoutException | smtplib.SMTPException | TimeoutError
+    )
+    if isinstance(error, transient_errors):
+        return True
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code == 429 or error.response.status_code >= 500
+    return False
+
+
+async def _deliver_with_retry(
+    channel: DeliveryChannel, event: DeliveryEvent, operation: Callable[[], Awaitable[None]]
+) -> None:
+    """Attempt an external notification without letting one channel block another.
+
+    The logs deliberately contain channel, owner, symbol, attempt and exception
+    type—but never webhook URLs, recipient addresses, bot tokens, or payloads.
+    That makes a failed delivery diagnosable while preserving credential privacy.
+    """
+    for attempt in range(_MAX_DELIVERY_ATTEMPTS):
+        try:
+            await operation()
+            logger.info(
+                "alert_delivery.sent channel=%s owner_id=%s symbol=%s attempt=%s",
+                channel, event.owner_id, event.trading_symbol, attempt + 1,
+            )
+            return
+        except Exception as error:
+            retryable = _is_retryable_delivery_error(error)
+            is_final_attempt = attempt + 1 == _MAX_DELIVERY_ATTEMPTS
+            if not retryable or is_final_attempt:
+                logger.warning(
+                    "alert_delivery.failed channel=%s owner_id=%s symbol=%s "
+                    "attempts=%s retryable=%s error_type=%s",
+                    channel,
+                    event.owner_id,
+                    event.trading_symbol,
+                    attempt + 1,
+                    retryable,
+                    type(error).__name__, exc_info=True,
+                )
+                return
+            delay = compute_backoff_delay(attempt, base_delay=0.25, jitter=0.25)
+            logger.info(
+                "alert_delivery.retry channel=%s owner_id=%s symbol=%s attempt=%s "
+                "delay_seconds=%.2f error_type=%s",
+                channel,
+                event.owner_id,
+                event.trading_symbol,
+                attempt + 1,
+                delay,
+                type(error).__name__,
+            )
+            await asyncio.sleep(delay)
+
+
 async def dispatch_alert_delivery(
     db: AsyncSession, event: DeliveryEvent, settings: Settings
 ) -> None:
@@ -99,24 +161,45 @@ async def dispatch_alert_delivery(
     if channels is None:
         return
     payload = delivery_payload(event)
-    jobs: list[tuple[str, Any]] = []
+    jobs: list[tuple[DeliveryChannel, Callable[[], Awaitable[None]]]] = []
     if channels.email_enabled and channels.email_recipient:
-        jobs.append(("email", _send_email(settings, channels.email_recipient, event)))
+        jobs.append(("email", lambda: _send_email(settings, channels.email_recipient or "", event)))
     if channels.webhook_enabled and channels.webhook_url:
-        jobs.append(("webhook", _post_json(channels.webhook_url, payload)))
+        jobs.append(
+            ("webhook", lambda: _post_json(channels.webhook_url or "", payload))
+        )
     if channels.slack_enabled and channels.slack_webhook_url:
-        jobs.append(("slack", _post_json(channels.slack_webhook_url, {"text": _message(event)})))
+        jobs.append(
+            (
+                "slack",
+                lambda: _post_json(
+                    channels.slack_webhook_url or "", {"text": _message(event)}
+                ),
+            )
+        )
     if channels.telegram_enabled and channels.telegram_bot_token and channels.telegram_chat_id:
         jobs.append(
             (
                 "telegram",
-                _post_json(
+                lambda: _post_json(
                     f"https://api.telegram.org/bot{channels.telegram_bot_token}/sendMessage",
-                    {"chat_id": channels.telegram_chat_id, "text": _message(event)},
+                    {"chat_id": channels.telegram_chat_id or "", "text": _message(event)},
                 ),
             )
         )
-    results = await asyncio.gather(*(job for _, job in jobs), return_exceptions=True)
-    for (channel, _), result in zip(jobs, results, strict=True):
-        if isinstance(result, Exception):
-            logger.warning("Alert %s delivery failed: %s", channel, result)
+    configured = {
+        "email": channels.email_enabled,
+        "webhook": channels.webhook_enabled,
+        "slack": channels.slack_enabled,
+        "telegram": channels.telegram_enabled,
+    }
+    scheduled = {channel for channel, _ in jobs}
+    for channel, enabled in configured.items():
+        if enabled and channel not in scheduled:
+            logger.warning(
+                "alert_delivery.not_configured channel=%s owner_id=%s symbol=%s",
+                channel, event.owner_id, event.trading_symbol,
+            )
+    await asyncio.gather(
+        *(_deliver_with_retry(channel, event, operation) for channel, operation in jobs)
+    )

@@ -15,7 +15,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { formatDate } from "@/lib/utils";
 import { getSavedLoginCredentials, hasSavedTotpCredentials, clearSavedLoginCredentials, SAVED_LOGIN_KEYS } from "@/lib/auth";
 import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { TradingModeToggle } from "@/components/ui/TradingModeToggle";

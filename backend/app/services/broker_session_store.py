@@ -6,6 +6,7 @@ what's actually stored.
 
 import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,9 @@ from app.models.user import TradingMode
 from app.services.dhan_service import DhanService
 from app.services.fyers_service import FyersService
 from app.services.session_manager import session_manager
+
+if TYPE_CHECKING:
+    from app.services.broker_base import BrokerService
 
 logger = logging.getLogger(__name__)
 
@@ -36,18 +40,16 @@ async def save_broker_session(
 ) -> None:
     """Replace the persisted session row with the newly established one."""
     await db.execute(delete(BrokerSessionRecord))
-    # `Base` (app.db.base_class) is built via the legacy `as_declarative()`
-    # helper rather than SQLAlchemy 2.0's `DeclarativeBase`, so mypy doesn't
-    # see the auto-generated kwargs `__init__` — assign attributes instead.
-    record = BrokerSessionRecord()
-    record.id = _SINGLETON_ID
-    record.broker = broker
-    record.client_id = client_id
-    record.app_id = app_id
-    record.access_token = encrypt_token(access_token, settings)
-    record.trading_mode = trading_mode.value
-    record.account_name = account_name
-    record.connected_at = datetime.now(UTC)
+    record = BrokerSessionRecord(
+        id=_SINGLETON_ID,
+        broker=broker,
+        client_id=client_id,
+        app_id=app_id,
+        access_token=encrypt_token(access_token, settings),
+        trading_mode=trading_mode.value,
+        account_name=account_name,
+        connected_at=datetime.now(UTC),
+    )
     db.add(record)
     await db.commit()
 
@@ -91,6 +93,7 @@ async def restore_broker_session(db: AsyncSession, settings: Settings) -> None:
         return
 
     access_token = decrypt_token(record.access_token, settings)
+    service: BrokerService
     if record.broker == "dhan":
         service = DhanService(
             client_id=record.client_id,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
@@ -33,6 +33,11 @@ export default function VolatilityPage() {
   const [activeTab, setActiveTab] = useState<string>("live");
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
+  const selectedExpiryRef = useRef(expiry);
+
+  useEffect(() => {
+    selectedExpiryRef.current = expiry;
+  }, [expiry]);
   
   // Historical State
   const [histData, setHistData] = useState<VolatilityHistoricalData[]>([]);
@@ -95,7 +100,7 @@ export default function VolatilityPage() {
           const expiries = Array.from(
             new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
           ).sort();
-          if (!expiry && expiries.length > 0) {
+          if (!selectedExpiryRef.current && expiries.length > 0) {
             setExpiry(expiries[0]);
           }
         }
@@ -105,7 +110,7 @@ export default function VolatilityPage() {
     }
     fetchContracts();
     return () => { isMounted = false; };
-  }, [symbol]); // Deliberately ignore expiry to load ALL contracts
+  }, [symbol]);
 
   // Get underlying price
   const underlyingTick = getTick(symbol);
@@ -252,7 +257,7 @@ export default function VolatilityPage() {
 
         {activeTab === "historical" && (
           <>
-            {histError && <ApiErrorDisplay error={histError} />}
+            {histError ? <ApiErrorDisplay error={histError} /> : null}
 
             {/* Metrics derived from 1Y of daily historical IV/RV data */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

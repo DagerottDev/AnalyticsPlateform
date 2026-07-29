@@ -28,7 +28,7 @@ class MarginResponse(BaseModel):
     span_margin: float | None = None
     exposure_margin: float | None = None
     premium: float | None = None
-    raw: dict
+    raw: dict[str, object]
 
 
 class Instrument(BaseModel):
@@ -58,6 +58,30 @@ class ExpiryList(BaseModel):
 class InstrumentResponse(BaseModel):
     """Response containing a list of instruments."""
     instruments: list[Instrument]
+
+
+class MarketQuote(BaseModel):
+    """Normalized quote shape shared by REST snapshots and live-tick seeding."""
+
+    symbol: str
+    trading_symbol: str
+    last_price: float
+    volume: int = 0
+    open_interest: int = 0
+    timestamp: int
+    change: float = 0
+    change_percent: float = 0
+    open_price: float | None = None
+    high_price: float | None = None
+    low_price: float | None = None
+    prev_close_price: float | None = None
+    ask: float | None = None
+    bid: float | None = None
+    atp: float | None = None
+
+
+class QuotesResponse(BaseModel):
+    quotes: list[MarketQuote]
 
 
 class SymbolSuggestion(BaseModel):

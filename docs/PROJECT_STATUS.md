@@ -3,6 +3,33 @@
 Current Milestone:
 - M10: Replay Mode — ✅ COMPLETE
 - Post-M10 audit & correctness pass (2026-07-20) — ✅ COMPLETE (see below)
+- Targeted quality refactor (2026-07-29) — ✅ COMPLETE (see below)
+- Resilience & confidence quality pass (2026-07-30) — ✅ COMPLETE (see below)
+
+## Selected Option Greek Analysis (2026-07-30)
+
+- Option Chain now supports selecting up to ten individual call/put contracts and opening a shareable analysis workspace in a new window or tab.
+- The full-width workspace compares Core Greeks (Delta, Gamma, Theta, Vega, Rho), higher-order Greeks (Vanna, Vomma, Charm, Speed, Color, Zomma, Ultima), and a selectable Greek-ratio chart against a base contract.
+- Each visible Greek chart has its own focused contract and SMA, EMA, or Bollinger overlay. Durable server-side threshold alerts can be created for every supported individual option Greek directly from its chart.
+
+## Resilience & confidence quality pass (2026-07-30)
+
+- Added explicit live, delayed, stale, and awaiting-quote states to dashboard, chart, and option-chain market data.
+- Preserved raw API errors for recoverable order, journal, alert, and delivery-setting actions, with visible error details and safe retry paths.
+- Made durable alert channels retry transient delivery failures with correlated, secret-safe structured logs; misconfigured enabled channels are now reported.
+- Added rate-limit outcome logging and deterministic coverage for data freshness and transient delivery retries. Existing responsive layouts for the dashboard, alerts, charts, and chain retain usable controls and information hierarchy at narrow widths.
+
+## Targeted quality refactor (2026-07-29)
+
+- Preserved the current API contracts while tightening SQLAlchemy mappings, broker/alert validation boundaries, and persisted literal-backed response values.
+- Made backend test apps isolated by construction and exempted authenticated logout from the login-rate-limit bucket; login and auto-login remain rate limited.
+- Refactored `useMarketData` subscriptions to diff added and removed symbols, with explicit cleanup for replay, logout, unmount, and Strict Mode remounts.
+- Cleared frontend ESLint warnings and retained live-chart updates through stable refs rather than dependency suppressions.
+- Verification: `eslint --max-warnings=0`, `tsc --noEmit`, frontend tests/build, Ruff, strict Mypy, and backend pytest are required to pass for this status (run results are recorded with the implementation handoff).
+
+## Correctness & consistency quality pass (2026-07-30)
+
+- Completed all six existing-flow improvements: typed market-data filtering, trade/order/portfolio serialization boundaries, persisted-alert lifecycle validation, session/replay/background lifecycle isolation, focused boundary regressions, and consistent keyboard/focus/chart-data fallbacks.
 
 Completed:
 - M1: Foundation
@@ -105,14 +132,13 @@ Known Issues:
 - **Dual-axis comparison charts and multi-strike price overlays** (both named in `MASTER_SPEC.md`'s Visualization section, absent from `FEATURE_MATRIX.md` entirely) are not implemented anywhere.
 - **Volatility data is backend-synthetic, not live-market.** `backend/app/api/v1/volatility.py`'s historical IV/RV series is a `random.gauss` random walk per symbol, not derived from real market data — the routing/field-mismatch bug that made it *worse* (silently falling back to an even-more-random frontend mock) is fixed, but the underlying data source itself is still synthetic.
 - `@tanstack/react-query` and `redis` — resolved. Both were unused dependencies; removed from `frontend/package.json` and `backend/pyproject.toml` respectively (Redis stays provisioned in `docker-compose` for future use, just not wired into any backend code path).
-- **Pre-existing lint/type debt outside this pass's scope**: `next lint` currently reports ~146 problems (mostly `@typescript-eslint/no-explicit-any` and unused-var warnings) across files this pass didn't touch (`websocket.ts`, `replayEngine.ts`, `ApiErrorDisplay.tsx`, several component files); `mypy app` reports 7 pre-existing errors, nearly all "missing type stubs for a third-party package" (`fyers_apiv3`, `jose`, `requests`) rather than real type errors. Neither blocks `tsc --noEmit`, `pytest`, or `vitest`, all of which are genuinely green as of this pass — but the earlier claim in this file that `next lint`/`mypy --strict` were green was not accurate, and is corrected here rather than repeated.
+- **Quality checks**: the targeted refactor resolved the previous ESLint warning set and strict Mypy findings. The supported verification commands are listed in the 2026-07-29 quality-pass section above.
 - A prior audit (2026-07-06) found and fixed a batch of regressions left over from the OpenAlgo → native broker SDK migration (2f06dfb, acff4bf) — retained here for history: a syntax error that prevented the backend from importing at all, a double-prefixed API router, a dead `openalgo_host` field reference, an undefined `tradingSymbols` reference crashing `/chain`, and a missing `calculateOptionPrice` export.
 
 Next Actions:
 - If live Fyers credentials become available: verify the real `optionchain()` response shape against a live account, then implement `get_instruments`/`get_expiries` for real (the option-chain item above is the single highest-leverage remaining gap — nearly every other "mock data" symptom traces back to it).
 - Decide whether real broker WebSocket streaming is worth the backend WS-proxy architecture, or whether the mock feed is acceptable for the platform's actual use case.
 - Wire the remaining 7 library-only indicators into the `/charts` UI if there's demand for them beyond SMA/EMA/Bollinger/RSI/Supertrend.
-- Optionally address the pre-existing `next lint`/`mypy` debt noted above (unrelated to this pass's scope, but real accumulated backlog).
 
 Tech Stack Locked:
 - Backend: FastAPI + Python 3.12 + Poetry

@@ -38,6 +38,7 @@ describe("saved login credentials (localStorage helpers)", () => {
   it("returns empty-string defaults and paper mode when nothing is saved", () => {
     const creds = getSavedLoginCredentials();
     expect(creds).toEqual({
+      broker: "fyers",
       appId: "",
       apiSecret: "",
       clientId: "",
@@ -45,6 +46,7 @@ describe("saved login credentials (localStorage helpers)", () => {
       pin: "",
       redirectUri: "http://127.0.0.1:3000",
       tradingMode: "paper",
+      dhanAccessToken: "",
     });
   });
 

@@ -1,5 +1,6 @@
 """Small in-memory HTTP rate limiter for protecting API and broker capacity."""
 
+import logging
 import time
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
@@ -9,6 +10,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -33,6 +36,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             not self.settings.api_rate_limit_enabled
             or request.method == "OPTIONS"
             or request.url.path.endswith("/health")
+            # A valid bearer token should always be able to invalidate itself.
+            # Login and auto-login remain in the intentionally tight auth bucket.
+            or request.url.path.endswith("/auth/logout")
         ):
             return await call_next(request)
         client_ip = request.client.host if request.client else "unknown"
@@ -46,6 +52,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         remaining = max(0, limit - len(history))
         if len(history) >= limit:
             retry_after = max(1, int(window - (now - history[0])) + 1)
+            logger.warning(
+                "rate_limit.exceeded bucket=%s path=%s client_ip=%s limit=%s retry_after=%s",
+                bucket, request.url.path, client_ip, limit, retry_after,
+            )
             return JSONResponse(
                 status_code=429,
                 content={

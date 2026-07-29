@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   calculateSMA,
   calculateEMA,
-  calculateRSI,
   calculateWMA,
   calculateHMA,
   calculateVWMA,

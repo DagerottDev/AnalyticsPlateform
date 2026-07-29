@@ -21,7 +21,7 @@ class BrokerSessionRecord(Base):
     single-active-session design.
     """
 
-    __tablename__ = "broker_sessions"  # type: ignore[assignment]
+    __tablename__ = "broker_sessions"
 
     id: Mapped[str] = mapped_column(String(20), primary_key=True)
     broker: Mapped[str] = mapped_column(String(20), default="fyers")

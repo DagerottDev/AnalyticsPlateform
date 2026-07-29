@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { OHLCVData, calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateSupertrend } from "@/lib/indicators";
 import { ChartIndicators, indicatorParameter } from "@/lib/chartIndicators";
+import { normalizeOHLCVData, sortAndDeduplicateChartData } from "@/lib/chartData";
 import { ChartLegend } from "./ChartLegend";
 import { ChartDataTable } from "./ChartDataTable";
 
@@ -34,6 +35,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const latestDataRef = useRef(data);
   
   // Indicator series refs
   const smaSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -106,29 +108,23 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current || !volumeSeriesRef.current || !data || data.length === 0) return;
 
-    const formattedData = data.map(d => ({
-      time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
+    const normalizedData = normalizeOHLCVData(data);
+    const formattedData = normalizedData.map(d => ({
+      time: d.time as Time,
       open: d.open,
       high: d.high,
       low: d.low,
       close: d.close,
     }));
-    
-    // De-duplicate times
-    const uniqueData = Array.from(new Map(formattedData.map(item => [item.time, item])).values())
-      .sort((a, b) => (a.time as number) - (b.time as number));
 
-    candleSeriesRef.current.setData(uniqueData);
+    candleSeriesRef.current.setData(formattedData);
 
-    const volumeData = data.map(d => ({
-      time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
+    const volumeData = normalizedData.map(d => ({
+      time: d.time as Time,
       value: d.volume || 0,
       color: d.close >= d.open ? `${COLOR_PROFIT}4D` : `${COLOR_LOSS}4D` // ~30% opacity
     }));
-    const uniqueVol = Array.from(new Map(volumeData.map(item => [item.time, item])).values())
-      .sort((a, b) => (a.time as number) - (b.time as number));
-      
-    volumeSeriesRef.current.setData(uniqueVol);
+    volumeSeriesRef.current.setData(volumeData);
 
     // --- Indicators ---
 
@@ -137,8 +133,10 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       if (!smaSeriesRef.current) {
         smaSeriesRef.current = chartRef.current.addLineSeries({ color: COLOR_CAT_1, lineWidth: 2 });
       }
-      const smaData = calculateSMA(data, indicatorParameter(indicators, "sma", "period")).map(d => ({
-        time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
+      const smaData = sortAndDeduplicateChartData(
+        calculateSMA(normalizedData, indicatorParameter(indicators, "sma", "period"))
+      ).map(d => ({
+        time: d.time as Time,
         value: d.value
       }));
       smaSeriesRef.current?.setData(smaData);
@@ -152,8 +150,10 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       if (!emaSeriesRef.current) {
         emaSeriesRef.current = chartRef.current.addLineSeries({ color: COLOR_CAT_2, lineWidth: 2 });
       }
-      const emaData = calculateEMA(data, indicatorParameter(indicators, "ema", "period")).map(d => ({
-        time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
+      const emaData = sortAndDeduplicateChartData(
+        calculateEMA(normalizedData, indicatorParameter(indicators, "ema", "period"))
+      ).map(d => ({
+        time: d.time as Time,
         value: d.value
       }));
       emaSeriesRef.current?.setData(emaData);
@@ -169,12 +169,12 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
         bbLowerRef.current = chartRef.current.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
       }
       const bbData = calculateBollingerBands(
-        data,
+        normalizedData,
         indicatorParameter(indicators, "bbands", "period"),
         indicatorParameter(indicators, "bbands", "multiplier")
       );
-      bbUpperRef.current?.setData(bbData.map(d => ({ time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time, value: d.upper })));
-      bbLowerRef.current?.setData(bbData.map(d => ({ time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time, value: d.lower })));
+      bbUpperRef.current?.setData(sortAndDeduplicateChartData(bbData).map(d => ({ time: d.time as Time, value: d.upper })));
+      bbLowerRef.current?.setData(sortAndDeduplicateChartData(bbData).map(d => ({ time: d.time as Time, value: d.lower })));
     } else if (bbUpperRef.current && bbLowerRef.current) {
       chartRef.current.removeSeries(bbUpperRef.current);
       chartRef.current.removeSeries(bbLowerRef.current);
@@ -191,12 +191,13 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
           lineStyle: 2,
         });
       }
-      const stData = calculateSupertrend(
-        data,
+      const supertrendData = calculateSupertrend(
+        normalizedData,
         indicatorParameter(indicators, "supertrend", "period"),
         indicatorParameter(indicators, "supertrend", "multiplier")
-      ).map(d => ({
-        time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
+      );
+      const stData = sortAndDeduplicateChartData(supertrendData).map(d => ({
+        time: d.time as Time,
         value: d.value,
       }));
       supertrendSeriesRef.current?.setData(stData);
@@ -236,15 +237,14 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       }
 
       if (data && data.length > 0 && rsiSeriesRef.current) {
-        const rsiData = calculateRSI(data, indicatorParameter(indicators, "rsi", "period")).map(d => ({
-          time: (typeof d.time === 'string' ? new Date(d.time).getTime() / 1000 : d.time) as Time,
+        const rsiData = sortAndDeduplicateChartData(
+          calculateRSI(normalizeOHLCVData(data), indicatorParameter(indicators, "rsi", "period"))
+        ).map(d => ({
+          time: d.time as Time,
           value: d.value
         }));
-        
-        const uniqueRsi = Array.from(new Map(rsiData.map(item => [item.time, item])).values())
-          .sort((a, b) => (a.time as number) - (b.time as number));
-          
-        rsiSeriesRef.current.setData(uniqueRsi);
+
+        rsiSeriesRef.current.setData(rsiData);
       }
     } else if (!indicators?.rsi.enabled && rsiChartRef.current) {
       rsiChartRef.current.remove();
@@ -253,12 +253,17 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     }
   }, [indicators, data]);
 
-  // Live Tick Updates
   useEffect(() => {
-    if (liveTick && candleSeriesRef.current && data && data.length > 0) {
+    latestDataRef.current = normalizeOHLCVData(data);
+  }, [data]);
+
+  // Live ticks must retain the newest candle without rebuilding the chart.
+  useEffect(() => {
+    const latestData = latestDataRef.current;
+    if (liveTick && candleSeriesRef.current && latestData.length > 0) {
       // Very basic live update: we just update the last candle's close and high/low
       // In a real app, we need to handle new minute candles forming.
-      const lastCandle = data[data.length - 1];
+      const lastCandle = latestData[latestData.length - 1];
       const time = (typeof lastCandle.time === 'string' ? new Date(lastCandle.time).getTime() / 1000 : lastCandle.time) as Time;
       
       const newHigh = Math.max(lastCandle.high, liveTick.price);
@@ -272,7 +277,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
         close: liveTick.price,
       });
     }
-  }, [liveTick]); // Deliberately omit data to avoid full redraws on ticks
+  }, [liveTick]);
 
   const legendItems = [
     indicators?.sma.enabled && { label: `SMA (${indicatorParameter(indicators, "sma", "period")})`, color: COLOR_CAT_1 },

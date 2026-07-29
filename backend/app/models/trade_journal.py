@@ -9,7 +9,7 @@ from app.db.base_class import Base
 
 
 class TradeJournalRecord(Base):
-    __tablename__ = "trade_journal_entries"  # type: ignore[assignment]
+    __tablename__ = "trade_journal_entries"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(50), index=True)

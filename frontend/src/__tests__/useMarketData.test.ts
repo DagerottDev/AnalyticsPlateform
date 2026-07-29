@@ -18,13 +18,15 @@ const unsubscribeMany = vi.fn();
 // call would make the effect's `user` dependency look "changed" every
 // render for reasons unrelated to what this test is verifying.
 const stableUser = { client_id: "TEST_CLIENT" };
+const authState: { user: typeof stableUser | null } = { user: stableUser };
+const replayState = { isActive: false, currentTicks: {} as Record<string, unknown> };
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ user: stableUser }),
+  useAuth: () => authState,
 }));
 
 vi.mock("@/stores/replayStore", () => ({
   useReplayStore: (selector: (state: { isActive: boolean; currentTicks: Record<string, unknown> }) => unknown) =>
-    selector({ isActive: false, currentTicks: {} }),
+    selector(replayState),
 }));
 
 vi.mock("@/lib/market", () => ({
@@ -39,6 +41,9 @@ describe("useMarketData", () => {
   beforeEach(() => {
     subscribeMany.mockClear();
     unsubscribeMany.mockClear();
+    authState.user = stableUser;
+    replayState.isActive = false;
+    replayState.currentTicks = {};
   });
 
   it("does not re-subscribe or unsubscribe when re-rendered with a new-but-equal symbols array", async () => {
@@ -99,5 +104,41 @@ describe("useMarketData", () => {
     expect(unsubscribeMany).toHaveBeenCalledWith(["BANKNIFTY"], expect.any(Function));
 
     await act(async () => {}); // flush the REST quote-seed promise
+  });
+
+  it("unsubscribes all active symbols when unmounted", async () => {
+    const { unmount } = renderHook(() => useMarketData(["NIFTY", "BANKNIFTY"]));
+
+    unmount();
+
+    expect(unsubscribeMany).toHaveBeenCalledWith(["NIFTY", "BANKNIFTY"], expect.any(Function));
+    await act(async () => {});
+  });
+
+  it("cleans up live subscriptions while replay is active, then restores them", async () => {
+    const { rerender } = renderHook(() => useMarketData(["NIFTY"]));
+
+    replayState.isActive = true;
+    rerender();
+    expect(unsubscribeMany).toHaveBeenCalledWith(["NIFTY"], expect.any(Function));
+
+    replayState.isActive = false;
+    rerender();
+    expect(subscribeMany).toHaveBeenLastCalledWith(["NIFTY"], expect.any(Function));
+    await act(async () => {});
+  });
+
+  it("cleans up live subscriptions after logout and supports a clean remount", async () => {
+    const first = renderHook(() => useMarketData(["NIFTY"]));
+
+    authState.user = null;
+    first.rerender();
+    expect(unsubscribeMany).toHaveBeenCalledWith(["NIFTY"], expect.any(Function));
+
+    first.unmount();
+    authState.user = stableUser;
+    renderHook(() => useMarketData(["NIFTY"]));
+    expect(subscribeMany).toHaveBeenLastCalledWith(["NIFTY"], expect.any(Function));
+    await act(async () => {});
   });
 });

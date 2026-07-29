@@ -5,6 +5,7 @@ import {
   calculateContractCharmExposure,
   calculateZeroGamma,
   findGammaWalls,
+  resolveOpenInterest,
   StrikeExposure
 } from "../lib/dealerFlow";
 
@@ -62,5 +63,12 @@ describe("Dealer Flow Engine", () => {
 
     const peCharmExp = calculateContractCharmExposure(-0.02, 1000, 25, "PE");
     expect(peCharmExp).toBe(500);
+  });
+
+  it("uses option-chain OI when the live tick has no OI", () => {
+    expect(resolveOpenInterest(0, 125000)).toBe(125000);
+    expect(resolveOpenInterest(undefined, 125000)).toBe(125000);
+    expect(resolveOpenInterest(130000, 125000)).toBe(130000);
+    expect(resolveOpenInterest(0, null)).toBe(0);
   });
 });

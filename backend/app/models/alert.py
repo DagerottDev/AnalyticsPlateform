@@ -12,7 +12,7 @@ from app.db.base_class import Base
 class AlertRecord(Base):
     """One user-owned alert that is evaluated independently of the browser."""
 
-    __tablename__ = "alerts"  # type: ignore[assignment]
+    __tablename__ = "alerts"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(50), index=True)
@@ -33,7 +33,7 @@ class AlertRecord(Base):
 class AlertTriggerRecord(Base):
     """An immutable audit record for each server-evaluated alert firing."""
 
-    __tablename__ = "alert_trigger_events"  # type: ignore[assignment]
+    __tablename__ = "alert_trigger_events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(50), index=True)
