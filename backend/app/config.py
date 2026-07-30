@@ -54,10 +54,13 @@ class Settings(BaseSettings):
 
     # API protection before requests can reach Fyers. Values are per client
     # IP per fixed window; broker-heavy routes are intentionally tighter.
+    # Quote snapshots have their own higher budget: they are lightweight and
+    # power time-sensitive UI recovery, unlike history/chain broker reads.
     api_rate_limit_enabled: bool = True
     api_rate_limit_window_seconds: float = 60.0
     api_rate_limit_default_requests: int = 120
     api_rate_limit_broker_requests: int = 30
+    api_rate_limit_quote_requests: int = 120
     api_rate_limit_auth_requests: int = 10
 
     # Daily OHLCV persistence. The job starts on application startup and

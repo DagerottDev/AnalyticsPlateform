@@ -25,6 +25,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def _bucket(self, path: str) -> tuple[str, int]:
         if path.startswith("/api/v1/auth/"):
             return "auth", self.settings.api_rate_limit_auth_requests
+        # This searches an in-process static NSE F&O symbol list; it never
+        # reaches a broker and must not consume the scarce broker budget per
+        # keystroke in the instrument picker.
+        if path.startswith("/api/v1/market/symbols/search"):
+            return "api", self.settings.api_rate_limit_default_requests
+        # Initial snapshots and recovery are latency-sensitive. Keep them
+        # distinct from expensive history/chain calls, which stay protected
+        # by the tighter broker bucket.
+        if path.startswith("/api/v1/market/quotes"):
+            return "quotes", self.settings.api_rate_limit_quote_requests
         if path.startswith(("/api/v1/market/", "/api/v1/volatility/", "/api/v1/portfolio/")):
             return "broker", self.settings.api_rate_limit_broker_requests
         return "api", self.settings.api_rate_limit_default_requests
@@ -61,6 +71,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 content={
                     "detail": "Rate limit exceeded. Please retry shortly.",
                     "error_type": "rate_limit_exceeded",
+                    "retry_after_seconds": retry_after,
                 },
                 headers={
                     "Retry-After": str(retry_after),

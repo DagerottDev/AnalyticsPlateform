@@ -1,11 +1,22 @@
-# Local developer override. Compose this on top of docker-compose.yml:
-#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build
+# Local developer override. Compose this on top of docker-compose.yml once:
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up
 #
-# The production compose file intentionally keeps its standalone frontend
-# image. This override replaces it with Next's development server and mounts
-# source code, so save events are hot-reloaded instead of requiring rebuilds.
+# The production compose file intentionally uses built images. This override
+# mounts both source trees and replaces those processes with development
+# servers, so save events hot-reload without image rebuilds.
 services:
+  backend:
+    image: oap-backend-dev
+    build:
+      target: development
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
+    volumes:
+      - ../backend:/app
+      - backend_venv:/app/.venv
+
   frontend:
+    image: oap-frontend-dev
     build:
       target: development
     environment:
@@ -17,5 +28,6 @@ services:
       - frontend_next:/app/.next
 
 volumes:
+  backend_venv:
   frontend_node_modules:
   frontend_next:

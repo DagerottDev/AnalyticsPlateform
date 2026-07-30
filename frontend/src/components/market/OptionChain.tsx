@@ -22,6 +22,7 @@ import { Select } from "@/components/ui/Select";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
+import { EducationPopover } from "@/components/ui/EducationPopover";
 import { DataFreshness } from "@/components/market/DataFreshness";
 
 const REFRESH_INTERVAL_MS = 30_000;
@@ -255,9 +256,12 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
       </div>
 
       <div className="flex flex-col gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-        <p className="text-xs text-[var(--color-text-secondary)]">
-          Select up to {MAX_ANALYSIS_CONTRACTS} call or put contracts to compare option Greeks, higher-order Greeks, and Greek ratios.
-        </p>
+        <div className="flex items-start gap-1">
+          <p className="text-xs text-[var(--color-text-secondary)]">
+            Select up to {MAX_ANALYSIS_CONTRACTS} call or put contracts to compare option Greeks, higher-order Greeks, and Greek ratios.
+          </p>
+          <EducationPopover title="Select contracts" description="Use the chart icon beside any call or put premium to add it to the Greek workspace. Choose contracts from the same expiry when you want a like-for-like comparison." tips={["You can compare up to 10 contracts.", "A mix of calls and puts is supported."]} links={[{ label: "Options chain and Greeks overview", href: "https://www.optionseducation.org/advancedconcepts/understanding-options-greeks" }]} />
+        </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className="tnum text-xs font-semibold text-[var(--color-text-muted)]">{selectedAnalysisSymbols.length}/{MAX_ANALYSIS_CONTRACTS} selected</span>
           <Button variant="secondary" size="sm" onClick={openStrikeAnalysis} disabled={selectedAnalysisSymbols.length === 0}>

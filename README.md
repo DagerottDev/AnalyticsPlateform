@@ -23,11 +23,11 @@ A production-grade, responsive web platform for Indian options analytics with na
 ### Development
 
 ```bash
-# Clone and start all services with frontend hot reload
+# Clone and start all services with frontend and backend hot reload
 ./start.sh
 
-# Or run detached
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build -d
+# Or run detached. Rebuild only after changing dependencies or a Dockerfile.
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
 
 # Backend only (development)
 cd backend
@@ -40,10 +40,12 @@ npm install
 npm run dev
 ```
 
-The Docker development override bind-mounts `frontend/` and runs `next dev`,
-so frontend source changes refresh automatically at `http://localhost:3001`.
-Use the base compose file alone only when you want the production frontend
-image (`docker compose -f docker/docker-compose.yml up --build`).
+The Docker development override bind-mounts `frontend/` and `backend/`, runs
+`next dev` and Uvicorn reload, and refreshes source changes automatically at
+`http://localhost:3001` and `http://localhost:8001`. Rebuild only after a
+`package.json`, lockfile, `pyproject.toml`, or Dockerfile change. Use the base
+compose file alone when you want production images
+(`docker compose -f docker/docker-compose.yml up --build`).
 
 ### Environment Variables
 

@@ -5,6 +5,7 @@ import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { OHLCVData, calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateSupertrend } from "@/lib/indicators";
 import { ChartIndicators, indicatorParameter } from "@/lib/chartIndicators";
 import { normalizeOHLCVData, sortAndDeduplicateChartData } from "@/lib/chartData";
+import { formatMarketDateTime, MARKET_CHART_LOCALIZATION, formatMarketTick } from "@/lib/chartTime";
 import { ChartLegend } from "./ChartLegend";
 import { ChartDataTable } from "./ChartDataTable";
 
@@ -69,7 +70,9 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
         timeVisible: true,
         secondsVisible: false,
         borderColor: COLOR_BORDER,
+        tickMarkFormatter: formatMarketTick,
       },
+      localization: MARKET_CHART_LOCALIZATION,
       rightPriceScale: {
         borderColor: COLOR_BORDER,
       },
@@ -216,7 +219,8 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
           height: 150,
           layout: { background: { color: "transparent" }, textColor: COLOR_AXIS_TEXT },
           grid: { vertLines: { color: COLOR_GRID }, horzLines: { color: COLOR_GRID } },
-          timeScale: { visible: false },
+          timeScale: { visible: false, tickMarkFormatter: formatMarketTick },
+          localization: MARKET_CHART_LOCALIZATION,
           rightPriceScale: { borderColor: COLOR_BORDER },
           autoSize: true,
         });
@@ -287,8 +291,8 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
   ].filter((item): item is { label: string; color: string } => Boolean(item));
 
   const formatTime = (time: OHLCVData["time"]) => {
-    const date = new Date(typeof time === "string" ? time : time < 1e11 ? time * 1000 : time);
-    return Number.isNaN(date.getTime()) ? String(time) : date.toLocaleString();
+    const marketTime = formatMarketDateTime(time as Time);
+    return marketTime || String(time);
   };
   const chartRows = data.map((point) => ({
     time: formatTime(point.time),

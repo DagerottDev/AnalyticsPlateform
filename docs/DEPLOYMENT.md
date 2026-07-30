@@ -6,9 +6,9 @@ This document outlines how to run the Option Analytics Platform locally for deve
 
 ## 1. Local Development Setup
 
-You can run the application locally in two ways: fully via Docker (recommended for easiest setup) or natively (recommended for active development).
+You can run the application locally in two ways: Docker development mode with hot reload (recommended) or natively.
 
-### Option A: Fully Dockerized (Easiest)
+### Option A: Docker Development Mode (Hot Reload)
 
 This approach spins up the Backend, Frontend, PostgreSQL (TimescaleDB), and Redis automatically.
 
@@ -20,11 +20,16 @@ This approach spins up the Backend, Frontend, PostgreSQL (TimescaleDB), and Redi
    ```
 3. **Start the Stack**:
    ```bash
-   docker compose -f docker/docker-compose.yml up --build
+   docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up
    ```
 4. **Access**:
-   - Frontend UI: `http://localhost:3000`
-   - Backend API Docs: `http://localhost:8000/docs`
+   - Frontend UI: `http://localhost:3001`
+   - Backend API Docs: `http://localhost:8001/docs`
+
+Both source trees are mounted into their development containers: Next.js
+refreshes frontend files and Uvicorn reloads after backend Python changes.
+Run an image rebuild only after changing a lockfile, `package.json`,
+`pyproject.toml`, or either Dockerfile.
 
 ### Option B: Native Development (Best for Coding)
 
@@ -99,7 +104,8 @@ To deploy this platform securely to a live server (e.g., Ubuntu 22.04 on Digital
      ```
 
 ### Step 3: Modify Docker Compose for Production
-By default, the `docker-compose.yml` mounts local volumes for hot-reloading. For production, you should rely on the built container images. 
+The base `docker-compose.yml` uses built production images. Do not include
+`docker-compose.dev.yml` in a production deployment.
 
 If you haven't created a specific production docker-compose file, simply run the existing one. It will build the production-ready Next.js artifact and FastAPI container.
 

@@ -98,6 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
     )
 
     register_exception_handlers(app)

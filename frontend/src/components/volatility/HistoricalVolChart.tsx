@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
+import { MARKET_CHART_LOCALIZATION, formatMarketTick } from "@/lib/chartTime";
 import { VolatilityHistoricalData } from "@/lib/volatility";
 import { ChartLegend } from "@/components/charts/ChartLegend";
 import { ChartDataTable } from "@/components/charts/ChartDataTable";
@@ -43,7 +44,9 @@ export function HistoricalVolChart({ data }: HistoricalVolChartProps) {
       timeScale: {
         timeVisible: false,
         borderColor: COLOR_BORDER,
+        tickMarkFormatter: formatMarketTick,
       },
+      localization: MARKET_CHART_LOCALIZATION,
       rightPriceScale: {
         borderColor: COLOR_BORDER,
       },

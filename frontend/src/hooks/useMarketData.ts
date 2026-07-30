@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getWebSocket } from "@/lib/websocket";
-import { getMarketQuotes } from "@/lib/market";
 import { MarketTick } from "@/types/market";
 import { useAuth } from "@/hooks/useAuth";
 import { useReplayStore } from "@/stores/replayStore";
@@ -48,23 +47,10 @@ export function useMarketData(symbols: string[]) {
     if (addedSymbols.length > 0) ws.subscribeMany(addedSymbols, handleTick);
     subscribedSymbols.current = requestedSymbols;
 
-    if (addedSymbols.length > 0) {
-      getMarketQuotes(addedSymbols)
-        .then((res) => {
-          if (Array.isArray(res.quotes)) {
-            setTicks((prev) => {
-              const updated = { ...prev };
-              res.quotes.forEach((q: MarketTick) => {
-                if (q.trading_symbol) {
-                  updated[q.trading_symbol] = q;
-                }
-              });
-              return updated;
-            });
-          }
-        })
-        .catch(() => {});
-    }
+    // The backend websocket seeds newly-subscribed symbols with quotes and
+    // maintains one shared REST polling fallback per broker session. A
+    // separate HTTP snapshot per mounted consumer duplicates that broker
+    // traffic and can exhaust the API/broker rate limit during navigation.
   }, [symbolsKey, user?.client_id, replayIsActive, handleTick]);
 
   useEffect(() => {

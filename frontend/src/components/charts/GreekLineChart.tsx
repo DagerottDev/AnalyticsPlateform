@@ -3,9 +3,9 @@
 import { useEffect, useRef } from "react";
 import { createChart, type IChartApi, type ISeriesApi, type Time } from "lightweight-charts";
 import { calculateBollingerBands, calculateEMA, calculateSMA, type OHLCVData } from "@/lib/indicators";
+import { MARKET_CHART_LOCALIZATION, formatMarketTick } from "@/lib/chartTime";
 import type { GreekPoint } from "@/lib/strikeGreekAnalysis";
 
-const COLORS = ["#2962ff", "#ff9800", "#ab47bc", "#00bcd4", "#66bb6a", "#ef5350"];
 const GRID = "#1e222d";
 const BORDER = "#2a2e3e";
 const TEXT = "#787b86";
@@ -13,20 +13,31 @@ const TEXT = "#787b86";
 export type GreekOverlay = "none" | "sma" | "ema" | "bbands";
 
 interface GreekLineChartProps {
-  series: Record<string, GreekPoint[]>;
-  focusSymbol: string;
+  points: GreekPoint[];
   overlay: GreekOverlay;
   overlayPeriod: number;
   bollingerMultiplier: number;
 }
 
+function normalizePoints(points: GreekPoint[]): GreekPoint[] {
+  const valuesBySecond = new Map<number, number>();
+  for (const point of points) {
+    const time = new Date(point.time).getTime();
+    if (!Number.isFinite(point.value) || !Number.isFinite(time)) continue;
+    valuesBySecond.set(Math.floor(time / 1000), point.value);
+  }
+  return Array.from(valuesBySecond, ([time, value]) => ({
+    time: new Date(time * 1000).toISOString(),
+    value,
+  })).sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime());
+}
+
 function toChartData(points: GreekPoint[]) {
-  return points
-    .filter((point) => Number.isFinite(point.value) && Number.isFinite(new Date(point.time).getTime()))
+  return normalizePoints(points)
     .map((point) => ({ time: (new Date(point.time).getTime() / 1000) as Time, value: point.value }));
 }
 
-export function GreekLineChart({ series, focusSymbol, overlay, overlayPeriod, bollingerMultiplier }: GreekLineChartProps) {
+export function GreekLineChart({ points, overlay, overlayPeriod, bollingerMultiplier }: GreekLineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const lineRefs = useRef<ISeriesApi<"Line">[]>([]);
@@ -39,7 +50,8 @@ export function GreekLineChart({ series, focusSymbol, overlay, overlayPeriod, bo
       layout: { background: { color: "transparent" }, textColor: TEXT },
       grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
       rightPriceScale: { borderColor: BORDER },
-      timeScale: { borderColor: BORDER, timeVisible: true, secondsVisible: false },
+      timeScale: { borderColor: BORDER, timeVisible: true, secondsVisible: false, tickMarkFormatter: formatMarketTick },
+      localization: MARKET_CHART_LOCALIZATION,
       crosshair: { mode: 1 },
     });
     chartRef.current = chart;
@@ -56,19 +68,17 @@ export function GreekLineChart({ series, focusSymbol, overlay, overlayPeriod, bo
     lineRefs.current.forEach((line) => chart.removeSeries(line));
     lineRefs.current = [];
 
-    Object.entries(series).forEach(([symbol, points], index) => {
-      const line = chart.addLineSeries({
-        color: COLORS[index % COLORS.length],
-        lineWidth: symbol === focusSymbol ? 3 : 2,
-        title: symbol,
-        lastValueVisible: true,
-      });
-      line.setData(toChartData(points));
-      lineRefs.current.push(line);
+    const normalizedPoints = normalizePoints(points);
+    const combined = chart.addLineSeries({
+      color: "#2962ff",
+      lineWidth: 3,
+      title: "Combined",
+      lastValueVisible: true,
     });
+    combined.setData(toChartData(normalizedPoints));
+    lineRefs.current.push(combined);
 
-    const focusPoints = series[focusSymbol] ?? [];
-    const ohlcv: OHLCVData[] = focusPoints.map((point) => ({
+    const ohlcv: OHLCVData[] = normalizedPoints.map((point) => ({
       time: point.time,
       open: point.value,
       high: point.value,
@@ -92,7 +102,7 @@ export function GreekLineChart({ series, focusSymbol, overlay, overlayPeriod, bo
       lineRefs.current.push(upper, lower);
     }
     chart.timeScale().fitContent();
-  }, [series, focusSymbol, overlay, overlayPeriod, bollingerMultiplier]);
+  }, [points, overlay, overlayPeriod, bollingerMultiplier]);
 
   return <div ref={containerRef} className="h-[290px] w-full" aria-label="Selected option Greek chart" />;
 }

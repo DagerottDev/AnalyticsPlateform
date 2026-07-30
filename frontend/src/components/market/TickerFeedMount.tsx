@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { getWebSocket } from "@/lib/websocket";
-import { getMarketQuotes } from "@/lib/market";
 import { useAuth } from "@/hooks/useAuth";
 import { useTickerStore } from "@/stores/tickerStore";
 import { useTickStore } from "@/stores/tickStore";
@@ -48,13 +47,9 @@ export function TickerFeedMount() {
     const addedSymbols = tickers.filter((s) => !prevSymbols.current.includes(s));
     if (addedSymbols.length > 0) {
       ws.subscribeMany(addedSymbols, handleTick);
-      getMarketQuotes(addedSymbols)
-        .then((res) => {
-          if (Array.isArray(res.quotes)) {
-            useTickStore.getState().setTicks(res.quotes);
-          }
-        })
-        .catch(() => {});
+      // The shared websocket sends an immediate broker snapshot and keeps a
+      // per-session fallback poll running. Do not duplicate it with a REST
+      // request for every mount/navigation.
     }
 
     prevSymbols.current = tickers;

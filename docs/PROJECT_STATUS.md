@@ -11,6 +11,8 @@ Current Milestone:
 - Option Chain now supports selecting up to ten individual call/put contracts and opening a shareable analysis workspace in a new window or tab.
 - The full-width workspace compares Core Greeks (Delta, Gamma, Theta, Vega, Rho), higher-order Greeks (Vanna, Vomma, Charm, Speed, Color, Zomma, Ultima), and a selectable Greek-ratio chart against a base contract.
 - Each visible Greek chart has its own focused contract and SMA, EMA, or Bollinger overlay. Durable server-side threshold alerts can be created for every supported individual option Greek directly from its chart.
+- Contextual Info controls explain contract selection, dashboard aggregation, each Greek, overlays, and alert behaviour, with direct links to Options Industry Council learning material and glossary definitions.
+- The workspace also has a desktop left-side, collapsible learning rail that explains the end-to-end workflow without reintroducing application navigation.
 
 ## Resilience & confidence quality pass (2026-07-30)
 

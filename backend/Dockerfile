@@ -17,7 +17,20 @@ COPY pyproject.toml poetry.lock* ./
 
 # Install dependencies (no dev dependencies in production)
 RUN poetry config virtualenvs.in-project true && \
-    poetry install --no-interaction --no-ansi --without dev
+    poetry install --no-interaction --no-ansi --without dev --no-root
+
+# Development image. docker-compose.dev.yml bind-mounts the backend source
+# and keeps this virtual environment in a named volume, allowing Uvicorn's
+# reloader to restart only the API process after a Python save.
+FROM builder AS development
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+EXPOSE 8000
+
+CMD ["poetry", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
 
 # Stage 2: Production image
 FROM python:3.12-slim AS production

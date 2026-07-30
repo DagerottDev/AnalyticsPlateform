@@ -35,19 +35,32 @@ async def test_rate_limit_returns_429_and_retry_headers() -> None:
     assert first.headers["x-ratelimit-remaining"] == "1"
     assert blocked.status_code == 429
     assert blocked.json()["error_type"] == "rate_limit_exceeded"
+    assert blocked.json()["retry_after_seconds"] == int(blocked.headers["retry-after"])
     assert int(blocked.headers["retry-after"]) > 0
 
 
 @pytest.mark.asyncio
-async def test_broker_bucket_is_stricter_and_health_is_exempt() -> None:
+async def test_quote_snapshots_have_a_separate_budget_from_broker_reads() -> None:
     app = FastAPI()
     app.add_middleware(
         RateLimitMiddleware,
-        settings=Settings(api_rate_limit_broker_requests=1, api_rate_limit_default_requests=1),
+        settings=Settings(
+            api_rate_limit_broker_requests=1,
+            api_rate_limit_quote_requests=2,
+            api_rate_limit_default_requests=1,
+        ),
     )
 
     @app.get("/api/v1/market/quotes")
     async def quotes() -> dict[str, bool]:
+        return {"ok": True}
+
+    @app.get("/api/v1/market/history")
+    async def history() -> dict[str, bool]:
+        return {"ok": True}
+
+    @app.get("/api/v1/market/symbols/search")
+    async def symbol_search() -> dict[str, bool]:
         return {"ok": True}
 
     @app.get("/api/v1/health")
@@ -57,7 +70,12 @@ async def test_broker_bucket_is_stricter_and_health_is_exempt() -> None:
     transport = ASGITransport(app=app, client=("198.51.100.2", 50000))
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         assert (await client.get("/api/v1/market/quotes")).status_code == 200
+        assert (await client.get("/api/v1/market/quotes")).status_code == 200
         assert (await client.get("/api/v1/market/quotes")).status_code == 429
+        assert (await client.get("/api/v1/market/history")).status_code == 200
+        assert (await client.get("/api/v1/market/history")).status_code == 429
+        # Static autocomplete uses the normal API bucket, not broker quota.
+        assert (await client.get("/api/v1/market/symbols/search")).status_code == 200
         assert (await client.get("/api/v1/health")).status_code == 200
         assert (await client.get("/api/v1/health")).status_code == 200
 
