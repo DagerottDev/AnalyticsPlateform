@@ -52,6 +52,7 @@ const navigation: NavGroup[] = [
     title: "Analytics",
     items: [
       { icon: LineChart, label: "Charts", href: "/charts" },
+      { icon: BarChart3, label: "Open Interest", href: "/open-interest" },
       { icon: Waves, label: "Volatility", href: "/volatility" },
       { icon: Search, label: "IV Screener", href: "/volatility/screener" },
       { icon: BarChart3, label: "Relative Value", href: "/relative-value" },

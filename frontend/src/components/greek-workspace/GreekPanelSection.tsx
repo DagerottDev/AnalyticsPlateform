@@ -12,12 +12,15 @@ interface GreekPanelSectionProps {
   panelLayoutFor: (metric: GreekMetric) => GreekPanelLayout;
   onLayoutChange: (metric: GreekMetric, layout: GreekPanelLayout) => void;
   onRequestAlert: (metric: GreekMetric) => void;
+  syncIdPrefix: string;
+  alertsDisabled?: boolean;
+  alertDisabledReason?: string;
 }
 
 /** Renders one grid of Greek chart cards for whichever metric list the
  * caller passes in (the Featured row, the active Core/Higher-order tab). */
 export function GreekPanelSection({
-  metrics, visibleGreeks, greekSeries, liveContracts, totalContracts, panelLayoutFor, onLayoutChange, onRequestAlert,
+  metrics, visibleGreeks, greekSeries, liveContracts, totalContracts, panelLayoutFor, onLayoutChange, onRequestAlert, syncIdPrefix, alertsDisabled, alertDisabledReason,
 }: GreekPanelSectionProps) {
   const visible = metrics.filter((metric) => visibleGreeks.includes(metric));
   if (visible.length === 0) return null;
@@ -33,8 +36,11 @@ export function GreekPanelSection({
           liveContracts={liveContracts}
           totalContracts={totalContracts}
           layout={panelLayoutFor(metric)}
+          syncId={`${syncIdPrefix}-${metric}`}
           onLayoutChange={(layout) => onLayoutChange(metric, layout)}
           onRequestAlert={onRequestAlert}
+          alertsDisabled={alertsDisabled}
+          alertDisabledReason={alertDisabledReason}
           featured={FEATURED_GREEKS.includes(metric)}
         />
       ))}

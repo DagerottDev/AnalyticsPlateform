@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useReplayStore } from "@/stores/replayStore";
 import { buildReplaySession, enrichReplaySessionWithRealPrices, startPlayback, stopPlayback } from "@/lib/replayEngine";
@@ -13,6 +13,7 @@ import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { History, PlayCircle, Settings2, AlertTriangle } from "lucide-react";
+import type { Instrument } from "@/types/market";
 
 function yesterday(): string {
   const d = new Date();
@@ -28,6 +29,17 @@ function isWeekend(isoDate: string): boolean {
   return dayOfWeek === 0 || dayOfWeek === 6;
 }
 
+// Used only when a contract has no broker price for the replay date. These
+// conservative index-specific starting points are preferable to one fixed
+// number (especially for the more volatile banking and mid-cap indices).
+const DEFAULT_FALLBACK_IV_PERCENT: Record<string, number> = {
+  NIFTY: 14,
+  BANKNIFTY: 18,
+  FINNIFTY: 17,
+  MIDCPNIFTY: 20,
+  SENSEX: 15,
+};
+
 export default function ReplayPage() {
   const {
     isActive,
@@ -35,18 +47,98 @@ export default function ReplayPage() {
     setIsPlaying,
     setSymbol,
     setSessionDate: setStoreSessionDate,
+    setExpiry: setStoreExpiry,
+    setStrike: setStoreStrike,
+    setOptionSide: setStoreOptionSide,
+    setSpeedMultiplier,
     priceCoverage,
     setPriceCoverage,
     reset,
   } = useReplayStore();
+  const replayPreferences = useSettingsStore((state) => state.replay);
 
   const [targetSymbol, setTargetSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
+  const riskFreeRate = useSettingsStore((state) => (
+    (state.analytics.riskFreeRatePercent[targetSymbol] ?? state.analytics.riskFreeRatePercent.DEFAULT ?? 10) / 100
+  ));
+  const [availableInstruments, setAvailableInstruments] = useState<Instrument[]>([]);
+  const [isLoadingInstruments, setIsLoadingInstruments] = useState(false);
+  const [instrumentError, setInstrumentError] = useState<string | null>(null);
+  const [selectedExpiry, setSelectedExpiry] = useState("");
+  const [selectedStrike, setSelectedStrike] = useState("");
+  const [optionSide, setOptionSide] = useState<"BOTH" | "CE" | "PE">(() => replayPreferences.optionSide);
   const [sessionDate, setSessionDate] = useState(yesterday());
-  const [resolution, setResolution] = useState("1");
-  const [volatility, setVolatility] = useState("15"); // used to price options off the real spot path
+  const [resolution, setResolution] = useState(() => replayPreferences.resolution);
+  const [fallbackIv, setFallbackIv] = useState(() => String(replayPreferences.fallbackIvPercent[useSettingsStore.getState().defaultSymbol] ?? replayPreferences.fallbackIvPercent.DEFAULT ?? DEFAULT_FALLBACK_IV_PERCENT[useSettingsStore.getState().defaultSymbol] ?? 15));
   const [isGenerating, setIsGenerating] = useState(false);
   const [loadingLabel, setLoadingLabel] = useState("Loading Historical Data...");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    setIsLoadingInstruments(true);
+    setInstrumentError(null);
+    setAvailableInstruments([]);
+    setSelectedExpiry("");
+    setSelectedStrike("");
+
+    getInstruments(targetSymbol)
+      .then((response) => {
+        if (!mounted) return;
+        setAvailableInstruments(response.instruments);
+        const firstExpiry = response.instruments
+          .map((instrument) => instrument.expiry)
+          .filter((expiry): expiry is string => Boolean(expiry))
+          .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0] ?? "";
+        setSelectedExpiry(firstExpiry);
+      })
+      .catch((cause) => {
+        if (!mounted) return;
+        setInstrumentError(formatApiError(cause) || "Failed to load option expiries and strikes.");
+      })
+      .finally(() => {
+        if (mounted) setIsLoadingInstruments(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [targetSymbol]);
+
+  useEffect(() => {
+    setFallbackIv(String(replayPreferences.fallbackIvPercent[targetSymbol] ?? replayPreferences.fallbackIvPercent.DEFAULT ?? DEFAULT_FALLBACK_IV_PERCENT[targetSymbol] ?? 15));
+  }, [replayPreferences.fallbackIvPercent, targetSymbol]);
+
+  const expiries = useMemo(
+    () => Array.from(new Set(availableInstruments.map((instrument) => instrument.expiry).filter((value): value is string => Boolean(value))))
+      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime()),
+    [availableInstruments]
+  );
+
+  const expiryInstruments = useMemo(
+    () => availableInstruments.filter((instrument) => instrument.expiry === selectedExpiry),
+    [availableInstruments, selectedExpiry]
+  );
+
+  const strikes = useMemo(
+    () => Array.from(new Set(expiryInstruments.map((instrument) => instrument.strike).filter((value): value is number => value !== null)))
+      .sort((a, b) => a - b),
+    [expiryInstruments]
+  );
+
+  useEffect(() => {
+    if (!strikes.some((strike) => String(strike) === selectedStrike)) {
+      setSelectedStrike(strikes.length > 0 ? String(strikes[Math.floor(strikes.length / 2)]) : "");
+    }
+  }, [selectedStrike, strikes]);
+
+  const selectedInstruments = useMemo(
+    () => expiryInstruments.filter((instrument) =>
+      String(instrument.strike) === selectedStrike &&
+      (optionSide === "BOTH" || instrument.option_type === optionSide)
+    ),
+    [expiryInstruments, optionSide, selectedStrike]
+  );
 
   const handleStart = async () => {
     setError(null);
@@ -54,19 +146,34 @@ export default function ReplayPage() {
       setError("Selected date is a weekend — the market was closed. Pick a weekday.");
       return;
     }
+    const fallbackVolatility = Number(fallbackIv) / 100;
+    if (!Number.isFinite(fallbackVolatility) || fallbackVolatility <= 0 || fallbackVolatility > 3) {
+      setError("Fallback IV must be greater than 0% and no more than 300%.");
+      return;
+    }
     setIsGenerating(true);
     setLoadingLabel("Loading Historical Data...");
     try {
-      // 1. Fetch the real instruments list so we have valid strikes to price
-      const [instrumentData, candles] = await Promise.all([
-        getInstruments(targetSymbol),
-        getHistoricalCandles(targetSymbol, sessionDate, sessionDate, resolution),
-      ]);
+      // 1. Refresh the instruments list and restrict the replay to the
+      // explicitly selected expiry, strike, and option side.
+      const instrumentData = await getInstruments(targetSymbol);
 
       if (!instrumentData || instrumentData.instruments.length === 0) {
         setError("Failed to fetch instruments for symbol.");
         return;
       }
+
+      const replayInstruments = instrumentData.instruments.filter((instrument) =>
+        instrument.expiry === selectedExpiry &&
+        String(instrument.strike) === selectedStrike &&
+        (optionSide === "BOTH" || instrument.option_type === optionSide)
+      );
+      if (replayInstruments.length === 0) {
+        setError("Select a valid expiry, strike, and option side before starting replay.");
+        return;
+      }
+
+      const candles = await getHistoricalCandles(targetSymbol, sessionDate, sessionDate, resolution);
       if (!candles || candles.length === 0) {
         setError("No historical data returned for this date (market may have been closed).");
         return;
@@ -77,8 +184,9 @@ export default function ReplayPage() {
       const { allTicks } = buildReplaySession(
         targetSymbol,
         candles,
-        instrumentData.instruments,
-        Number(volatility) / 100
+        replayInstruments,
+        fallbackVolatility,
+        riskFreeRate,
       );
 
       // 3. Try to replace near-the-money contracts on the nearest expiry with
@@ -88,7 +196,7 @@ export default function ReplayPage() {
       const coverage = await enrichReplaySessionWithRealPrices(
         targetSymbol,
         allTicks,
-        instrumentData.instruments,
+        replayInstruments,
         sessionDate,
         resolution
       );
@@ -97,6 +205,10 @@ export default function ReplayPage() {
       // 4. Setup Store and Start
       setSymbol(targetSymbol);
       setStoreSessionDate(sessionDate);
+      setStoreExpiry(selectedExpiry);
+      setStoreStrike(Number(selectedStrike));
+      setStoreOptionSide(optionSide);
+      setSpeedMultiplier(replayPreferences.speedMultiplier);
       setIsActive(true);
       setIsPlaying(true);
 
@@ -143,7 +255,7 @@ export default function ReplayPage() {
               </p>
               {priceCoverage && priceCoverage.attempted > 0 && (
                 <p className="mx-auto mt-2 max-w-md text-xs text-[var(--color-text-muted)]">
-                  {priceCoverage.matched} of {priceCoverage.attempted} near-the-money contracts are using{" "}
+                  {priceCoverage.matched} of {priceCoverage.attempted} selected contracts are using{" "}
                   <b className="text-[var(--color-text-secondary)]">real broker prices</b>; the rest (and everything
                   further from the money) are modeled with Black-Scholes.
                 </p>
@@ -182,8 +294,50 @@ export default function ReplayPage() {
               </div>
 
               <div className="flex flex-col gap-2">
+                <label className="text-sm text-[var(--color-text-muted)]">Option Expiry</label>
+                <Select
+                  value={selectedExpiry}
+                  onChange={(event) => setSelectedExpiry(event.target.value)}
+                  disabled={isLoadingInstruments || expiries.length === 0}
+                >
+                  {expiries.length === 0 ? (
+                    <option value="">{isLoadingInstruments ? "Loading expiries…" : "No expiry available"}</option>
+                  ) : expiries.map((expiry) => (
+                    <option key={expiry} value={expiry}>{expiry}</option>
+                  ))}
+                </Select>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-sm text-[var(--color-text-muted)]">Option Strike</label>
+                <Select
+                  value={selectedStrike}
+                  onChange={(event) => setSelectedStrike(event.target.value)}
+                  disabled={isLoadingInstruments || strikes.length === 0}
+                >
+                  {strikes.length === 0 ? (
+                    <option value="">{isLoadingInstruments ? "Loading strikes…" : "No strike available"}</option>
+                  ) : strikes.map((strike) => (
+                    <option key={strike} value={strike}>{strike.toLocaleString("en-IN")}</option>
+                  ))}
+                </Select>
+                <span className="text-[11px] text-[var(--color-text-muted)]">
+                  {selectedInstruments.length} contract{selectedInstruments.length === 1 ? "" : "s"} will be replayed.
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-sm text-[var(--color-text-muted)]">Option Side</label>
+                <Select value={optionSide} onChange={(event) => setOptionSide(event.target.value as "BOTH" | "CE" | "PE")}>
+                  <option value="BOTH">Call + Put</option>
+                  <option value="CE">Call (CE)</option>
+                  <option value="PE">Put (PE)</option>
+                </Select>
+              </div>
+
+              <div className="flex flex-col gap-2">
                 <label className="text-sm text-[var(--color-text-muted)]">Candle Resolution</label>
-                <Select value={resolution} onChange={e => setResolution(e.target.value)}>
+                <Select value={resolution} onChange={e => setResolution(e.target.value as typeof resolution)}>
                   <option value="1">1 Minute</option>
                   <option value="5">5 Minute</option>
                   <option value="15">15 Minute</option>
@@ -191,23 +345,31 @@ export default function ReplayPage() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-sm text-[var(--color-text-muted)]">Model Volatility (IV %)</label>
+                <label className="text-sm text-[var(--color-text-muted)]">Fallback IV for Modeled Contracts (%)</label>
                 <Input
                   type="number"
-                  value={volatility}
-                  onChange={e => setVolatility(e.target.value)}
+                  min="0.01"
+                  max="300"
+                  step="0.1"
+                  value={fallbackIv}
+                  onChange={e => setFallbackIv(e.target.value)}
                 />
+                <span className="text-[11px] text-[var(--color-text-muted)]">
+                  Defaults by underlying; used only when historical option prices are unavailable.
+                </span>
               </div>
             </div>
+
+            {instrumentError && <p className="text-sm text-[var(--color-loss)]">{instrumentError}</p>}
 
             <div className="flex gap-3 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-hover)] p-4 text-sm text-[var(--color-text-secondary)]">
               <AlertTriangle className="h-5 w-5 shrink-0 text-[var(--color-status-warning)]" />
               <p>
                 This mode will disconnect your live broker WebSocket feed and instead replay real historical candles
                 for the chosen date. The underlying price path is always real broker data. For near-the-money
-                contracts on the nearest expiry, option prices are also fetched as real historical data from the
-                broker where available; everything else (further strikes, or contracts the broker has no history
-                for) falls back to a Black-Scholes model off the real spot, at the volatility above.
+                contracts, option prices are also fetched as real historical data from the broker where available;
+                contracts the broker has no history for fall back to a Black-Scholes model off the real spot, at the
+                fallback IV above.
                 <br /><br />
                 <b>All dashboards will render this replayed session until stopped.</b>
               </p>

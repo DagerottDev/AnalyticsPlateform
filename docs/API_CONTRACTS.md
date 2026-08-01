@@ -75,6 +75,32 @@ Logout. Requires Bearer token. Client should discard token.
 
 ---
 
+## User settings
+
+Settings are non-sensitive UI and analytics defaults owned by the authenticated
+broker client. Alert-delivery secrets remain on `/alerts/delivery-settings`.
+
+### GET `/settings`
+
+Returns the normalized settings document and `persisted`; a client with no
+saved profile receives defaults with `persisted: false`.
+
+### PUT `/settings`
+
+Replaces the full typed settings document. Fields use camelCase and include
+appearance/general/notifications/chart, option-chain, Greek-workspace, replay,
+analytics, strategy, and alert defaults. Unknown fields, invalid enums,
+indicator bounds, duplicate metrics, invalid symbols, and watchlists longer
+than twenty entries return `422`.
+
+### DELETE `/settings`
+
+Deletes only the generic settings profile and returns defaults. It does not
+delete encrypted alert-delivery channels, broker credentials, sessions, or
+orders.
+
+---
+
 ## Market Data
 
 Requires Bearer token and an active broker session (established via `/auth/login`).
@@ -232,6 +258,47 @@ Current IV Rank (IVR) and IV Percentile (IVP), derived from the 1Y historical se
   "data_points": 252
 }
 ```
+
+---
+
+## Basket orders
+
+### POST `/orders/basket`
+
+Live-only multi-leg market entry. Each leg accepts `stop_loss` and
+`target_price` as option premium prices. `combined_stop_loss` and
+`combined_take_profit` are positive ₹ P&L thresholds for the entire basket.
+The response reports `PendingEntry` after broker acceptance; the server arms
+the protective stop only after it confirms a fill. The former per-leg
+`take_profit` field remains accepted only as a legacy ₹ P&L target.
+
+---
+
+## GTT orders
+
+### `POST /orders/gtt`
+
+Creates a single conditional option-entry order. It accepts `symbol`, `quantity`,
+`side`, `product_type`, `execution_type` (`MARKET` or `LIMIT`), `trigger_price`,
+`limit_price`, and timezone-aware `expires_at`. The trigger lifetime is separate
+from the exchange order's DAY validity after triggering. `GET /orders/gtt` lists
+the authenticated owner's records and `DELETE /orders/gtt/{id}` cancels a pending
+record.
+
+Fyers GTTs are evaluated by the server while the active owner session is present;
+Dhan uses a native Forever Order and the platform cancels it at `expires_at`.
+
+---
+
+## Analysis workspace URLs
+
+`/chain/analysis` and `/chain/premium-analysis` accept `symbol`, `expiry`, and
+fixed broker contracts in `contracts` (comma-separated). They also accept an
+optional validated `dynamic` parameter for rolling option descriptors:
+`CE:ATM:0`, `CE:OTM:1` through `CE:OTM:5`, `CE:ITM:1` through `CE:ITM:5`,
+and the corresponding `PE` values. Invalid descriptors are ignored. Dynamic
+descriptors resolve to the active expiry's strike ladder on each historical
+underlying candle and current live spot tick.
 
 ---
 

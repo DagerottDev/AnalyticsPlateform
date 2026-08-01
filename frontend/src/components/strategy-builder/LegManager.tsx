@@ -29,6 +29,7 @@ interface LegManagerProps {
   currentExpiry: string | null;
   lotSize: number;
   spot: number;
+  defaultPreset?: StrategyPresetName;
 }
 
 const ALL_PRESETS: StrategyPresetName[] = [...SINGLE_EXPIRY_PRESETS, ...MULTI_EXPIRY_PRESETS];
@@ -39,9 +40,10 @@ export function LegManager({
   availableInstruments,
   currentExpiry,
   lotSize,
-  spot
+  spot,
+  defaultPreset = "Iron Condor",
 }: LegManagerProps) {
-  const [selectedPreset, setSelectedPreset] = useState<StrategyPresetName>("Iron Condor");
+  const [selectedPreset, setSelectedPreset] = useState<StrategyPresetName>(defaultPreset);
 
   const loadPreset = () => {
     if (!currentExpiry) return;

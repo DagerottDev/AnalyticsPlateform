@@ -2,21 +2,23 @@
 
 import { useEffect, useRef } from "react";
 import { createChart, type IChartApi, type ISeriesApi, type Time } from "lightweight-charts";
-import { calculateBollingerBands, calculateEMA, calculateSMA, type OHLCVData } from "@/lib/indicators";
+import { calculateBollingerBands, calculateEMA, calculateSMA, calculateSupertrend, type OHLCVData } from "@/lib/indicators";
 import { MARKET_CHART_LOCALIZATION, formatMarketTick } from "@/lib/chartTime";
+import { useGreekChartSync } from "@/components/greek-workspace/GreekChartSyncProvider";
 import type { GreekPoint } from "@/lib/strikeGreekAnalysis";
 
 const GRID = "#1e222d";
 const BORDER = "#2a2e3e";
 const TEXT = "#787b86";
 
-export type GreekOverlay = "none" | "sma" | "ema" | "bbands";
+export type GreekOverlay = "none" | "sma" | "ema" | "bbands" | "supertrend";
 
 interface GreekLineChartProps {
   points: GreekPoint[];
   overlay: GreekOverlay;
   overlayPeriod: number;
   bollingerMultiplier: number;
+  syncId: string;
 }
 
 function normalizePoints(points: GreekPoint[]): GreekPoint[] {
@@ -37,10 +39,11 @@ function toChartData(points: GreekPoint[]) {
     .map((point) => ({ time: (new Date(point.time).getTime() / 1000) as Time, value: point.value }));
 }
 
-export function GreekLineChart({ points, overlay, overlayPeriod, bollingerMultiplier }: GreekLineChartProps) {
+export function GreekLineChart({ points, overlay, overlayPeriod, bollingerMultiplier, syncId }: GreekLineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const lineRefs = useRef<ISeriesApi<"Line">[]>([]);
+  const { registerChart, notifyTimeRange } = useGreekChartSync();
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -55,16 +58,24 @@ export function GreekLineChart({ points, overlay, overlayPeriod, bollingerMultip
       crosshair: { mode: 1 },
     });
     chartRef.current = chart;
+    const onVisibleTimeRangeChange = (range: Parameters<typeof notifyTimeRange>[1]) => {
+      notifyTimeRange(syncId, range);
+    };
+    chart.timeScale().subscribeVisibleTimeRangeChange(onVisibleTimeRangeChange);
+    const unregisterChart = registerChart(syncId, chart);
     return () => {
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(onVisibleTimeRangeChange);
+      unregisterChart();
       chart.remove();
       chartRef.current = null;
       lineRefs.current = [];
     };
-  }, []);
+  }, [notifyTimeRange, registerChart, syncId]);
 
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
+    const visibleRange = chart.timeScale().getVisibleRange();
     lineRefs.current.forEach((line) => chart.removeSeries(line));
     lineRefs.current = [];
 
@@ -100,8 +111,21 @@ export function GreekLineChart({ points, overlay, overlayPeriod, bollingerMultip
       upper.setData(bands.map((point) => ({ time: (new Date(String(point.time)).getTime() / 1000) as Time, value: point.upper })));
       lower.setData(bands.map((point) => ({ time: (new Date(String(point.time)).getTime() / 1000) as Time, value: point.lower })));
       lineRefs.current.push(upper, lower);
+    } else if (overlay === "supertrend") {
+      const line = chart.addLineSeries({
+        color: "#00bcd4",
+        lineWidth: 2,
+        lineStyle: 2,
+        title: `Supertrend ${overlayPeriod} × ${bollingerMultiplier}`,
+      });
+      line.setData(calculateSupertrend(ohlcv, overlayPeriod, bollingerMultiplier).map((point) => ({
+        time: (new Date(String(point.time)).getTime() / 1000) as Time,
+        value: point.value,
+      })));
+      lineRefs.current.push(line);
     }
-    chart.timeScale().fitContent();
+    if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
+    else chart.timeScale().fitContent();
   }, [points, overlay, overlayPeriod, bollingerMultiplier]);
 
   return <div ref={containerRef} className="h-[290px] w-full" aria-label="Selected option Greek chart" />;

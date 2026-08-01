@@ -18,6 +18,9 @@ interface ReplayState {
   currentTicks: ReplayTickMap;
   symbol: string;
   sessionDate: string;
+  expiry: string;
+  strike: number | null;
+  optionSide: "BOTH" | "CE" | "PE";
   /** How many near-the-money contracts ended up with real broker prices vs.
    * modeled ones for this session — null until a session has been built. */
   priceCoverage: ReplayPriceCoverage | null;
@@ -29,6 +32,9 @@ interface ReplayState {
   setCurrentTicks: (ticks: ReplayTickMap) => void;
   setSymbol: (sym: string) => void;
   setSessionDate: (date: string) => void;
+  setExpiry: (expiry: string) => void;
+  setStrike: (strike: number | null) => void;
+  setOptionSide: (side: "BOTH" | "CE" | "PE") => void;
   setPriceCoverage: (coverage: ReplayPriceCoverage | null) => void;
   reset: () => void;
 }
@@ -41,6 +47,9 @@ export const useReplayStore = create<ReplayState>((set) => ({
   currentTicks: {},
   symbol: "",
   sessionDate: "",
+  expiry: "",
+  strike: null,
+  optionSide: "BOTH",
   priceCoverage: null,
 
   setIsActive: (active) => set({ isActive: active }),
@@ -50,6 +59,9 @@ export const useReplayStore = create<ReplayState>((set) => ({
   setCurrentTicks: (ticks) => set({ currentTicks: ticks }),
   setSymbol: (sym) => set({ symbol: sym }),
   setSessionDate: (date) => set({ sessionDate: date }),
+  setExpiry: (expiry) => set({ expiry }),
+  setStrike: (strike) => set({ strike }),
+  setOptionSide: (optionSide) => set({ optionSide }),
   setPriceCoverage: (coverage) => set({ priceCoverage: coverage }),
   reset: () => set({
     isActive: false,
@@ -59,6 +71,9 @@ export const useReplayStore = create<ReplayState>((set) => ({
     currentTicks: {},
     symbol: "",
     sessionDate: "",
+    expiry: "",
+    strike: null,
+    optionSide: "BOTH",
     priceCoverage: null,
   }),
 }));

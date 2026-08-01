@@ -1,16 +1,20 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
-import { Instrument } from "@/types/market";
-import { getInstruments } from "@/lib/market";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
+import { Instrument, MarketTick } from "@/types/market";
+import { getInstruments, getMarketQuotes } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
+import { useNseMarketSession } from "@/hooks/useNseMarketSession";
+import { useReplayStore } from "@/stores/replayStore";
 import { formatApiError } from "@/lib/apiError";
 import { cn, formatINR } from "@/lib/utils";
-import { BarChart3, Check, Download, ShoppingCart, Settings2, TrendingUp } from "lucide-react";
+import { BarChart3, Check, Download, Plus, ShoppingCart, Settings2, TrendingDown, TrendingUp, X } from "lucide-react";
 import { BuyTicketModal } from "@/components/market/BuyTicketModal";
+import { BasketOrderModal } from "@/components/market/BasketOrderModal";
+import { BasketLegDraft, BasketRiskDraft, orderBasketLegsForMargin } from "@/lib/basket";
 import { calculateImpliedVolatility, calculateGreeks, Greeks } from "@/lib/greeks";
 import { classifyBuildup } from "@/lib/buildup";
-import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
+import { timeToExpiry, nearestStrikeTo, defaultSpotFallback } from "@/lib/optionMath";
 import {
   filterOptionChainStrikes,
   MoneynessFilter,
@@ -25,9 +29,38 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { EducationPopover } from "@/components/ui/EducationPopover";
 import { DataFreshness } from "@/components/market/DataFreshness";
+import { useSettingsStore } from "@/stores/settingsStore";
+import {
+  dynamicSelection,
+  dynamicSelectionLabel,
+  fixedSelection,
+  MAX_ANALYSIS_SELECTIONS,
+  serializeDynamicSelections,
+  type AnalysisSelection,
+  type DynamicMoneyness,
+} from "@/lib/analysisSelections";
 
-const REFRESH_INTERVAL_MS = 30_000;
-const MAX_ANALYSIS_CONTRACTS = 10;
+const MAX_ANALYSIS_CONTRACTS = MAX_ANALYSIS_SELECTIONS;
+type TicketSide = "Buy" | "Sell";
+
+/**
+ * Outside regular hours, some broker quote responses expose an indicative or
+ * stale `last_price` while `prev_close_price` is the official closing value.
+ * The option chain is a closing snapshot in that state, so use the close for
+ * LTP, ATM ordering, IV, and Greeks and avoid carrying an intraday change.
+ */
+export function toClosedMarketQuote(quote: MarketTick): MarketTick {
+  const previousClose = quote.prev_close_price;
+  if (typeof previousClose !== "number" || !Number.isFinite(previousClose) || previousClose <= 0) {
+    return quote;
+  }
+  return {
+    ...quote,
+    last_price: previousClose,
+    change: 0,
+    change_percent: 0,
+  };
+}
 
 interface OptionChainProps {
   symbol: string;
@@ -35,20 +68,34 @@ interface OptionChainProps {
 }
 
 export function OptionChain({ symbol, expiry }: OptionChainProps) {
+  const optionChainPreferences = useSettingsStore((state) => state.optionChain);
+  const refreshMilliseconds = useSettingsStore((state) => state.charts.refreshSeconds * 1000);
+  const riskFreeRate = useSettingsStore((state) => (
+    (state.analytics.riskFreeRatePercent[symbol] ?? state.analytics.riskFreeRatePercent.DEFAULT ?? 10) / 100
+  ));
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showGreeks, setShowGreeks] = useState(true);
-  const [showBuildup, setShowBuildup] = useState(true);
-  const [moneyness, setMoneyness] = useState<MoneynessFilter>("all");
+  const [showGreeks, setShowGreeks] = useState(() => optionChainPreferences.showGreeks);
+  const [showBuildup, setShowBuildup] = useState(() => optionChainPreferences.showBuildup);
+  const [moneyness, setMoneyness] = useState<MoneynessFilter>(() => optionChainPreferences.moneyness);
   // Start with every broker-provided strike. Traders can narrow this range
   // explicitly, but the default must not hide most of an otherwise complete
   // option chain.
-  const [strikesEachSide, setStrikesEachSide] = useState<number | null>(null);
+  const [strikesEachSide, setStrikesEachSide] = useState<number | null>(() => optionChainPreferences.strikesEachSide);
   const [previousOiBySymbol, setPreviousOiBySymbol] = useState<Map<string, number>>(new Map());
-  const [selectedAnalysisSymbols, setSelectedAnalysisSymbols] = useState<string[]>([]);
-  const [buyTarget, setBuyTarget] = useState<Instrument | null>(null);
+  const [analysisSelections, setAnalysisSelections] = useState<AnalysisSelection[]>([]);
+  const [dynamicOptionType, setDynamicOptionType] = useState<"CE" | "PE">("CE");
+  const [dynamicMoneyness, setDynamicMoneyness] = useState<DynamicMoneyness>("ATM");
+  const [dynamicOffset, setDynamicOffset] = useState(1);
+  const [orderTarget, setOrderTarget] = useState<{ instrument: Instrument; side: TicketSide } | null>(null);
+  const [basketLegs, setBasketLegs] = useState<BasketLegDraft[]>([]);
+  const [basketRisk, setBasketRisk] = useState<BasketRiskDraft>({});
+  const [basketOpen, setBasketOpen] = useState(false);
   const latestOiBySymbol = useRef<Map<string, number>>(new Map());
+  const [afterHoursTicks, setAfterHoursTicks] = useState<Record<string, MarketTick>>({});
+  const marketSession = useNseMarketSession();
+  const replayIsActive = useReplayStore((state) => state.isActive);
 
   // Fetch instruments when symbol or expiry changes, then keep OI/buildup
   // fresh with a background poll matching the backend's own ~30s cache TTL —
@@ -76,7 +123,11 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
             )
           );
           setInstruments(filtered);
-          if (!isBackground) setSelectedAnalysisSymbols([]);
+          if (!isBackground) {
+            setAnalysisSelections([]);
+            setBasketLegs([]);
+            setBasketRisk({});
+          }
           if (isBackground) setError(null);
         }
       } catch (err) {
@@ -89,18 +140,78 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
     }
 
     fetchContracts(false);
-    const interval = setInterval(() => fetchContracts(true), REFRESH_INTERVAL_MS);
+    const interval = setInterval(() => fetchContracts(true), refreshMilliseconds);
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [symbol, expiry]);
+  }, [symbol, expiry, refreshMilliseconds]);
 
   // Extract trading symbols for WebSocket subscription
   // Subscribe to live market data + underlying index
   const tradingSymbols = useMemo(() => instruments.map((i) => i.trading_symbol), [instruments]);
   const allSymbols = useMemo(() => [...tradingSymbols, symbol], [tradingSymbols, symbol]);
-  const { getTick } = useMarketData(allSymbols);
+  const allSymbolsKey = allSymbols.join(",");
+  const { getTick: getLiveTick } = useMarketData(allSymbols);
+
+  // Outside the regular session the websocket is intentionally paused, but
+  // FYERS still serves the latest quote snapshot. Keep a small, chunked REST
+  // poll here so the chain still has closing prices for ATM ordering, LTP,
+  // IV, and Greeks without re-enabling a misleading "live" feed globally.
+  useEffect(() => {
+    if (!symbol || replayIsActive || marketSession.state === "open" || !allSymbolsKey) {
+      if (marketSession.state === "open" || replayIsActive) setAfterHoursTicks({});
+      return;
+    }
+
+    let isMounted = true;
+    setAfterHoursTicks({});
+    const snapshotSymbols = allSymbolsKey.split(",").filter(Boolean);
+    const snapshotInterval = 30_000;
+
+    async function fetchAfterHoursQuotes() {
+      const chunks: string[][] = [];
+      for (let index = 0; index < snapshotSymbols.length; index += 40) {
+        chunks.push(snapshotSymbols.slice(index, index + 40));
+      }
+      const quotes: MarketTick[] = [];
+      // Keep chunks sequential so a large chain does not create a second
+      // quote burst precisely when the websocket is paused.
+      for (const chunk of chunks) {
+        try {
+          const response = await getMarketQuotes(chunk);
+          quotes.push(...response.quotes.map(toClosedMarketQuote));
+        } catch {
+          // Preserve successful chunks if one broker snapshot is unavailable.
+        }
+      }
+      if (!isMounted) return;
+      if (quotes.length === 0) return;
+      setAfterHoursTicks((current) => ({
+        ...current,
+        ...Object.fromEntries(quotes.map((quote) => [quote.trading_symbol, quote])),
+      }));
+    }
+
+    void fetchAfterHoursQuotes();
+    const interval = window.setInterval(() => void fetchAfterHoursQuotes(), snapshotInterval);
+    return () => {
+      isMounted = false;
+      window.clearInterval(interval);
+    };
+  }, [allSymbolsKey, marketSession.state, replayIsActive, symbol]);
+
+  const getTick = useCallback(
+    (tradingSymbol: string): MarketTick | null => {
+      const snapshot = afterHoursTicks[tradingSymbol];
+      // useMarketData retains its last live tick when a session closes. Once
+      // a closed-market snapshot exists, prefer it so the chain reflects the
+      // broker's latest API value instead of the stale in-session tick.
+      if (!replayIsActive && marketSession.state !== "open" && snapshot) return snapshot;
+      return getLiveTick(tradingSymbol) ?? snapshot ?? null;
+    },
+    [afterHoursTicks, getLiveTick, marketSession.state, replayIsActive]
+  );
   
   // Get underlying price
   const underlyingTick = getTick(symbol);
@@ -109,7 +220,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   // Time to expiry (T) in years
   const T = useMemo(() => timeToExpiry(expiry), [expiry]);
 
-  const r = DEFAULT_RISK_FREE_RATE; // 10% risk-free rate for Indian markets
+  const r = riskFreeRate;
 
   // Group by strike price
   const strikes = useMemo<OptionChainStrikeRow[]>(() => {
@@ -145,25 +256,75 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
 
   const toggleAnalysisContract = (instrument: Instrument | undefined) => {
     if (!instrument) return;
-    setSelectedAnalysisSymbols((current) => {
-      if (current.includes(instrument.trading_symbol)) {
-        return current.filter((symbol) => symbol !== instrument.trading_symbol);
+    const selection = fixedSelection(instrument.trading_symbol);
+    setAnalysisSelections((current) => {
+      if (current.some((item) => item.id === selection.id)) {
+        return current.filter((item) => item.id !== selection.id);
       }
       return current.length >= MAX_ANALYSIS_CONTRACTS
         ? current
-        : [...current, instrument.trading_symbol];
+        : [...current, selection];
+    });
+  };
+
+  const addDynamicAnalysisSelection = () => {
+    const selection = dynamicSelection(dynamicOptionType, dynamicMoneyness, dynamicOffset);
+    setAnalysisSelections((current) => {
+      if (current.some((item) => item.id === selection.id) || current.length >= MAX_ANALYSIS_CONTRACTS) return current;
+      return [...current, selection];
+    });
+  };
+
+  const removeAnalysisSelection = (id: string) => setAnalysisSelections((current) => current.filter((item) => item.id !== id));
+  const selectedAnalysisSymbols = analysisSelections.flatMap((selection) => selection.kind === "fixed" ? [selection.tradingSymbol] : []);
+  const dynamicAnalysisSelections = analysisSelections.flatMap((selection) => selection.kind === "dynamic" ? [selection] : []);
+
+  const addBasketLeg = (instrument: Instrument | undefined) => {
+    if (!instrument) return;
+    setBasketLegs(current => {
+      const existing = current.find(leg => leg.instrument.trading_symbol === instrument.trading_symbol);
+      if (existing) return current.filter(leg => leg.id !== existing.id);
+      if (current.length >= MAX_ANALYSIS_CONTRACTS) return current;
+      return orderBasketLegsForMargin([...current, {
+        id: `basket-${instrument.trading_symbol}`,
+        instrument,
+        side: "Buy",
+        quantity: instrument.lot_size || 1,
+      }]);
     });
   };
 
   const openStrikeAnalysis = () => {
-    if (selectedAnalysisSymbols.length === 0) return;
+    if (analysisSelections.length === 0) return;
     const params = new URLSearchParams({
       symbol,
       expiry: expiry ?? "",
       contracts: selectedAnalysisSymbols.join(","),
     });
+    if (dynamicAnalysisSelections.length) params.set("dynamic", serializeDynamicSelections(dynamicAnalysisSelections));
     const href = `/chain/analysis?${params.toString()}`;
     const analysisWindow = window.open(href, "strike-analysis");
+    if (!analysisWindow) window.location.assign(href);
+  };
+
+  const openCombinedPremiumAnalysis = () => {
+    if (analysisSelections.length === 0) return;
+    const params = new URLSearchParams({
+      symbol,
+      expiry: expiry ?? "",
+      contracts: selectedAnalysisSymbols.join(","),
+    });
+    if (dynamicAnalysisSelections.length) params.set("dynamic", serializeDynamicSelections(dynamicAnalysisSelections));
+    const href = `/chain/premium-analysis?${params.toString()}`;
+    const analysisWindow = window.open(href, "combined-premium-analysis");
+    if (!analysisWindow) window.location.assign(href);
+  };
+
+  const openOpenInterestAnalysis = () => {
+    if (!expiry) return;
+    const params = new URLSearchParams({ symbol, expiry });
+    const href = `/open-interest?${params.toString()}`;
+    const analysisWindow = window.open(href, "open-interest-analysis");
     if (!analysisWindow) window.location.assign(href);
   };
 
@@ -266,16 +427,47 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
       <div className="flex flex-col gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
         <div className="flex items-start gap-1">
           <p className="text-xs text-[var(--color-text-secondary)]">
-            Select up to {MAX_ANALYSIS_CONTRACTS} call or put contracts to compare option Greeks, higher-order Greeks, and Greek ratios.
+            Select up to {MAX_ANALYSIS_CONTRACTS} fixed or rolling Call/Put contracts for Greek comparison or combined-premium candles.
           </p>
-          <EducationPopover title="Select contracts" description="Use the chart icon beside any call or put premium to add it to the Greek workspace. Choose contracts from the same expiry when you want a like-for-like comparison." tips={["You can compare up to 10 contracts.", "A mix of calls and puts is supported."]} links={[{ label: "Options chain and Greeks overview", href: "https://www.optionseducation.org/advancedconcepts/understanding-options-greeks" }]} />
+          <EducationPopover title="Select contracts" description="Use the chart icon for a fixed strike, or add a rolling ATM/OTM/ITM descriptor. Rolling selections follow the current expiry's strike ladder as spot changes." tips={["You can compare up to 10 selections.", "A mix of calls, puts, fixed, and rolling selections is supported."]} links={[{ label: "Options chain and Greeks overview", href: "https://www.optionseducation.org/advancedconcepts/understanding-options-greeks" }]} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <span className="tnum text-xs font-semibold text-[var(--color-text-muted)]">{selectedAnalysisSymbols.length}/{MAX_ANALYSIS_CONTRACTS} selected</span>
-          <Button variant="secondary" size="sm" onClick={openStrikeAnalysis} disabled={selectedAnalysisSymbols.length === 0}>
+          <Button variant="secondary" size="sm" onClick={() => setBasketOpen(true)} disabled={basketLegs.length === 0}>
+            <ShoppingCart className="h-4 w-4" /> Basket ({basketLegs.length})
+          </Button>
+          <Button variant="outline" size="sm" onClick={openOpenInterestAnalysis} disabled={!expiry}>
+            <BarChart3 className="h-4 w-4" /> Open Interest
+          </Button>
+          <span className="tnum text-xs font-semibold text-[var(--color-text-muted)]">{analysisSelections.length}/{MAX_ANALYSIS_CONTRACTS} selected</span>
+          <Button variant="outline" size="sm" onClick={openCombinedPremiumAnalysis} disabled={analysisSelections.length === 0}>
+            <BarChart3 className="h-4 w-4" /> Combined Premium
+          </Button>
+          <Button variant="secondary" size="sm" onClick={openStrikeAnalysis} disabled={analysisSelections.length === 0}>
             <BarChart3 className="h-4 w-4" /> Analyze Greeks
           </Button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] px-3 py-2 sm:px-4">
+        <span className="text-xs font-medium text-[var(--color-text-secondary)]">Dynamic strike</span>
+        <Select aria-label="Dynamic option side" value={dynamicOptionType} onChange={(event) => setDynamicOptionType(event.target.value as "CE" | "PE")} className="h-8 w-20 text-xs">
+          <option value="CE">Call</option><option value="PE">Put</option>
+        </Select>
+        <Select aria-label="Dynamic strike moneyness" value={dynamicMoneyness} onChange={(event) => setDynamicMoneyness(event.target.value as DynamicMoneyness)} className="h-8 w-20 text-xs">
+          <option value="ATM">ATM</option><option value="OTM">OTM</option><option value="ITM">ITM</option>
+        </Select>
+        {dynamicMoneyness !== "ATM" && <Select aria-label="Dynamic strike offset" value={dynamicOffset} onChange={(event) => setDynamicOffset(Number(event.target.value))} className="h-8 w-20 text-xs">
+          {[1, 2, 3, 4, 5].map((offset) => <option key={offset} value={offset}>{offset}</option>)}
+        </Select>}
+        <Button variant="outline" size="sm" onClick={addDynamicAnalysisSelection} disabled={analysisSelections.length >= MAX_ANALYSIS_CONTRACTS}>
+          <Plus className="h-4 w-4" /> Add rolling
+        </Button>
+        {analysisSelections.length > 0 && <div className="flex flex-wrap items-center gap-1">
+          {analysisSelections.map((selection) => <Badge key={selection.id} tone={selection.kind === "dynamic" ? "blue" : "neutral"}>
+            {selection.kind === "dynamic" ? dynamicSelectionLabel(selection) : (instruments.find((item) => item.trading_symbol === selection.tradingSymbol)?.strike?.toLocaleString() ?? selection.tradingSymbol)}
+            <button type="button" aria-label={`Remove ${selection.kind === "dynamic" ? dynamicSelectionLabel(selection) : selection.tradingSymbol}`} onClick={() => removeAnalysisSelection(selection.id)} className="ml-1 inline-flex align-middle"><X className="h-3 w-3" /></button>
+          </Badge>)}
+        </div>}
       </div>
 
       {error && (
@@ -348,16 +540,33 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                       <Button
                         className="flex-1 bg-[var(--color-profit)] text-white hover:opacity-90"
                         size="sm"
-                        onClick={() => setBuyTarget(side.instrument!)}
+                        onClick={() => setOrderTarget({ instrument: side.instrument!, side: "Buy" })}
                       >
                         <ShoppingCart className="h-3.5 w-3.5" /> Buy
+                      </Button>
+                      <Button
+                        className="flex-1 border-[var(--color-loss)]/40 text-[var(--color-loss)] hover:bg-[var(--color-loss)]/10"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setOrderTarget({ instrument: side.instrument!, side: "Sell" })}
+                      >
+                        <TrendingDown className="h-3.5 w-3.5" /> Sell
+                      </Button>
+                      <Button
+                        variant={basketLegs.some(leg => leg.instrument.trading_symbol === side.instrument!.trading_symbol) ? "secondary" : "outline"}
+                        size="sm"
+                        title={basketLegs.some(leg => leg.instrument.trading_symbol === side.instrument!.trading_symbol) ? "Remove contract from basket" : "Add contract to basket"}
+                        onClick={() => addBasketLeg(side.instrument)}
+                        disabled={!basketLegs.some(leg => leg.instrument.trading_symbol === side.instrument!.trading_symbol) && basketLegs.length >= MAX_ANALYSIS_CONTRACTS}
+                      >
+                        <Plus className="h-3.5 w-3.5" /> {basketLegs.some(leg => leg.instrument.trading_symbol === side.instrument!.trading_symbol) ? "In basket" : "Basket"}
                       </Button>
                       <Button
                         className="flex-1"
                         variant={selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? "secondary" : "outline"}
                         size="sm"
                         onClick={() => toggleAnalysisContract(side.instrument)}
-                        disabled={!selectedAnalysisSymbols.includes(side.instrument.trading_symbol) && selectedAnalysisSymbols.length >= MAX_ANALYSIS_CONTRACTS}
+                        disabled={!selectedAnalysisSymbols.includes(side.instrument.trading_symbol) && analysisSelections.length >= MAX_ANALYSIS_CONTRACTS}
                       >
                         {selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? <Check className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />}
                         {selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? "Selected" : "Select"}
@@ -512,14 +721,28 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                       {row.CE && <button
                         type="button"
                         aria-label={`Buy ${row.CE.trading_symbol}`}
-                        onClick={() => setBuyTarget(row.CE!)}
+                        onClick={() => setOrderTarget({ instrument: row.CE!, side: "Buy" })}
                         className="rounded p-1 text-[var(--color-profit)] hover:bg-[var(--color-profit)]/10"
                       ><ShoppingCart className="h-3 w-3" /></button>}
                       {row.CE && <button
                         type="button"
+                        aria-label={`Sell ${row.CE.trading_symbol}`}
+                        title={`Sell ${row.CE.trading_symbol}`}
+                        onClick={() => setOrderTarget({ instrument: row.CE!, side: "Sell" })}
+                        className="rounded p-1 text-[var(--color-loss)] hover:bg-[var(--color-loss)]/10"
+                      ><TrendingDown className="h-3 w-3" /></button>}
+                      {row.CE && <button
+                        type="button"
+                        aria-label={`${basketLegs.some(leg => leg.instrument.trading_symbol === row.CE!.trading_symbol) ? "Remove" : "Add"} ${row.CE.trading_symbol} ${basketLegs.some(leg => leg.instrument.trading_symbol === row.CE!.trading_symbol) ? "from" : "to"} basket`}
+                        onClick={() => addBasketLeg(row.CE)}
+                        disabled={!basketLegs.some(leg => leg.instrument.trading_symbol === row.CE!.trading_symbol) && basketLegs.length >= MAX_ANALYSIS_CONTRACTS}
+                        className={cn("rounded p-1", basketLegs.some(leg => leg.instrument.trading_symbol === row.CE!.trading_symbol) ? "bg-[var(--color-accent-blue)] text-white" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]", "disabled:cursor-not-allowed disabled:opacity-40")}
+                      ><Plus className="h-3 w-3" /></button>}
+                      {row.CE && <button
+                        type="button"
                         aria-label={`${selectedAnalysisSymbols.includes(row.CE.trading_symbol) ? "Remove" : "Select"} ${row.CE.trading_symbol} for Greek analysis`}
                         onClick={() => toggleAnalysisContract(row.CE)}
-                        disabled={!selectedAnalysisSymbols.includes(row.CE.trading_symbol) && selectedAnalysisSymbols.length >= MAX_ANALYSIS_CONTRACTS}
+                        disabled={!selectedAnalysisSymbols.includes(row.CE.trading_symbol) && analysisSelections.length >= MAX_ANALYSIS_CONTRACTS}
                         className={cn("rounded p-1", selectedAnalysisSymbols.includes(row.CE.trading_symbol) ? "bg-[var(--color-accent-blue)] text-white" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]", "disabled:cursor-not-allowed disabled:opacity-40")}
                       >{selectedAnalysisSymbols.includes(row.CE.trading_symbol) ? <Check className="h-3 w-3" /> : <BarChart3 className="h-3 w-3" />}</button>}
                     </div>
@@ -537,15 +760,29 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                         type="button"
                         aria-label={`${selectedAnalysisSymbols.includes(row.PE.trading_symbol) ? "Remove" : "Select"} ${row.PE.trading_symbol} for Greek analysis`}
                         onClick={() => toggleAnalysisContract(row.PE)}
-                        disabled={!selectedAnalysisSymbols.includes(row.PE.trading_symbol) && selectedAnalysisSymbols.length >= MAX_ANALYSIS_CONTRACTS}
+                        disabled={!selectedAnalysisSymbols.includes(row.PE.trading_symbol) && analysisSelections.length >= MAX_ANALYSIS_CONTRACTS}
                         className={cn("rounded p-1", selectedAnalysisSymbols.includes(row.PE.trading_symbol) ? "bg-[var(--color-accent-blue)] text-white" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]", "disabled:cursor-not-allowed disabled:opacity-40")}
                       >{selectedAnalysisSymbols.includes(row.PE.trading_symbol) ? <Check className="h-3 w-3" /> : <BarChart3 className="h-3 w-3" />}</button>}
                       {row.PE && <button
                         type="button"
                         aria-label={`Buy ${row.PE.trading_symbol}`}
-                        onClick={() => setBuyTarget(row.PE!)}
+                        onClick={() => setOrderTarget({ instrument: row.PE!, side: "Buy" })}
                         className="rounded p-1 text-[var(--color-profit)] hover:bg-[var(--color-profit)]/10"
                       ><ShoppingCart className="h-3 w-3" /></button>}
+                      {row.PE && <button
+                        type="button"
+                        aria-label={`Sell ${row.PE.trading_symbol}`}
+                        title={`Sell ${row.PE.trading_symbol}`}
+                        onClick={() => setOrderTarget({ instrument: row.PE!, side: "Sell" })}
+                        className="rounded p-1 text-[var(--color-loss)] hover:bg-[var(--color-loss)]/10"
+                      ><TrendingDown className="h-3 w-3" /></button>}
+                      {row.PE && <button
+                        type="button"
+                        aria-label={`${basketLegs.some(leg => leg.instrument.trading_symbol === row.PE!.trading_symbol) ? "Remove" : "Add"} ${row.PE.trading_symbol} ${basketLegs.some(leg => leg.instrument.trading_symbol === row.PE!.trading_symbol) ? "from" : "to"} basket`}
+                        onClick={() => addBasketLeg(row.PE)}
+                        disabled={!basketLegs.some(leg => leg.instrument.trading_symbol === row.PE!.trading_symbol) && basketLegs.length >= MAX_ANALYSIS_CONTRACTS}
+                        className={cn("rounded p-1", basketLegs.some(leg => leg.instrument.trading_symbol === row.PE!.trading_symbol) ? "bg-[var(--color-accent-blue)] text-white" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]", "disabled:cursor-not-allowed disabled:opacity-40")}
+                      ><Plus className="h-3 w-3" /></button>}
                       {peTick ? formatINR(peTick.last_price) : "-"}
                       {peTick?.source && (
                         <span
@@ -614,12 +851,24 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
           </tbody>
         </table>
       </div>
-      {buyTarget && (
+      {orderTarget && (
         <BuyTicketModal
           symbol={symbol}
-          instrument={buyTarget}
-          tick={getTick(buyTarget.trading_symbol)}
-          onClose={() => setBuyTarget(null)}
+          instrument={orderTarget.instrument}
+          tick={getTick(orderTarget.instrument.trading_symbol)}
+          initialSide={orderTarget.side}
+          onClose={() => setOrderTarget(null)}
+        />
+      )}
+      {basketOpen && (
+        <BasketOrderModal
+          symbol={symbol}
+          legs={basketLegs}
+          risk={basketRisk}
+          priceFor={(tradingSymbol) => getTick(tradingSymbol)?.last_price}
+          onChange={setBasketLegs}
+          onRiskChange={setBasketRisk}
+          onClose={() => setBasketOpen(false)}
         />
       )}
     </div>

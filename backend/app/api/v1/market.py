@@ -21,6 +21,7 @@ from app.schemas.market import (
     SymbolSearchResponse,
     SymbolSuggestion,
 )
+from app.services.dhan_service import DhanService
 from app.services.fyers_service import FyersService, from_fyers_ws_symbol, to_fyers_ws_symbol
 from app.services.lot_size_store import lot_size_store
 from app.services.session_manager import session_manager
@@ -89,6 +90,13 @@ async def get_expiries(
     service = session_manager.get_session(current_user["sub"])
     if not service:
         raise HTTPException(status_code=401, detail="Active broker session not found")
+
+    # Dhan has a dedicated expiry-list endpoint.  Do not probe the instance
+    # with ``hasattr`` here: AsyncMock synthesizes arbitrary attributes, which
+    # caused the generic instrument-derived fallback to be skipped in tests
+    # and would hide an adapter that does not actually implement this API.
+    if isinstance(service, DhanService):
+        return ExpiryList(expiries=await service.get_expiries(symbol.upper()))
 
     raw_instruments = await service.get_instruments(symbol.upper())
     expiries: set[str] = set()
@@ -173,6 +181,9 @@ async def get_margin(
     if not request.legs:
         raise HTTPException(status_code=400, detail="At least one leg is required")
 
+    # Keep protective buys before sells for the broker's multi-leg calculator
+    # as well as actual order placement, so the preview matches execution.
+    ordered_legs = sorted(request.legs, key=lambda leg: 0 if leg.side == "Buy" else 1)
     orders = [
         {
             "symbol": leg.symbol,
@@ -180,23 +191,68 @@ async def get_margin(
             "side": leg.side,
             "product_type": leg.product_type,
         }
-        for leg in request.legs
+        for leg in ordered_legs
     ]
     data = await service.get_margin(orders)
 
     def first_of(*keys: str) -> float | None:
-        for key in keys:
-            value = data.get(key)
-            if isinstance(value, int | float):
-                return float(value)
+        """Read Fyers' numeric margin values across API-version key shapes.
+
+        Some SDK versions return the summary inside `summary`/`margin`, while
+        others return it at the data root and encode amounts as strings.
+        Normalize at the boundary so every client sees the same response.
+        """
+        candidates: list[dict[str, object]] = [data]
+        for container in ("summary", "margin", "data", "result"):
+            nested = data.get(container)
+            if isinstance(nested, dict):
+                candidates.append(nested)
+        for candidate in candidates:
+            for key in keys:
+                value = candidate.get(key)
+                if isinstance(value, bool):
+                    continue
+                if isinstance(value, int | float):
+                    return float(value)
+                if isinstance(value, str):
+                    try:
+                        return float(value.replace(",", ""))
+                    except ValueError:
+                        continue
         return None
 
+    span_margin = first_of("span", "span_margin", "spanMargin", "spanmargin")
+    exposure_margin = first_of("expo", "exposure", "exposure_margin", "exposureMargin")
+    premium = first_of("premium", "option_premium", "premium_margin", "net_premium")
+    total_margin = first_of(
+        "margin_total",
+        "total",
+        "marginTotal",
+        "totalMargin",
+        "total_margin",
+        "margin_required",
+        "required_margin",
+        "marginUsed",
+    )
+    if total_margin is None:
+        components = [
+            value for value in (span_margin, exposure_margin, premium) if value is not None
+        ]
+        total_margin = sum(components) if components else None
+
     return MarginResponse(
-        total_margin=first_of("margin_total", "total", "marginTotal"),
-        available_margin=first_of("margin_avail", "marginAvail", "available_balance"),
-        span_margin=first_of("span", "span_margin", "spanMargin"),
-        exposure_margin=first_of("expo", "exposure", "exposure_margin"),
-        premium=first_of("premium", "option_premium"),
+        total_margin=total_margin,
+        available_margin=first_of(
+            "margin_avail",
+            "marginAvail",
+            "available_balance",
+            "availableBalance",
+            "margin_available",
+            "avail_margin",
+        ),
+        span_margin=span_margin,
+        exposure_margin=exposure_margin,
+        premium=premium,
         raw=data,
     )
 

@@ -38,3 +38,18 @@ in memory, keyed by `client_id`.
 ID, encrypted access token, mode, account name, and connection time) so startup can restore it.
 `broker_credentials` stores encrypted Fyers TOTP credentials for optional auto-login. The live
 client itself is always rebuilt in memory; neither table represents a multi-user account system.
+
+## `user_preferences`
+
+One non-sensitive, versioned settings document per authenticated broker client.
+`settings` is JSON storage only; the FastAPI/Pydantic settings schema is the
+strict validation and normalization boundary. It contains UI defaults,
+watchlist/layout preferences, replay configuration, and calculation assumptions
+but never credentials, delivery secrets, orders, or broker tokens.
+
+| Column | Type | Notes |
+|---|---|---|
+| `owner_id` | `varchar(50)` | Primary key; JWT broker-client subject |
+| `schema_version` | `int` | Settings document version |
+| `settings` | `json` | Validated normalized preferences |
+| `updated_at` | `timestamptz` | Last full-profile save |

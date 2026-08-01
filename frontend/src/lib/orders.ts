@@ -21,6 +21,8 @@ export interface BrokerOrder {
 }
 
 export interface OrderActionResponse { id: string | null; message: string; }
+export interface GttOrder { id: string; broker_name: string; symbol: string; side: OrderSide; quantity: number; product_type: string; execution_type: "MARKET" | "LIMIT"; trigger_price: number; limit_price: number; expires_at: string; status: "Pending" | "Triggered" | "Placed" | "Failed" | "Cancelled" | "Expired"; native_order_id: string | null; execution_order_id: string | null; error_message: string | null; created_at: string; triggered_at: string | null; closed_at: string | null; }
+export interface CreateGttOrderRequest { symbol: string; quantity: number; side: OrderSide; product_type: ProductType; execution_type: "MARKET" | "LIMIT"; trigger_price: number; limit_price: number; expires_at: string; }
 
 export interface PlaceOrderRequest {
   symbol: string; quantity: number; side: OrderSide; order_type: OrderType; product_type: ProductType;
@@ -29,6 +31,18 @@ export interface PlaceOrderRequest {
 }
 
 export interface ModifyOrderRequest { quantity: number; order_type: OrderType; limit_price: number; stop_price: number; }
+
+export interface PlaceBasketLegRequest {
+  symbol: string; quantity: number; side: OrderSide; product_type: ProductType;
+  order_type: "MARKET"; limit_price: number; stop_price: number;
+  validity: "DAY"; disclosed_quantity: number; offline_order: boolean;
+  stop_loss?: number; target_price?: number;
+}
+export interface BasketLegResult {
+  symbol: string; id: string | null; message: string; status: string;
+  filled_quantity: number; protective_stop_order_id: string | null;
+}
+export interface BasketOrderResponse { basket_id: string | null; legs: BasketLegResult[]; }
 
 export async function getOrders(): Promise<BrokerOrder[]> {
   const response = await apiClient.get<{ orders: BrokerOrder[] }>("/orders");
@@ -44,4 +58,14 @@ export async function modifyOrder(id: string, order: ModifyOrderRequest): Promis
 }
 export async function cancelOrder(id: string): Promise<OrderActionResponse> {
   return (await apiClient.delete<OrderActionResponse>(`/orders/${encodeURIComponent(id)}`)).data;
+}
+export async function getGttOrders(): Promise<GttOrder[]> { return (await apiClient.get<{ orders: GttOrder[] }>("/orders/gtt")).data.orders; }
+export async function createGttOrder(order: CreateGttOrderRequest): Promise<GttOrder> { return (await apiClient.post<GttOrder>("/orders/gtt", order)).data; }
+export async function cancelGttOrder(id: string): Promise<GttOrder> { return (await apiClient.delete<GttOrder>(`/orders/gtt/${encodeURIComponent(id)}`)).data; }
+export async function placeBasketOrder(request: {
+  legs: PlaceBasketLegRequest[];
+  combined_stop_loss?: number;
+  combined_take_profit?: number;
+}): Promise<BasketOrderResponse> {
+  return (await apiClient.post<BasketOrderResponse>("/orders/basket", request)).data;
 }

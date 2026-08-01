@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 /**
  * Persisted app-wide watchlist. `tickers` remains the state key for backward
@@ -10,43 +11,55 @@ interface WatchlistState {
   addTicker: (symbol: string) => void;
   removeTicker: (symbol: string) => void;
   setTickers: (symbols: string[]) => void;
+  setTickersFromPreferences: (symbols: string[]) => void;
   resetTickers: () => void;
 }
 
 const DEFAULT_WATCHLIST = ["NIFTY", "BANKNIFTY"];
 
+function cleanSymbols(symbols: string[]): string[] {
+  return Array.from(new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))).slice(0, 20);
+}
+
 export const useTickerStore = create<WatchlistState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       tickers: DEFAULT_WATCHLIST,
 
       addTicker: (symbol: string) => {
         const formatted = symbol.trim().toUpperCase();
         if (!formatted) return;
-        set((state) => {
-          if (state.tickers.includes(formatted)) return state;
-          return { tickers: [...state.tickers, formatted] };
-        });
+        const next = cleanSymbols([...get().tickers, formatted]);
+        if (next.join(",") === get().tickers.join(",")) return;
+        set({ tickers: next });
+        useSettingsStore.getState().updatePreferences((current) => ({ ...current, general: { ...current.general, watchlist: next } }));
       },
 
       removeTicker: (symbol: string) => {
-        set((state) => {
-          // Keep at least 1 ticker
-          if (state.tickers.length <= 1) return state;
-          return { tickers: state.tickers.filter((t) => t !== symbol) };
-        });
+        const current = get().tickers;
+        if (current.length <= 1) return;
+        const next = current.filter((ticker) => ticker !== symbol);
+        set({ tickers: next });
+        useSettingsStore.getState().updatePreferences((preferences) => ({ ...preferences, general: { ...preferences.general, watchlist: next } }));
       },
 
       setTickers: (symbols: string[]) => {
-        const cleaned = Array.from(
-          new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))
-        );
+        const cleaned = cleanSymbols(symbols);
         if (cleaned.length > 0) {
           set({ tickers: cleaned });
+          useSettingsStore.getState().updatePreferences((preferences) => ({ ...preferences, general: { ...preferences.general, watchlist: cleaned } }));
         }
       },
 
-      resetTickers: () => set({ tickers: DEFAULT_WATCHLIST }),
+      setTickersFromPreferences: (symbols: string[]) => {
+        const cleaned = cleanSymbols(symbols);
+        if (cleaned.length > 0) set({ tickers: cleaned });
+      },
+
+      resetTickers: () => {
+        set({ tickers: DEFAULT_WATCHLIST });
+        useSettingsStore.getState().updatePreferences((preferences) => ({ ...preferences, general: { ...preferences.general, watchlist: DEFAULT_WATCHLIST } }));
+      },
     }),
     { name: "ticker-storage" }
   )

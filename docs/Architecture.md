@@ -3,7 +3,7 @@
 ## Frontend
 
 - Next.js 15 App Router, React 19, TypeScript, and Tailwind CSS.
-- Zustand owns local auth, alert, replay, settings, and UI state; API access uses the shared Axios client and focused hooks.
+- Zustand owns local auth, alert, replay, and UI state. Settings keep a versioned local fallback for startup and sync a validated profile to the authenticated broker client through the shared API client.
 - Lightweight Charts renders OHLCV views; Recharts renders Dealer Flow and volatility views.
 - A browser WebSocket connects to the backend market-stream proxy. REST quote seeding and polling provide a resilience fallback.
 

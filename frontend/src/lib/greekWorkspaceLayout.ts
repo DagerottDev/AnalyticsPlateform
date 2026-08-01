@@ -32,7 +32,7 @@ function isGreekMetric(value: unknown): value is GreekMetric {
 function isPanelLayout(value: unknown): value is GreekPanelLayout {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<GreekPanelLayout>;
-  return ["none", "sma", "ema", "bbands"].includes(candidate.overlay ?? "")
+  return ["none", "sma", "ema", "bbands", "supertrend"].includes(candidate.overlay ?? "")
     && typeof candidate.period === "number"
     && Number.isFinite(candidate.period)
     && typeof candidate.multiplier === "number"

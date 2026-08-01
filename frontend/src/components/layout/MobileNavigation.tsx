@@ -30,6 +30,7 @@ const allItems = [
   ...primaryItems,
   { label: "Accounts", href: "/accounts", icon: CircleUserRound },
   { label: "Charts", href: "/charts", icon: BarChart3 },
+  { label: "Open Interest", href: "/open-interest", icon: BarChart3 },
   { label: "Volatility", href: "/volatility", icon: Waves },
   { label: "Relative Value", href: "/relative-value", icon: BarChart3 },
   { label: "Dealer Flow", href: "/dealer-flow", icon: BarChart3 },

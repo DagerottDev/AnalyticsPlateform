@@ -29,9 +29,10 @@ interface TradingChartProps {
   liveTick?: { price: number; timestamp: number } | null;
   indicators?: ChartIndicators;
   symbol?: string;
+  timeframeLabel?: string;
 }
 
-export function TradingChart({ data, liveTick, indicators, symbol }: TradingChartProps) {
+export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabel = "1m" }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -104,12 +105,43 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
 
     return () => {
       chart.remove();
+      // React Strict Mode and fast refresh can dispose a chart and then run a
+      // dependent effect once more. Clear every ref so that effect cannot
+      // call removeSeries/setData on a disposed Lightweight Charts instance.
+      if (chartRef.current === chart) {
+        chartRef.current = null;
+        candleSeriesRef.current = null;
+        volumeSeriesRef.current = null;
+        smaSeriesRef.current = null;
+        emaSeriesRef.current = null;
+        bbUpperRef.current = null;
+        bbLowerRef.current = null;
+        supertrendSeriesRef.current = null;
+      }
     };
   }, []);
 
   // Update Data and Indicators
   useEffect(() => {
-    if (!chartRef.current || !candleSeriesRef.current || !volumeSeriesRef.current || !data || data.length === 0) return;
+    const chart = chartRef.current;
+    if (!chart || !candleSeriesRef.current || !volumeSeriesRef.current || !data || data.length === 0) return;
+
+    // removeSeries throws "Value is undefined" when a series belongs to a
+    // chart that has already been disposed (most commonly during Strict Mode
+    // effect replay). Treat that cleanup as idempotent and forget the stale
+    // ref so the next render can create a fresh series.
+    const removeLineSeries = (seriesRef: { current: ISeriesApi<"Line"> | null }) => {
+      const series = seriesRef.current;
+      if (!series) return;
+      try {
+        chart.removeSeries(series);
+      } catch {
+        // The chart may have been removed between effects; there is nothing
+        // left to clean up in that case.
+      } finally {
+        seriesRef.current = null;
+      }
+    };
 
     const normalizedData = normalizeOHLCVData(data);
     const formattedData = normalizedData.map(d => ({
@@ -134,7 +166,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
     // SMA
     if (indicators?.sma.enabled) {
       if (!smaSeriesRef.current) {
-        smaSeriesRef.current = chartRef.current.addLineSeries({ color: COLOR_CAT_1, lineWidth: 2 });
+        smaSeriesRef.current = chart.addLineSeries({ color: COLOR_CAT_1, lineWidth: 2 });
       }
       const smaData = sortAndDeduplicateChartData(
         calculateSMA(normalizedData, indicatorParameter(indicators, "sma", "period"))
@@ -144,14 +176,13 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       }));
       smaSeriesRef.current?.setData(smaData);
     } else if (smaSeriesRef.current) {
-      chartRef.current.removeSeries(smaSeriesRef.current);
-      smaSeriesRef.current = null;
+      removeLineSeries(smaSeriesRef);
     }
 
     // EMA
     if (indicators?.ema.enabled) {
       if (!emaSeriesRef.current) {
-        emaSeriesRef.current = chartRef.current.addLineSeries({ color: COLOR_CAT_2, lineWidth: 2 });
+        emaSeriesRef.current = chart.addLineSeries({ color: COLOR_CAT_2, lineWidth: 2 });
       }
       const emaData = sortAndDeduplicateChartData(
         calculateEMA(normalizedData, indicatorParameter(indicators, "ema", "period"))
@@ -161,15 +192,14 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       }));
       emaSeriesRef.current?.setData(emaData);
     } else if (emaSeriesRef.current) {
-      chartRef.current.removeSeries(emaSeriesRef.current);
-      emaSeriesRef.current = null;
+      removeLineSeries(emaSeriesRef);
     }
 
     // Bollinger Bands
     if (indicators?.bbands.enabled) {
       if (!bbUpperRef.current) {
-        bbUpperRef.current = chartRef.current.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
-        bbLowerRef.current = chartRef.current.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
+        bbUpperRef.current = chart.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
+        bbLowerRef.current = chart.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
       }
       const bbData = calculateBollingerBands(
         normalizedData,
@@ -179,16 +209,14 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       bbUpperRef.current?.setData(sortAndDeduplicateChartData(bbData).map(d => ({ time: d.time as Time, value: d.upper })));
       bbLowerRef.current?.setData(sortAndDeduplicateChartData(bbData).map(d => ({ time: d.time as Time, value: d.lower })));
     } else if (bbUpperRef.current && bbLowerRef.current) {
-      chartRef.current.removeSeries(bbUpperRef.current);
-      chartRef.current.removeSeries(bbLowerRef.current);
-      bbUpperRef.current = null;
-      bbLowerRef.current = null;
+      removeLineSeries(bbUpperRef);
+      removeLineSeries(bbLowerRef);
     }
 
     // Supertrend
     if (indicators?.supertrend.enabled) {
       if (!supertrendSeriesRef.current) {
-        supertrendSeriesRef.current = chartRef.current.addLineSeries({
+        supertrendSeriesRef.current = chart.addLineSeries({
           color: COLOR_CAT_4,
           lineWidth: 2,
           lineStyle: 2,
@@ -205,8 +233,7 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
       }));
       supertrendSeriesRef.current?.setData(stData);
     } else if (supertrendSeriesRef.current) {
-      chartRef.current.removeSeries(supertrendSeriesRef.current);
-      supertrendSeriesRef.current = null;
+      removeLineSeries(supertrendSeriesRef);
     }
 
   }, [data, indicators]);
@@ -305,18 +332,18 @@ export function TradingChart({ data, liveTick, indicators, symbol }: TradingChar
 
   return (
     <div className="panel flex w-full flex-col gap-1 p-2">
-      {symbol && <div className="px-2 pt-2 text-sm font-bold text-[var(--color-text-bright)]">{symbol} <span className="font-normal text-[var(--color-text-muted)] text-xs ml-2">1m Timeframe</span></div>}
+      {symbol && <div className="px-2 pt-2 text-sm font-bold text-[var(--color-text-bright)]">{symbol} <span className="font-normal text-[var(--color-text-muted)] text-xs ml-2">{timeframeLabel} Timeframe</span></div>}
       <ChartLegend items={legendItems} />
       <div
         ref={chartContainerRef}
         role="img"
-        aria-label={`${symbol ?? "Instrument"} one-minute candlestick chart with ${data.length} candles. Use the following data table for exact OHLC and volume values.`}
+        aria-label={`${symbol ?? "Instrument"} ${timeframeLabel} candlestick chart with ${data.length} candles. Use the following data table for exact OHLC and volume values.`}
         className="h-[400px] w-full"
       />
       <ChartDataTable
         className="px-2"
         title={`${symbol ?? "Instrument"} OHLCV`}
-        summary={`${data.length} one-minute candles. Values are ordered from oldest to newest.`}
+        summary={`${data.length} ${timeframeLabel} candles. Values are ordered from oldest to newest.`}
         columns={[
           { key: "time", label: "Time" }, { key: "open", label: "Open" }, { key: "high", label: "High" },
           { key: "low", label: "Low" }, { key: "close", label: "Close" }, { key: "volume", label: "Volume" },

@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TradingChart } from "@/components/charts/TradingChart";
-import { Heatmap } from "@/components/charts/Heatmap";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
 import { OHLCVData } from "@/lib/indicators";
@@ -26,9 +25,19 @@ import { Select } from "@/components/ui/Select";
 
 type OptionType = "CE" | "PE";
 type SelectedOption = Instrument & { strike: number; option_type: OptionType };
+const FALLBACK_CHART_PREFERENCES = {
+  timeframe: "1" as const,
+  historyDays: 7,
+  refreshSeconds: 30 as const,
+  indicators: createDefaultChartIndicators(),
+};
 
 export default function ChartsPage() {
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
+  const chartPreferences = useMemo(
+    () => useSettingsStore.getState().charts ?? FALLBACK_CHART_PREFERENCES,
+    []
+  );
   const [expiry, setExpiry] = useState<string | null>(null);
   const [optionType, setOptionType] = useState<OptionType>("CE");
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
@@ -38,7 +47,11 @@ export default function ChartsPage() {
   const [chartError, setChartError] = useState<unknown>(null);
   const [chartEmptyMessage, setChartEmptyMessage] = useState<string | null>(null);
 
-  const [indicators, setIndicators] = useState(createDefaultChartIndicators);
+  const [indicators, setIndicators] = useState(() => chartPreferences.indicators ?? createDefaultChartIndicators());
+
+  useEffect(() => {
+    setIndicators(chartPreferences.indicators);
+  }, [chartPreferences.indicators]);
 
   const updateIndicatorParameter = (
     indicatorId: ChartIndicatorId,
@@ -54,7 +67,7 @@ export default function ChartsPage() {
     }));
   };
   
-  // For Heatmap
+  // Option contracts for the strike selector.
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const availableStrikes = useMemo(
     () => Array.from(new Set(instruments.flatMap((instrument) =>
@@ -82,7 +95,7 @@ export default function ChartsPage() {
   );
   const { getTick } = useMarketData(allSymbols); // Subscribe to options + underlying
 
-  // Load option chain for Heatmap
+  // Load option contracts for the selected expiry.
   useEffect(() => {
     let isMounted = true;
     if (!symbol || !expiry) {
@@ -128,10 +141,10 @@ export default function ChartsPage() {
         // this is real option OHLCV rather than a synthetic premium series.
         const rangeTo = new Date();
         const rangeFrom = new Date(rangeTo);
-        rangeFrom.setDate(rangeFrom.getDate() - 7);
+        rangeFrom.setDate(rangeFrom.getDate() - chartPreferences.historyDays);
         const toIso = (d: Date) => d.toISOString().slice(0, 10);
 
-        const candles = await getHistoricalCandles(chartSymbol, toIso(rangeFrom), toIso(rangeTo), "1");
+        const candles = await getHistoricalCandles(chartSymbol, toIso(rangeFrom), toIso(rangeTo), chartPreferences.timeframe);
         if (isMounted) {
           if (candles.length > 0) {
             setHistoricalData(
@@ -166,29 +179,9 @@ export default function ChartsPage() {
     fetchHistorical();
 
     return () => { isMounted = false; };
-  }, [chartSymbol, selectedOption]);
+  }, [chartPreferences.historyDays, chartPreferences.timeframe, chartSymbol, selectedOption]);
 
-  // Heatmap Data Preparation
-  const heatmapData = useMemo(() => {
-    if (instruments.length === 0) return [];
-    
-    const map = new Map<number, { ceOI: number; peOI: number }>();
-    instruments.forEach((inst) => {
-      if (!inst.strike) return;
-      if (!map.has(inst.strike)) map.set(inst.strike, { ceOI: 0, peOI: 0 });
-      const group = map.get(inst.strike)!;
-
-      // OI is only present on the option-chain snapshot (inst.oi), not on live ticks.
-      if (inst.option_type === "CE") group.ceOI = inst.oi ?? 0;
-      if (inst.option_type === "PE") group.peOI = inst.oi ?? 0;
-    });
-
-    return Array.from(map.entries())
-      .map(([strike, data]) => ({ strike, ceValue: data.ceOI, peValue: data.peOI }))
-      .sort((a, b) => a.strike - b.strike);
-  }, [instruments]);
-
-  // Underlying tick for live chart updates
+  // The active chart instrument receives live updates on top of broker history.
   const chartTick = getTick(chartSymbol);
   const liveChartTick = chartTick ? { price: chartTick.last_price, timestamp: chartTick.timestamp } : null;
 
@@ -207,7 +200,7 @@ export default function ChartsPage() {
     <DashboardLayout>
       <PageContainer>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <SectionHeader title="Advanced Charting" description="Broker-sourced historical OHLCV, live overlays, and heatmaps." />
+          <SectionHeader title="Advanced Charting" description="Broker-sourced historical OHLCV, live overlays, and indicators." />
           <DataFreshness tick={chartTick} />
         </div>
 
@@ -306,46 +299,30 @@ export default function ChartsPage() {
           </Card>
         </div>
 
-        {/* Main Chart Area */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-
-          <div className="col-span-1 lg:col-span-2">
-            {loading ? (
-              <Card>
-                <LoadingState size="lg" label="Loading chart data..." />
-              </Card>
-            ) : chartError ? (
-              <Card className="flex flex-col gap-3">
-                <EmptyState title="Failed to load chart data" />
-                <ApiErrorDisplay error={chartError} />
-              </Card>
-            ) : chartEmptyMessage ? (
-              <Card>
-                <EmptyState title="No chart data available" description={chartEmptyMessage} />
-              </Card>
-            ) : (
-              <TradingChart
-                data={historicalData}
-                liveTick={liveChartTick}
-                indicators={indicators}
-                symbol={chartLabel}
-              />
-            )}
-          </div>
-
-          <div className="col-span-1">
-            {expiry ? (
-              <div className="h-full max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                 <Heatmap data={heatmapData} title={`Open Interest Heatmap (${expiry})`} type="oi" />
-              </div>
-            ) : (
-              <Card className="flex h-full items-center justify-center">
-                <EmptyState title="Select an expiry date to view the strike-level heatmaps for this instrument." />
-              </Card>
-            )}
-          </div>
-
-        </div>
+        {/* Price chart now uses the full workspace width. Open-interest
+            analysis lives in its dedicated, chart-dense workspace. */}
+        {loading ? (
+          <Card>
+            <LoadingState size="lg" label="Loading chart data..." />
+          </Card>
+        ) : chartError ? (
+          <Card className="flex flex-col gap-3">
+            <EmptyState title="Failed to load chart data" />
+            <ApiErrorDisplay error={chartError} />
+          </Card>
+        ) : chartEmptyMessage ? (
+          <Card>
+            <EmptyState title="No chart data available" description={chartEmptyMessage} />
+          </Card>
+        ) : (
+          <TradingChart
+            data={historicalData}
+            liveTick={liveChartTick}
+            indicators={indicators}
+            symbol={chartLabel}
+            timeframeLabel={`${chartPreferences.timeframe}m`}
+          />
+        )}
       </PageContainer>
     </DashboardLayout>
   );

@@ -27,7 +27,8 @@ export function buildReplaySession(
   symbol: string,
   candles: HistoricalCandle[],
   instruments: Instrument[],
-  volatility: number
+  volatility: number,
+  riskFreeRate: number = DEFAULT_RISK_FREE_RATE,
 ): { allTicks: Record<string, TickData>[] } {
   if (candles.length === 0) return { allTicks: [] };
 
@@ -59,10 +60,10 @@ export function buildReplaySession(
       const type = inst.option_type as "CE" | "PE";
 
       const T = timeToExpiry(inst.expiry, atMs);
-      const price = calculateOptionPrice(type, spot, K, T, DEFAULT_RISK_FREE_RATE, volatility);
+      const price = calculateOptionPrice(type, spot, K, T, riskFreeRate, volatility);
 
       const T0 = timeToExpiry(inst.expiry, startMs);
-      const baselinePrice = calculateOptionPrice(type, startPrice, K, T0, DEFAULT_RISK_FREE_RATE, volatility);
+      const baselinePrice = calculateOptionPrice(type, startPrice, K, T0, riskFreeRate, volatility);
       const change = price - baselinePrice;
       const changePercent = baselinePrice > 0 ? (change / baselinePrice) * 100 : 0;
 

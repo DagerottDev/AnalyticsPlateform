@@ -15,6 +15,9 @@ export function ReplayController() {
     progressPercentage,
     symbol,
     sessionDate,
+    expiry,
+    strike,
+    optionSide,
     priceCoverage,
     reset
   } = useReplayStore();
@@ -46,12 +49,18 @@ export function ReplayController() {
         <span className="text-[var(--color-accent-blue)]">{speedMultiplier}x Speed</span>
       </div>
 
+      {(expiry || strike !== null) && (
+        <div className="text-center text-[10px] font-normal normal-case text-[var(--color-text-muted)]">
+          {expiry || "Any expiry"} · {strike !== null ? strike.toLocaleString("en-IN") : "Any strike"} · {optionSide === "BOTH" ? "CE + PE" : optionSide}
+        </div>
+      )}
+
       {priceCoverage && priceCoverage.attempted > 0 && (
         <div
           className="text-center text-[10px] font-normal normal-case text-[var(--color-text-muted)]"
-          title="Near-the-money contracts on the nearest expiry priced from real broker history; the rest are modeled with Black-Scholes."
+          title="Selected contracts priced from real broker history; contracts without history are modeled with Black-Scholes."
         >
-          {priceCoverage.matched}/{priceCoverage.attempted} near-the-money contracts using real broker prices
+          {priceCoverage.matched}/{priceCoverage.attempted} selected contracts using real broker prices
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import { calculateGreeks, calculateImpliedVolatility, type Greeks } from "@/lib/greeks";
 import type { HistoricalCandle } from "@/lib/market";
 import type { Instrument, MarketTick } from "@/types/market";
+import type { ResolvedSelectionPaths } from "@/lib/analysisSelections";
 
 export type GreekMetric = Exclude<keyof Greeks, "price">;
 export interface GreekPoint { time: string; value: number; }
@@ -48,7 +49,8 @@ function expiryTime(expiry: string | null): number | null {
 export function buildStrikeGreekSeries(
   instruments: Instrument[],
   candlesBySymbol: Record<string, HistoricalCandle[]>,
-  underlyingCandles: HistoricalCandle[]
+  underlyingCandles: HistoricalCandle[],
+  riskFreeRate: number = 0.1,
 ): GreekSeries {
   const result = EMPTY_SERIES();
   const spotByTime = new Map(underlyingCandles.map((candle) => [candle.timestamp, candle.close]));
@@ -65,12 +67,50 @@ export function buildStrikeGreekSeries(
       const timestamp = new Date(candle.timestamp).getTime();
       if (!spot || !Number.isFinite(timestamp)) continue;
       const years = Math.max((expiry - timestamp) / (365 * 24 * 60 * 60 * 1000), 0.0001);
-      const iv = calculateImpliedVolatility(instrument.option_type, spot, instrument.strike, years, 0.1, candle.close);
+      const iv = calculateImpliedVolatility(instrument.option_type, spot, instrument.strike, years, riskFreeRate, candle.close);
       if (iv <= 0) continue;
-      const greeks = calculateGreeks(instrument.option_type, spot, instrument.strike, years, 0.1, iv);
+      const greeks = calculateGreeks(instrument.option_type, spot, instrument.strike, years, riskFreeRate, iv);
       (Object.keys(result) as GreekMetric[]).forEach((metric) => {
         result[metric][instrument.trading_symbol].push({ time: candle.timestamp, value: greeks[metric] });
       });
+    }
+  }
+  return result;
+}
+
+/**
+ * Greek series for fixed and rolling selections. A rolling path names the
+ * exact broker contract in force at each underlying candle, so a descriptor
+ * can move strikes without mixing a premium from one strike with Greeks from
+ * another. Keys are selection ids (rather than trading symbols).
+ */
+export function buildResolvedGreekSeries(
+  paths: ResolvedSelectionPaths,
+  candlesBySymbol: Record<string, HistoricalCandle[]>,
+  underlyingCandles: HistoricalCandle[],
+  riskFreeRate: number = 0.1,
+): GreekSeries {
+  const result = EMPTY_SERIES();
+  const optionBySymbolAndTime = new Map<string, Map<string, HistoricalCandle>>();
+  for (const [symbol, candles] of Object.entries(candlesBySymbol)) {
+    optionBySymbolAndTime.set(symbol, new Map(candles.map((candle) => [candle.timestamp, candle])));
+  }
+  for (const [selectionId, path] of Object.entries(paths)) {
+    for (const metric of Object.keys(result) as GreekMetric[]) result[metric][selectionId] = [];
+    for (const underlying of underlyingCandles) {
+      const instrument = path[underlying.timestamp];
+      if (!instrument?.strike || !instrument.option_type) continue;
+      const option = optionBySymbolAndTime.get(instrument.trading_symbol)?.get(underlying.timestamp);
+      const expiry = expiryTime(instrument.expiry);
+      const timestamp = new Date(underlying.timestamp).getTime();
+      if (!option || !expiry || !Number.isFinite(timestamp)) continue;
+      const years = Math.max((expiry - timestamp) / (365 * 24 * 60 * 60 * 1000), 0.0001);
+      const iv = calculateImpliedVolatility(instrument.option_type, underlying.close, instrument.strike, years, riskFreeRate, option.close);
+      if (iv <= 0) continue;
+      const greeks = calculateGreeks(instrument.option_type, underlying.close, instrument.strike, years, riskFreeRate, iv);
+      for (const metric of Object.keys(result) as GreekMetric[]) {
+        result[metric][selectionId].push({ time: underlying.timestamp, value: greeks[metric] });
+      }
     }
   }
   return result;
@@ -107,7 +147,8 @@ export function combineGreekSeries(series: GreekSeries): CombinedGreekSeries {
 export function calculateLiveCombinedGreeks(
   instruments: Instrument[],
   underlyingSymbol: string,
-  ticks: Record<string, MarketTick>
+  ticks: Record<string, MarketTick>,
+  riskFreeRate: number = 0.1,
 ): LiveGreekCalculation | null {
   const underlyingTick = ticks[underlyingSymbol];
   const spot = underlyingTick?.last_price;
@@ -130,12 +171,12 @@ export function calculateLiveCombinedGreeks(
       spot,
       instrument.strike,
       years,
-      0.1,
+      riskFreeRate,
       optionTick.last_price
     );
     if (!Number.isFinite(iv) || iv <= 0) continue;
 
-    const greeks = calculateGreeks(instrument.option_type, spot, instrument.strike, years, 0.1, iv);
+    const greeks = calculateGreeks(instrument.option_type, spot, instrument.strike, years, riskFreeRate, iv);
     for (const metric of Object.keys(values) as GreekMetric[]) values[metric] += greeks[metric];
     timestamps.push(optionTick.timestamp);
     liveContracts += 1;

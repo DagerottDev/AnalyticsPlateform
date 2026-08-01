@@ -13,7 +13,8 @@ import { usePositionStore, Position } from "@/stores/positionStore";
 import { useMarketData } from "@/hooks/useMarketData";
 import { MarketTick } from "@/types/market";
 import { calculateGreeks, calculateImpliedVolatility } from "@/lib/greeks";
-import { timeToExpiry, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
+import { timeToExpiry, defaultSpotFallback } from "@/lib/optionMath";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { calculatePaperAccountSummary } from "@/lib/paperTrading";
 import { formatDate, cn } from "@/lib/utils";
 import { BrokerAccountPanel } from "@/components/positions/BrokerAccountPanel";
@@ -44,7 +45,7 @@ interface PositionSnapshot {
  * premium), not a single strategy-wide assumption. Aggregating these across
  * every open position (across strategies, across underlyings) is what turns
  * this from a per-strategy view into a whole-book risk view. */
-function evaluatePosition(position: Position, getTick: (symbol: string) => MarketTick | null): PositionSnapshot {
+function evaluatePosition(position: Position, getTick: (symbol: string) => MarketTick | null, riskFreeRate: number): PositionSnapshot {
   let markValue = 0;
   let netDelta = 0;
   let netGamma = 0;
@@ -54,20 +55,24 @@ function evaluatePosition(position: Position, getTick: (symbol: string) => Marke
 
   position.legs.forEach(leg => {
     if (!leg.instrument) { ready = false; return; }
-    const tick = getTick(leg.instrument.trading_symbol);
-    if (!tick) { ready = false; return; }
+    const exit = position.legExits?.[leg.id];
+    const tick = exit ? null : getTick(leg.instrument.trading_symbol);
+    if (!exit && !tick) { ready = false; return; }
 
     const sign = leg.action === "Buy" ? 1 : -1;
-    markValue += tick.last_price * leg.quantity * sign;
+    const price = exit?.price ?? tick!.last_price;
+    markValue += price * leg.quantity * sign;
+
+    if (exit) return;
 
     if (leg.instrument.strike && leg.instrument.option_type && leg.instrument.expiry) {
       const underlyingTick = getTick(leg.instrument.symbol);
       const S = underlyingTick?.last_price || defaultSpotFallback(leg.instrument.symbol);
       const T = timeToExpiry(leg.instrument.expiry);
       const optionType = leg.instrument.option_type as "CE" | "PE";
-      const iv = calculateImpliedVolatility(optionType, S, leg.instrument.strike, T, DEFAULT_RISK_FREE_RATE, tick.last_price);
+      const iv = calculateImpliedVolatility(optionType, S, leg.instrument.strike, T, riskFreeRate, price);
       if (iv > 0) {
-        const greeks = calculateGreeks(optionType, S, leg.instrument.strike, T, DEFAULT_RISK_FREE_RATE, iv);
+        const greeks = calculateGreeks(optionType, S, leg.instrument.strike, T, riskFreeRate, iv);
         netDelta += greeks.delta * leg.quantity * sign;
         netGamma += greeks.gamma * leg.quantity * sign;
         netTheta += greeks.theta * leg.quantity * sign;
@@ -106,6 +111,7 @@ function formatMoney(val: number): string {
 }
 
 export default function PositionsPage() {
+  const riskFreeRateBySymbol = useSettingsStore((state) => state.analytics.riskFreeRatePercent);
   const { positions, closePosition, removePosition, clearClosed } = usePositionStore();
   const { tradingMode } = useAuth();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -130,9 +136,13 @@ export default function PositionsPage() {
 
   const snapshots = useMemo(() => {
     const map = new Map<string, PositionSnapshot>();
-    openPositions.forEach(p => map.set(p.id, evaluatePosition(p, getTick)));
+    openPositions.forEach(p => {
+      const symbol = p.legs.find((leg) => leg.instrument)?.instrument?.symbol ?? "DEFAULT";
+      const riskFreeRate = (riskFreeRateBySymbol[symbol] ?? riskFreeRateBySymbol.DEFAULT ?? 10) / 100;
+      map.set(p.id, evaluatePosition(p, getTick, riskFreeRate));
+    });
     return map;
-  }, [openPositions, getTick]);
+  }, [openPositions, getTick, riskFreeRateBySymbol]);
 
   const totalUnrealizedPnl = useMemo(
     () => openPositions.reduce((sum, p) => sum + (snapshots.get(p.id)?.pnl || 0), 0),
@@ -342,15 +352,16 @@ export default function PositionsPage() {
                                     <th className="py-1 text-left font-medium">Qty</th>
                                     <th className="py-1 text-left font-medium">Entry</th>
                                     <th className="py-1 text-left font-medium">Fill Time</th>
-                                    <th className="py-1 text-left font-medium">Mark</th>
+                                    <th className="py-1 text-left font-medium">Mark / exit</th>
                                     <th className="py-1 text-left font-medium">Leg P&L</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {position.legs.map(leg => {
                                     const fill = position.fills?.find(item => item.legId === leg.id);
-                                    const tick = leg.instrument ? getTick(leg.instrument.trading_symbol) : null;
-                                    const mark = tick?.last_price;
+                                    const exit = position.legExits?.[leg.id];
+                                    const tick = exit ? null : leg.instrument ? getTick(leg.instrument.trading_symbol) : null;
+                                    const mark = exit?.price ?? tick?.last_price;
                                     const sign = leg.action === "Buy" ? 1 : -1;
                                     const legPnl = typeof mark === "number" ? (mark - leg.entryPrice) * leg.quantity * sign : null;
 
@@ -363,7 +374,7 @@ export default function PositionsPage() {
                                         <td className="tnum py-1">{leg.quantity}</td>
                                         <td className="tnum py-1">{leg.entryPrice.toFixed(2)}</td>
                                         <td className="py-1">{fill ? new Date(fill.filledAt).toLocaleTimeString() : "Legacy"}</td>
-                                        <td className="tnum py-1">{typeof mark === "number" ? mark.toFixed(2) : "-"}</td>
+                                        <td className="tnum py-1">{typeof mark === "number" ? mark.toFixed(2) : "-"}{exit && <p className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">{exit.reason}</p>}</td>
                                         <td className={cn("tnum py-1", legPnl !== null && (legPnl >= 0 ? "text-[var(--color-profit)]" : "text-[var(--color-loss)]"))}>
                                           {legPnl !== null ? formatMoney(legPnl) : "-"}
                                         </td>

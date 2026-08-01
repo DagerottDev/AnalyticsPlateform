@@ -33,8 +33,13 @@ async def create_basket(
     return record
 
 
-async def load_open_baskets(db: AsyncSession) -> list[LiveBasketRecord]:
-    result = await db.execute(select(LiveBasketRecord).where(LiveBasketRecord.status == "Open"))
+async def load_open_baskets(
+    db: AsyncSession, *, owner_id: str | None = None
+) -> list[LiveBasketRecord]:
+    statement = select(LiveBasketRecord).where(LiveBasketRecord.status == "Open")
+    if owner_id is not None:
+        statement = statement.where(LiveBasketRecord.owner_id == owner_id)
+    result = await db.execute(statement)
     return list(result.scalars())
 
 

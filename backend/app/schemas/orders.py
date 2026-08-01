@@ -1,5 +1,6 @@
 """Validated request and response models for broker order execution."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -65,8 +66,12 @@ class BasketLegRequest(_OrderPrices):
     # Broker-enforced exchange stop order placed right after entry, opposite
     # side, at this trigger price — survives the app/server going down.
     stop_loss: float | None = Field(default=None, ge=0)
-    # Watched by the basket monitor loop, not a resting broker order — only
-    # protected while the backend job is running and connected.
+    # A premium-price target. The monitor applies the appropriate comparison
+    # for the entry side (Buy: price >= target; Sell: price <= target).
+    target_price: float | None = Field(default=None, gt=0)
+    # Compatibility for clients that used the first incomplete basket API.
+    # Unlike target_price this is a rupee P&L target and should not be used by
+    # new callers.
     take_profit: float | None = Field(default=None, ge=0)
 
 
@@ -84,6 +89,9 @@ class BasketLegResult(BaseModel):
     symbol: str
     id: str | None = None
     message: str
+    status: str = "Failed"
+    filled_quantity: int = 0
+    protective_stop_order_id: str | None = None
 
 
 class BasketOrderResponse(BaseModel):
@@ -109,3 +117,54 @@ class BrokerOrder(BaseModel):
 
 class OrdersResponse(BaseModel):
     orders: list[BrokerOrder]
+
+
+GttExecutionType = Literal["MARKET", "LIMIT"]
+GttStatus = Literal["Pending", "Triggered", "Placed", "Failed", "Cancelled", "Expired"]
+
+
+class CreateGttOrderRequest(BaseModel):
+    symbol: str = Field(min_length=3, max_length=80)
+    quantity: int = Field(gt=0, le=1_000_000)
+    side: OrderSide
+    product_type: ProductType = "INTRADAY"
+    execution_type: GttExecutionType
+    trigger_price: float = Field(gt=0)
+    limit_price: float = Field(default=0, ge=0)
+    expires_at: datetime
+
+    @model_validator(mode="after")
+    def validate_gtt(self) -> "CreateGttOrderRequest":
+        if self.execution_type == "LIMIT" and self.limit_price <= 0:
+            raise ValueError("limit_price is required for a limit GTT")
+        if self.execution_type == "MARKET" and self.limit_price != 0:
+            raise ValueError("limit_price must be zero for a market GTT")
+        if self.expires_at.tzinfo is None or self.expires_at <= datetime.now(
+            self.expires_at.tzinfo
+        ):
+            raise ValueError("expires_at must be in the future and timezone-aware")
+        return self
+
+
+class GttOrderResponse(BaseModel):
+    id: str
+    broker_name: str
+    symbol: str
+    side: OrderSide
+    quantity: int
+    product_type: str
+    execution_type: GttExecutionType
+    trigger_price: float
+    limit_price: float
+    expires_at: datetime
+    status: GttStatus
+    native_order_id: str | None = None
+    execution_order_id: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    triggered_at: datetime | None = None
+    closed_at: datetime | None = None
+
+
+class GttOrdersResponse(BaseModel):
+    orders: list[GttOrderResponse]

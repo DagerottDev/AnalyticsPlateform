@@ -246,6 +246,24 @@ async def test_get_instruments_raises_when_expiry_discovery_fails() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_instruments_treats_no_expiry_as_empty_universe() -> None:
+    """A valid equity with no active F&O contract should not log as an outage."""
+    service = _make_service()
+    service.client.optionchain = MagicMock(
+        return_value={
+            "s": "error",
+            "code": -470,
+            "data": {},
+            "message": "There are no expiry contracts.",
+        }
+    )
+
+    assert await service.get_instruments("WHIRLPOOL") == []
+    assert await service.get_instruments("WHIRLPOOL") == []
+    service.client.optionchain.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_get_instruments_skips_an_expiry_that_fails() -> None:
     """One bad expiry's chain call doesn't fail the whole request."""
     service = _make_service()

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Bell, Check, CloudOff, Loader2, Moon, Palette, RotateCcw, SlidersHorizontal, Sun } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -12,222 +13,111 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { INDICES } from "@/components/market/InstrumentSelector";
-import { useSettingsStore, ThemeMode } from "@/stores/settingsStore";
+import { CHART_INDICATOR_DEFINITIONS } from "@/lib/chartIndicators";
+import type { GreekMetric } from "@/lib/strikeGreekAnalysis";
 import { requestNotificationPermission } from "@/lib/notifications";
-import { cn } from "@/lib/utils";
+import { resetUserPreferences } from "@/lib/userPreferences";
 import { AlertDeliverySettings, getAlertDeliverySettings, saveAlertDeliverySettings } from "@/lib/alertDelivery";
-import { Moon, Sun, Palette, Bell, SlidersHorizontal, RotateCcw } from "lucide-react";
+import { formatApiError } from "@/lib/apiError";
+import { useAuthStore } from "@/stores/authStore";
+import { INDEX_SYMBOLS, useSettingsStore, type ThemeMode } from "@/stores/settingsStore";
+import { cn } from "@/lib/utils";
 
-function ThemeOption({
-  mode,
-  active,
-  onSelect,
-}: {
-  mode: ThemeMode;
-  active: boolean;
-  onSelect: () => void;
-}) {
+const GREEKS: GreekMetric[] = ["delta", "gamma", "theta", "vega", "rho", "vanna", "vomma", "charm", "speed", "color", "zomma", "ultima"];
+const GREEK_LABEL: Record<GreekMetric, string> = { delta: "Delta", gamma: "Gamma", theta: "Theta", vega: "Vega", rho: "Rho", vanna: "Vanna", vomma: "Vomma", charm: "Charm", speed: "Speed", color: "Color", zomma: "Zomma", ultima: "Ultima" };
+
+function Help({ children }: { children: React.ReactNode }) {
+  return <p className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)]">{children}</p>;
+}
+
+function ThemeOption({ mode, active, onSelect }: { mode: ThemeMode; active: boolean; onSelect: () => void }) {
   const Icon = mode === "dark" ? Moon : Sun;
-  const label = mode === "dark" ? "Dark" : "Light";
+  return <button type="button" onClick={onSelect} className={cn("flex flex-1 flex-col items-center gap-2 rounded-lg border p-4 transition-all focus-ring", active ? "border-[var(--color-accent-blue)] bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]" : "border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-accent)] hover:text-[var(--color-text-primary)]")}><Icon className="h-5 w-5" /><span className="text-sm font-semibold">{mode === "dark" ? "Dark" : "Light"}</span></button>;
+}
 
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        "flex flex-1 flex-col items-center gap-2 rounded-lg border p-4 transition-all",
-        active
-          ? "border-[var(--color-accent-blue)] bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]"
-          : "border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-accent)] hover:text-[var(--color-text-primary)]"
-      )}
-    >
-      <Icon className="h-5 w-5" />
-      <span className="text-sm font-semibold">{label}</span>
-    </button>
-  );
+function SettingTitle({ title, children }: { title: string; children: React.ReactNode }) {
+  return <div><p className="text-sm font-medium text-[var(--color-text-primary)]">{title}</p><Help>{children}</Help></div>;
 }
 
 export default function SettingsPage() {
-  const {
-    theme,
-    defaultSymbol,
-    notifyToast,
-    notifyDesktop,
-    setTheme,
-    setDefaultSymbol,
-    setNotifyToast,
-    setNotifyDesktop,
-    resetToDefaults,
-  } = useSettingsStore();
-
+  const settings = useSettingsStore();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const owner = useAuthStore((state) => state.user?.client_id ?? null);
   const [requestingPermission, setRequestingPermission] = useState(false);
   const [delivery, setDelivery] = useState<AlertDeliverySettings | null>(null);
   const [telegramToken, setTelegramToken] = useState("");
   const [savingDelivery, setSavingDelivery] = useState(false);
   const [deliveryError, setDeliveryError] = useState<unknown>(null);
+  const [watchlistText, setWatchlistText] = useState(settings.general.watchlist.join(", "));
 
+  useEffect(() => setWatchlistText(settings.general.watchlist.join(", ")), [settings.general.watchlist]);
   useEffect(() => {
+    if (!isAuthenticated) { setDelivery(null); return; }
     void getAlertDeliverySettings().then(setDelivery).catch(setDeliveryError);
-  }, []);
+  }, [isAuthenticated]);
 
-  const updateDelivery = <K extends keyof AlertDeliverySettings>(key: K, value: AlertDeliverySettings[K]) => {
-    setDelivery(current => current ? { ...current, [key]: value } : current);
+  const syncLabel = useMemo(() => {
+    if (!isAuthenticated) return "Saved on this device";
+    if (settings.syncStatus === "saving" || settings.syncStatus === "loading") return "Saving profile…";
+    if (settings.syncStatus === "error") return "Saved locally — retrying";
+    return "Saved to profile";
+  }, [isAuthenticated, settings.syncStatus]);
+
+  const update = settings.updatePreferences;
+  const updateDelivery = <K extends keyof AlertDeliverySettings>(key: K, value: AlertDeliverySettings[K]) => setDelivery((current) => current ? { ...current, [key]: value } : current);
+  const applyWatchlist = () => {
+    const next = Array.from(new Set(watchlistText.split(",").map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))).slice(0, 20);
+    if (!next.length) { toast.error("Keep at least one watchlist symbol."); return; }
+    update((current) => ({ ...current, general: { ...current.general, watchlist: next } }));
   };
-
-  const saveDelivery = async () => {
-    if (!delivery) return;
-    setSavingDelivery(true);
-    setDeliveryError(null);
-    try {
-      const saved = await saveAlertDeliverySettings({ ...delivery, telegramBotToken: telegramToken || undefined });
-      setDelivery(saved);
-      setTelegramToken("");
-      toast.success("Alert delivery settings saved");
-    } catch (cause) {
-      setDeliveryError(cause);
-      toast.error("Could not save alert delivery settings.");
-    } finally {
-      setSavingDelivery(false);
-    }
-  };
-
-  const handleToggleDesktop = async (enabled: boolean) => {
-    if (!enabled) {
-      setNotifyDesktop(false);
-      return;
-    }
-
+  const handleDesktop = async (enabled: boolean) => {
+    if (!enabled) { settings.setNotifyDesktop(false); return; }
     setRequestingPermission(true);
     try {
       const permission = await requestNotificationPermission();
-      if (permission === "granted") {
-        setNotifyDesktop(true);
-        toast.success("Desktop notifications enabled");
-      } else {
-        setNotifyDesktop(false);
-        toast.error("Desktop notifications blocked", {
-          description: "Allow notifications for this site in your browser settings, then try again.",
-        });
+      settings.setNotifyDesktop(permission === "granted");
+      if (permission !== "granted") toast.error("Allow browser notifications, then try again.");
+    } finally { setRequestingPermission(false); }
+  };
+  const reset = async () => {
+    settings.resetToDefaults();
+    if (isAuthenticated && owner) {
+      try {
+        const response = await resetUserPreferences();
+        settings.applyServerPreferences(response, owner, false);
+      } catch (error) {
+        toast.error("Defaults restored locally; profile reset will retry when the server reconnects.");
+        settings.markSyncError(formatApiError(error));
       }
-    } finally {
-      setRequestingPermission(false);
     }
+    toast.success("Generic preferences reset. Alert-delivery channels were kept.");
+  };
+  const saveDelivery = async () => {
+    if (!delivery) return;
+    setSavingDelivery(true); setDeliveryError(null);
+    try { const saved = await saveAlertDeliverySettings({ ...delivery, telegramBotToken: telegramToken || undefined }); setDelivery(saved); setTelegramToken(""); toast.success("Alert delivery settings saved"); }
+    catch (error) { setDeliveryError(error); toast.error("Could not save alert delivery settings."); }
+    finally { setSavingDelivery(false); }
   };
 
-  const handleReset = () => {
-    resetToDefaults();
-    toast.success("Settings reset to defaults");
-  };
+  return <DashboardLayout><PageContainer>
+    <div className="flex flex-wrap items-center justify-between gap-3"><SectionHeader title="Settings" description="Personal defaults apply immediately and sync to your authenticated profile." /><div className="flex items-center gap-2"><span className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">{settings.syncStatus === "error" ? <CloudOff className="h-3.5 w-3.5" /> : settings.syncStatus === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5 text-[var(--color-profit)]" />}{syncLabel}</span><Button variant="ghost" size="sm" onClick={() => void reset()}><RotateCcw className="h-3.5 w-3.5" /> Reset defaults</Button></div></div>
+    {settings.syncError ? <ApiErrorDisplay error={settings.syncError} /> : null}
 
-  return (
-    <DashboardLayout>
-      <PageContainer>
-        <div className="flex items-center justify-between gap-4">
-          <SectionHeader
-            title="Settings"
-            description="App-wide preferences — saved locally and applied immediately."
-          />
-          <Button variant="ghost" size="sm" onClick={handleReset}>
-            <RotateCcw className="h-3.5 w-3.5" /> Reset to Defaults
-          </Button>
-        </div>
+    <Card className="flex flex-col gap-4"><h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]"><Palette className="h-4 w-4 text-[var(--color-accent-blue)]" /> Appearance & general</h3><div className="flex gap-3"><ThemeOption mode="dark" active={settings.appearance.theme === "dark"} onSelect={() => settings.setTheme("dark")} /><ThemeOption mode="light" active={settings.appearance.theme === "light"} onSelect={() => settings.setTheme("light")} /></div><div className="grid gap-4 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-2"><div><SettingTitle title="Default symbol">Pre-selected when you open analytics pages, charts, alerts, and replay.</SettingTitle><Select className="mt-2" value={settings.general.defaultSymbol} onChange={(event) => settings.setDefaultSymbol(event.target.value)}>{INDICES.map((symbol) => <option key={symbol} value={symbol}>{symbol}</option>)}</Select></div><div><SettingTitle title="Watchlist">The symbols shown in the dashboard ticker and instrument selector. Comma-separated, up to 20.</SettingTitle><Input className="mt-2" value={watchlistText} onChange={(event) => setWatchlistText(event.target.value)} onBlur={applyWatchlist} onKeyDown={(event) => { if (event.key === "Enter") applyWatchlist(); }} /></div></div></Card>
 
-        {/* Appearance */}
-        <Card className="flex flex-col gap-4">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
-            <Palette className="h-4 w-4 text-[var(--color-accent-blue)]" /> Appearance
-          </h3>
-          <div className="flex gap-3">
-            <ThemeOption mode="dark" active={theme === "dark"} onSelect={() => setTheme("dark")} />
-            <ThemeOption mode="light" active={theme === "light"} onSelect={() => setTheme("light")} />
-          </div>
-        </Card>
+    <Card className="flex flex-col gap-4"><h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]"><Bell className="h-4 w-4 text-[var(--color-accent-blue)]" /> Notifications</h3><div className="flex items-center justify-between gap-4"><SettingTitle title="Toast notifications">Shows an in-app confirmation when an alert triggers.</SettingTitle><Switch checked={settings.notifications.toast} onChange={settings.setNotifyToast} label="Toggle toast notifications" /></div><div className="flex items-center justify-between gap-4 border-t border-[var(--color-border-subtle)] pt-4"><SettingTitle title="Desktop notifications">Shows a browser notification when an alert triggers outside the focused tab.</SettingTitle><Switch checked={settings.notifications.desktop} onChange={handleDesktop} disabled={requestingPermission} label="Toggle desktop notifications" /></div></Card>
 
-        <Card className="flex flex-col gap-4">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
-            <Bell className="h-4 w-4 text-[var(--color-accent-blue)]" /> Server-side alert delivery
-          </h3>
-          <p className="text-xs text-[var(--color-text-secondary)]">These channels are sent by the backend when an alert fires, including while the app is closed.</p>
-          {!delivery ? <p className="text-sm text-[var(--color-text-muted)]">Loading delivery settings…</p> : <>
-            <div className="grid gap-3 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-[1fr_2fr_auto] md:items-center">
-              <div><p className="text-sm font-medium">Email</p><p className="text-xs text-[var(--color-text-secondary)]">Requires SMTP server configuration.</p></div>
-              <Input type="email" value={delivery.emailRecipient || ""} onChange={e => updateDelivery("emailRecipient", e.target.value || null)} placeholder="you@example.com" />
-              <Switch checked={delivery.emailEnabled} onChange={value => updateDelivery("emailEnabled", value)} label="Enable email alerts" />
-            </div>
-            <div className="grid gap-3 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-[1fr_2fr_auto] md:items-center">
-              <div><p className="text-sm font-medium">Webhook</p><p className="text-xs text-[var(--color-text-secondary)]">POSTs an alert.triggered JSON payload.</p></div>
-              <Input type="url" value={delivery.webhookUrl || ""} onChange={e => updateDelivery("webhookUrl", e.target.value || null)} placeholder="https://example.com/alerts" />
-              <Switch checked={delivery.webhookEnabled} onChange={value => updateDelivery("webhookEnabled", value)} label="Enable webhooks" />
-            </div>
-            <div className="grid gap-3 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-[1fr_2fr_auto] md:items-center">
-              <div><p className="text-sm font-medium">Slack</p><p className="text-xs text-[var(--color-text-secondary)]">Incoming webhook message.</p></div>
-              <Input type="url" value={delivery.slackWebhookUrl || ""} onChange={e => updateDelivery("slackWebhookUrl", e.target.value || null)} placeholder="https://hooks.slack.com/..." />
-              <Switch checked={delivery.slackEnabled} onChange={value => updateDelivery("slackEnabled", value)} label="Enable Slack alerts" />
-            </div>
-            <div className="grid gap-3 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-[1fr_2fr_auto] md:items-center">
-              <div><p className="text-sm font-medium">Telegram</p><p className="text-xs text-[var(--color-text-secondary)]">Bot token is write-only and encrypted.</p></div>
-              <div className="grid gap-2 sm:grid-cols-2"><Input value={delivery.telegramChatId || ""} onChange={e => updateDelivery("telegramChatId", e.target.value || null)} placeholder="Chat ID" /><Input type="password" value={telegramToken} onChange={e => setTelegramToken(e.target.value)} placeholder={delivery.telegramBotTokenConfigured ? "Bot token saved — enter to replace" : "Bot token"} /></div>
-              <Switch checked={delivery.telegramEnabled} onChange={value => updateDelivery("telegramEnabled", value)} label="Enable Telegram alerts" />
-            </div>
-            <div><Button onClick={saveDelivery} disabled={savingDelivery}>{savingDelivery ? "Saving…" : "Save delivery settings"}</Button></div>
-          </>}
-          {deliveryError ? <ApiErrorDisplay error={deliveryError} /> : null}
-        </Card>
+    <Card className="flex flex-col gap-4"><h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]"><SlidersHorizontal className="h-4 w-4 text-[var(--color-accent-blue)]" /> Chart & market data defaults</h3><div className="grid gap-4 md:grid-cols-3"><label className="text-sm text-[var(--color-text-primary)]">Candle timeframe<Help>Initial interval for Advanced Charting and new Greek workspaces.</Help><Select className="mt-2" value={settings.charts.timeframe} onChange={(event) => update((current) => ({ ...current, charts: { ...current.charts, timeframe: event.target.value as typeof current.charts.timeframe } }))}>{[1, 3, 5, 10, 15].map((value) => <option key={value} value={value}>{value} minute{value === 1 ? "" : "s"}</option>)}</Select></label><label className="text-sm text-[var(--color-text-primary)]">Chart history window<Help>Days of broker candles loaded when a chart opens.</Help><Select className="mt-2" value={settings.charts.historyDays} onChange={(event) => update((current) => ({ ...current, charts: { ...current.charts, historyDays: Number(event.target.value) } }))}>{[1, 3, 5, 7, 14, 30].map((value) => <option key={value} value={value}>{value} days</option>)}</Select></label><label className="text-sm text-[var(--color-text-primary)]">Snapshot refresh<Help>REST snapshot refresh when live WebSocket data is unavailable; it does not change live ticks.</Help><Select className="mt-2" value={settings.charts.refreshSeconds} onChange={(event) => update((current) => ({ ...current, charts: { ...current.charts, refreshSeconds: Number(event.target.value) as 15 | 30 | 60 } }))}>{[15, 30, 60].map((value) => <option key={value} value={value}>{value} seconds</option>)}</Select></label></div><div className="border-t border-[var(--color-border-subtle)] pt-4"><SettingTitle title="Chart indicators">Controls which overlays open by default and their starting parameters. You can still change them on an individual chart.</SettingTitle><div className="mt-3 grid gap-3 lg:grid-cols-2">{CHART_INDICATOR_DEFINITIONS.map((definition) => { const indicator = settings.charts.indicators[definition.id]; return <div key={definition.id} className="rounded-md border border-[var(--color-border-subtle)] p-3"><div className="flex items-center justify-between"><p className="text-sm font-semibold">{definition.label}</p><Switch checked={indicator.enabled} onChange={(enabled) => update((current) => ({ ...current, charts: { ...current.charts, indicators: { ...current.charts.indicators, [definition.id]: { ...current.charts.indicators[definition.id], enabled } } } }))} label={`Enable ${definition.label} by default`} /></div><div className="mt-2 flex flex-wrap gap-2">{definition.parameters.map((parameter) => <label key={parameter.key} className="text-xs text-[var(--color-text-secondary)]">{parameter.label}<Input className="mt-1 w-24" type="number" min={parameter.min} max={parameter.max} step={parameter.step} value={indicator.parameters[parameter.key]} onChange={(event) => { const value = event.target.valueAsNumber; if (Number.isFinite(value)) update((current) => ({ ...current, charts: { ...current.charts, indicators: { ...current.charts.indicators, [definition.id]: { ...current.charts.indicators[definition.id], parameters: { ...current.charts.indicators[definition.id].parameters, [parameter.key]: Math.min(parameter.max, Math.max(parameter.min, value)) } } } } })); }} /></label>)}</div></div>; })}</div></div></Card>
 
-        {/* General */}
-        <Card className="flex flex-col gap-4">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
-            <SlidersHorizontal className="h-4 w-4 text-[var(--color-accent-blue)]" /> General
-          </h3>
-          <div className="max-w-xs">
-            <label className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
-              Default Symbol
-            </label>
-            <Select value={defaultSymbol} onChange={(e) => setDefaultSymbol(e.target.value)}>
-              {INDICES.map((idx) => (
-                <option key={idx} value={idx}>
-                  {idx}
-                </option>
-              ))}
-            </Select>
-            <p className="mt-2 text-xs text-[var(--color-text-secondary)]">
-              Pre-selected on Option Chain, Charts, Volatility, Dealer Flow, Alerts, Strategy Builder, and Replay Mode.
-            </p>
-          </div>
-        </Card>
+    <Card className="flex flex-col gap-4"><h3 className="text-sm font-bold text-[var(--color-text-bright)]">Option Chain defaults</h3><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5"><label className="text-sm">Moneyness<Help>Initial strike filter in the Option Chain.</Help><Select className="mt-2" value={settings.optionChain.moneyness} onChange={(event) => update((current) => ({ ...current, optionChain: { ...current.optionChain, moneyness: event.target.value as typeof current.optionChain.moneyness } }))}><option value="all">All moneyness</option><option value="itm">ITM calls</option><option value="atm">ATM only</option><option value="otm">OTM calls</option></Select></label><label className="text-sm">Strike range<Help>How many strikes appear around ATM when the chain opens.</Help><Select className="mt-2" value={settings.optionChain.strikesEachSide ?? "all"} onChange={(event) => update((current) => ({ ...current, optionChain: { ...current.optionChain, strikesEachSide: event.target.value === "all" ? null : Number(event.target.value) as 5 | 10 | 20 } }))}><option value="all">All strikes</option><option value="5">±5 strikes</option><option value="10">±10 strikes</option><option value="20">±20 strikes</option></Select></label><label className="text-sm">GTT trigger validity<Help>Default number of days before a pending GTT trigger expires; it does not change order-entry defaults.</Help><Input className="mt-2" type="number" min="1" max="365" value={settings.optionChain.defaultGttValidityDays} onChange={(event) => update((current) => ({ ...current, optionChain: { ...current.optionChain, defaultGttValidityDays: Math.max(1, Math.min(365, event.target.valueAsNumber || 1)) } }))} /></label><div className="flex items-center justify-between pt-4"><SettingTitle title="Show Greeks">Displays calculated IV and Greeks columns.</SettingTitle><Switch checked={settings.optionChain.showGreeks} onChange={(showGreeks) => update((current) => ({ ...current, optionChain: { ...current.optionChain, showGreeks } }))} label="Show Greeks by default" /></div><div className="flex items-center justify-between pt-4"><SettingTitle title="Show buildup">Displays OI/price buildup labels.</SettingTitle><Switch checked={settings.optionChain.showBuildup} onChange={(showBuildup) => update((current) => ({ ...current, optionChain: { ...current.optionChain, showBuildup } }))} label="Show buildup by default" /></div></div></Card>
 
-        {/* Notifications */}
-        <Card className="flex flex-col gap-4">
-          <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
-            <Bell className="h-4 w-4 text-[var(--color-accent-blue)]" /> Notifications
-          </h3>
+    <Card className="flex flex-col gap-4"><h3 className="text-sm font-bold text-[var(--color-text-bright)]">Greek workspace defaults</h3><div className="grid gap-4 md:grid-cols-3"><label className="text-sm">Timeframe<Help>Initial Greek-series candle interval.</Help><Select className="mt-2" value={settings.greekWorkspace.timeframe} onChange={(event) => update((current) => ({ ...current, greekWorkspace: { ...current.greekWorkspace, timeframe: event.target.value as typeof current.greekWorkspace.timeframe } }))}>{[1, 3, 5, 10, 15].map((value) => <option key={value} value={value}>{value} minutes</option>)}</Select></label><div className="flex items-center justify-between pt-4"><SettingTitle title="Sync charts">Keeps horizontal zoom and time axis aligned across Greek charts.</SettingTitle><Switch checked={settings.greekWorkspace.syncCharts} onChange={(syncCharts) => update((current) => ({ ...current, greekWorkspace: { ...current.greekWorkspace, syncCharts } }))} label="Sync Greek charts" /></div><div className="flex items-center justify-between pt-4"><SettingTitle title="Education panel">Opens the Greek learning rail by default.</SettingTitle><Switch checked={settings.greekWorkspace.educationOpen} onChange={(educationOpen) => update((current) => ({ ...current, greekWorkspace: { ...current.greekWorkspace, educationOpen } }))} label="Show Greek education panel" /></div></div><div className="border-t border-[var(--color-border-subtle)] pt-4"><SettingTitle title="Visible Greeks">Choose the charts displayed for each new strike selection.</SettingTitle><div className="mt-2 flex flex-wrap gap-2">{GREEKS.map((metric) => { const selected = settings.greekWorkspace.visibleGreeks.includes(metric); return <Button key={metric} size="sm" variant={selected ? "primary" : "outline"} aria-pressed={selected} onClick={() => update((current) => ({ ...current, greekWorkspace: { ...current.greekWorkspace, visibleGreeks: selected ? current.greekWorkspace.visibleGreeks.filter((item) => item !== metric) : [...current.greekWorkspace.visibleGreeks, metric] } }))} disabled={selected && settings.greekWorkspace.visibleGreeks.length === 1}>{GREEK_LABEL[metric]}</Button>; })}</div></div></Card>
 
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text-primary)]">Toast notifications</p>
-              <p className="text-xs text-[var(--color-text-secondary)]">
-                Show an in-app toast when an alert triggers.
-              </p>
-            </div>
-            <Switch checked={notifyToast} onChange={setNotifyToast} label="Toggle toast notifications" />
-          </div>
+    <Card className="flex flex-col gap-4"><h3 className="text-sm font-bold text-[var(--color-text-bright)]">Greek panel overlays</h3><Help>Saved overlay defaults apply to each Greek chart when its layout is loaded. Length and multiplier work the same as their chart controls.</Help><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{GREEKS.map((metric) => { const panel = settings.greekWorkspace.panels[metric] ?? { overlay: "none" as const, period: 20, multiplier: 2 }; const updatePanel = (patch: Partial<typeof panel>) => update((current) => ({ ...current, greekWorkspace: { ...current.greekWorkspace, panels: { ...current.greekWorkspace.panels, [metric]: { ...(current.greekWorkspace.panels[metric] ?? panel), ...patch } } } })); return <div key={metric} className="rounded-md border border-[var(--color-border-subtle)] p-3"><p className="text-sm font-medium">{GREEK_LABEL[metric]}</p><Select className="mt-2" value={panel.overlay} onChange={(event) => updatePanel({ overlay: event.target.value as typeof panel.overlay })}><option value="none">No overlay</option><option value="sma">SMA</option><option value="ema">EMA</option><option value="bbands">Bollinger</option><option value="supertrend">Supertrend</option></Select>{panel.overlay !== "none" ? <div className="mt-2 flex gap-2"><Input aria-label={`${GREEK_LABEL[metric]} indicator length`} className="w-24" type="number" min="2" max="500" value={panel.period} onChange={(event) => updatePanel({ period: Math.max(2, Math.min(500, event.target.valueAsNumber || 2)) })} />{(panel.overlay === "bbands" || panel.overlay === "supertrend") ? <Input aria-label={`${GREEK_LABEL[metric]} multiplier`} className="w-24" type="number" min="0.1" max="10" step="0.1" value={panel.multiplier} onChange={(event) => updatePanel({ multiplier: Math.max(0.1, Math.min(10, event.target.valueAsNumber || 0.1)) })} /> : null}</div> : null}</div>; })}</div></Card>
 
-          <div className="flex items-center justify-between gap-4 border-t border-[var(--color-border-subtle)] pt-4">
-            <div>
-              <p className="text-sm font-medium text-[var(--color-text-primary)]">Desktop notifications</p>
-              <p className="text-xs text-[var(--color-text-secondary)]">
-                Also send a browser notification when an alert triggers, even if this tab isn&apos;t focused.
-              </p>
-            </div>
-            <Switch
-              checked={notifyDesktop}
-              onChange={handleToggleDesktop}
-              disabled={requestingPermission}
-              label="Toggle desktop notifications"
-            />
-          </div>
-        </Card>
-      </PageContainer>
-    </DashboardLayout>
-  );
+    <Card className="flex flex-col gap-4"><h3 className="text-sm font-bold text-[var(--color-text-bright)]">Replay, analytics, strategy & alerts</h3><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><label className="text-sm">Replay resolution<Help>Default historical candle interval before starting a replay.</Help><Select className="mt-2" value={settings.replay.resolution} onChange={(event) => update((current) => ({ ...current, replay: { ...current.replay, resolution: event.target.value as typeof current.replay.resolution } }))}>{[1, 5, 15].map((value) => <option key={value} value={value}>{value} minutes</option>)}</Select></label><label className="text-sm">Replay speed<Help>Initial playback rate; this can be changed during replay.</Help><Select className="mt-2" value={settings.replay.speedMultiplier} onChange={(event) => update((current) => ({ ...current, replay: { ...current.replay, speedMultiplier: Number(event.target.value) as typeof current.replay.speedMultiplier } }))}>{[1, 5, 10, 100].map((value) => <option key={value} value={value}>{value}x</option>)}</Select></label><label className="text-sm">Replay option side<Help>Which contracts are preselected in a new replay.</Help><Select className="mt-2" value={settings.replay.optionSide} onChange={(event) => update((current) => ({ ...current, replay: { ...current.replay, optionSide: event.target.value as typeof current.replay.optionSide } }))}><option value="BOTH">Call + Put</option><option value="CE">Call</option><option value="PE">Put</option></Select></label><label className="text-sm">Strategy preset<Help>Preset selected when Strategy Builder opens; it is never auto-submitted.</Help><Select className="mt-2" value={settings.strategy.defaultPreset} onChange={(event) => update((current) => ({ ...current, strategy: { ...current.strategy, defaultPreset: event.target.value as typeof current.strategy.defaultPreset } }))}>{["Iron Condor", "Straddle", "Strangle", "Butterfly", "Calendar", "Diagonal"].map((value) => <option key={value}>{value}</option>)}</Select></label><label className="text-sm">Backtest hold days<Help>Default number of trading days each historical strategy roll is held.</Help><Input className="mt-2" type="number" min="1" max="60" value={settings.strategy.backtestHoldingDays} onChange={(event) => update((current) => ({ ...current, strategy: { ...current.strategy, backtestHoldingDays: Math.max(1, Math.min(60, event.target.valueAsNumber || 1)) } }))} /></label><label className="text-sm">Backtest fresh DTE<Help>Default days-to-expiry used when each backtest roll is opened.</Help><Input className="mt-2" type="number" min="1" max="365" value={settings.strategy.backtestDaysToExpiry} onChange={(event) => update((current) => ({ ...current, strategy: { ...current.strategy, backtestDaysToExpiry: Math.max(1, Math.min(365, event.target.valueAsNumber || 1)) } }))} /></label><label className="text-sm">Alert metric<Help>Starting measurement when creating a new alert; change it per alert whenever needed.</Help><Select className="mt-2" value={settings.alerts.metric} onChange={(event) => update((current) => ({ ...current, alerts: { ...current.alerts, metric: event.target.value as typeof current.alerts.metric } }))}>{["Price", "IV", "Delta", "Gamma", "Theta", "Vega", "Call GEX", "Put GEX", "Net GEX", "VWAP Breakout"].map((value) => <option key={value}>{value}</option>)}</Select></label><label className="text-sm">Alert condition<Help>Starting comparison operator when creating a new alert.</Help><Select className="mt-2" value={settings.alerts.operator} onChange={(event) => update((current) => ({ ...current, alerts: { ...current.alerts, operator: event.target.value as typeof current.alerts.operator } }))}>{[">", "<", ">=", "<="].map((value) => <option key={value}>{value}</option>)}</Select></label><label className="text-sm">Alert cooldown<Help>Default minimum wait between repeated alerts for a newly created condition.</Help><Select className="mt-2" value={settings.alerts.cooldownMinutes} onChange={(event) => update((current) => ({ ...current, alerts: { ...current.alerts, cooldownMinutes: Number(event.target.value) } }))}>{[0, 5, 15, 30, 60, 240].map((value) => <option key={value} value={value}>{value === 0 ? "Off (fire once)" : `${value} min`}</option>)}</Select></label></div><div className="border-t border-[var(--color-border-subtle)] pt-4"><SettingTitle title="Risk-free rate by underlying">Annual percentage used by Greeks, IV, strategy pricing, Monte Carlo, and replay. Other/custom symbols use the final value.</SettingTitle><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[...INDEX_SYMBOLS, "DEFAULT"].map((symbol) => <label key={symbol} className="text-xs text-[var(--color-text-secondary)]">{symbol === "DEFAULT" ? "Other/custom symbols" : symbol}<Input className="mt-1" type="number" min="0" max="50" step="0.01" value={settings.analytics.riskFreeRatePercent[symbol]} onChange={(event) => update((current) => ({ ...current, analytics: { ...current.analytics, riskFreeRatePercent: { ...current.analytics.riskFreeRatePercent, [symbol]: Math.max(0, Math.min(50, event.target.valueAsNumber || 0)) } } }))} /></label>)}</div></div><div><SettingTitle title="Fallback replay IV by underlying">Used only if the broker has no option-price history for the replayed contract.</SettingTitle><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[...INDEX_SYMBOLS, "DEFAULT"].map((symbol) => <label key={symbol} className="text-xs text-[var(--color-text-secondary)]">{symbol === "DEFAULT" ? "Other/custom symbols" : symbol}<Input className="mt-1" type="number" min="0.01" max="300" step="0.1" value={settings.replay.fallbackIvPercent[symbol]} onChange={(event) => update((current) => ({ ...current, replay: { ...current.replay, fallbackIvPercent: { ...current.replay.fallbackIvPercent, [symbol]: Math.max(0.01, Math.min(300, event.target.valueAsNumber || 0.01)) } } }))} /></label>)}</div></div></Card>
+
+    <Card className="flex flex-col gap-4"><h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]"><Bell className="h-4 w-4 text-[var(--color-accent-blue)]" /> Server-side alert delivery</h3><Help>These encrypted delivery channels are separate from generic preferences and continue firing while the app is closed.</Help>{!isAuthenticated ? <p className="text-sm text-[var(--color-text-muted)]">Connect an account to configure delivery channels.</p> : !delivery ? <p className="text-sm text-[var(--color-text-muted)]">Loading delivery settings…</p> : <><div className="grid gap-3 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-[1fr_2fr_auto] md:items-center"><SettingTitle title="Email">Requires SMTP server configuration.</SettingTitle><Input type="email" value={delivery.emailRecipient || ""} onChange={(event) => updateDelivery("emailRecipient", event.target.value || null)} placeholder="you@example.com" /><Switch checked={delivery.emailEnabled} onChange={(value) => updateDelivery("emailEnabled", value)} label="Enable email alerts" /></div><div className="grid gap-3 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-[1fr_2fr_auto] md:items-center"><SettingTitle title="Webhook">POSTs an alert.triggered JSON payload.</SettingTitle><Input type="url" value={delivery.webhookUrl || ""} onChange={(event) => updateDelivery("webhookUrl", event.target.value || null)} placeholder="https://example.com/alerts" /><Switch checked={delivery.webhookEnabled} onChange={(value) => updateDelivery("webhookEnabled", value)} label="Enable webhooks" /></div><div className="grid gap-3 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-[1fr_2fr_auto] md:items-center"><SettingTitle title="Slack">Sends an incoming-webhook message.</SettingTitle><Input type="url" value={delivery.slackWebhookUrl || ""} onChange={(event) => updateDelivery("slackWebhookUrl", event.target.value || null)} placeholder="https://hooks.slack.com/..." /><Switch checked={delivery.slackEnabled} onChange={(value) => updateDelivery("slackEnabled", value)} label="Enable Slack alerts" /></div><div className="grid gap-3 border-t border-[var(--color-border-subtle)] pt-4 md:grid-cols-[1fr_2fr_auto] md:items-center"><SettingTitle title="Telegram">Bot token is write-only and encrypted.</SettingTitle><div className="grid gap-2 sm:grid-cols-2"><Input value={delivery.telegramChatId || ""} onChange={(event) => updateDelivery("telegramChatId", event.target.value || null)} placeholder="Chat ID" /><Input type="password" value={telegramToken} onChange={(event) => setTelegramToken(event.target.value)} placeholder={delivery.telegramBotTokenConfigured ? "Bot token saved — enter to replace" : "Bot token"} /></div><Switch checked={delivery.telegramEnabled} onChange={(value) => updateDelivery("telegramEnabled", value)} label="Enable Telegram alerts" /></div><Button onClick={() => void saveDelivery()} disabled={savingDelivery}>{savingDelivery ? "Saving…" : "Save delivery settings"}</Button></>}{deliveryError ? <ApiErrorDisplay error={deliveryError} /> : null}</Card>
+  </PageContainer></DashboardLayout>;
 }

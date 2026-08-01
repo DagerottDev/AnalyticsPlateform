@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { Suspense, useState, useEffect, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments, getMarginRequirement, MarginResult } from "@/lib/market";
 import { calculateImpliedVolatility } from "@/lib/greeks";
-import { timeToExpiry, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
+import { timeToExpiry, defaultSpotFallback } from "@/lib/optionMath";
 import {
   StrategyLeg,
   calculatePayoffProfile,
@@ -33,15 +34,23 @@ import { PayoffChart } from "@/components/strategy-builder/PayoffChart";
 import { StrategyMetrics } from "@/components/strategy-builder/StrategyMetrics";
 import { MonteCarloPanel } from "@/components/strategy-builder/MonteCarloPanel";
 import { StrategyBacktestPanel } from "@/components/strategy-builder/StrategyBacktestPanel";
+import { parseStrategyBasket } from "@/lib/basket";
 
-export default function StrategyBuilderPage() {
+function StrategyBuilderContent() {
+  const searchParams = useSearchParams();
+  const basketSeeded = useRef(false);
   const executePaperOrder = usePositionStore((state) => state.executePaperOrder);
   const { tradingMode } = useAuth();
 
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
+  const strategyPreferences = useSettingsStore((state) => state.strategy);
+  const riskFreeRate = useSettingsStore((state) => (
+    (state.analytics.riskFreeRatePercent[symbol] ?? state.analytics.riskFreeRatePercent.DEFAULT ?? 10) / 100
+  ));
   const [expiry, setExpiry] = useState<string | null>(null);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [legs, setLegs] = useState<StrategyLeg[]>([]);
+  const incomingBasket = useMemo(() => parseStrategyBasket(searchParams.get("basket")), [searchParams]);
 
   // Subscriptions
   const tradingSymbols = useMemo(() => {
@@ -71,8 +80,29 @@ export default function StrategyBuilderPage() {
           if (expiries.length > 0) {
             setExpiry(expiries[0]);
           }
-          // Reset legs when symbol changes
-          setLegs([]);
+          if (!basketSeeded.current && incomingBasket.length > 0) {
+            const hydrated = incomingBasket.flatMap((seed, index) => {
+              const instrument = data.instruments.find(item => item.trading_symbol === seed.s);
+              return instrument ? [{
+                id: `basket-${index}-${seed.s}`,
+                instrument,
+                action: seed.a,
+                quantity: seed.q,
+                entryPrice: seed.p,
+                iv: 0.15,
+              }] : [];
+            });
+            if (hydrated.length > 0) {
+              setLegs(hydrated);
+              const seededExpiry = hydrated[0].instrument.expiry;
+              if (seededExpiry) setExpiry(seededExpiry);
+            }
+            basketSeeded.current = true;
+          } else if (!basketSeeded.current) {
+            // Reset legs only for an ordinary symbol change, never after the
+            // new-window basket handoff has populated them.
+            setLegs([]);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch instruments", err);
@@ -80,7 +110,7 @@ export default function StrategyBuilderPage() {
     }
     fetchContracts();
     return () => { isMounted = false; };
-  }, [symbol]);
+  }, [symbol, incomingBasket]);
 
   // Live Calculations
   const underlyingTick = getTick(symbol);
@@ -116,7 +146,7 @@ export default function StrategyBuilderPage() {
           spotPrice,
           leg.instrument.strike!,
           T,
-          DEFAULT_RISK_FREE_RATE,
+          riskFreeRate,
           tick.last_price
         );
 
@@ -130,20 +160,20 @@ export default function StrategyBuilderPage() {
       
       return changed ? updated : currentLegs;
     });
-  }, [getTick, spotPrice]); // Depends on ticks arriving
+  }, [getTick, riskFreeRate, spotPrice]); // Depends on ticks arriving
 
   // Derive Strategy Data
   const payoffData = useMemo(() => {
-    return calculatePayoffProfile(legs, spotPrice, 0.10, 0.10, 100);
-  }, [legs, spotPrice]);
+    return calculatePayoffProfile(legs, spotPrice, riskFreeRate, 0.10, 100);
+  }, [legs, riskFreeRate, spotPrice]);
 
   const profileMetrics = useMemo(() => {
     return deriveMetricsFromProfile(payoffData);
   }, [payoffData]);
 
   const netGreeks = useMemo(() => {
-    return calculateNetGreeks(legs, spotPrice, 0.10);
-  }, [legs, spotPrice]);
+    return calculateNetGreeks(legs, spotPrice, 0.10, riskFreeRate);
+  }, [legs, riskFreeRate, spotPrice]);
 
   const totalCost = useMemo(() => {
     return legs.reduce((sum, leg) => {
@@ -151,7 +181,7 @@ export default function StrategyBuilderPage() {
       return sum + (leg.entryPrice * leg.quantity * sign);
     }, 0);
   }, [legs]);
-  const simulation = useMemo(() => simulateStrategyPnl(legs, spotPrice), [legs, spotPrice]);
+  const simulation = useMemo(() => simulateStrategyPnl(legs, spotPrice, 2000, Date.now(), riskFreeRate), [legs, riskFreeRate, spotPrice]);
 
   const validLegs = legs.filter(l => l.instrument !== null);
 
@@ -262,6 +292,7 @@ export default function StrategyBuilderPage() {
               currentExpiry={expiry}
               lotSize={lotSize}
               spot={spotPrice}
+              defaultPreset={strategyPreferences.defaultPreset}
             />
           </div>
 
@@ -305,7 +336,7 @@ export default function StrategyBuilderPage() {
             )}
             <StrategyMetrics metrics={profileMetrics} netGreeks={netGreeks} cost={totalCost} />
             <MonteCarloPanel result={simulation} />
-            <StrategyBacktestPanel symbol={symbol} currentSpot={spotPrice} legs={legs} />
+            <StrategyBacktestPanel symbol={symbol} currentSpot={spotPrice} legs={legs} defaultHoldingDays={strategyPreferences.backtestHoldingDays} defaultDaysToExpiry={strategyPreferences.backtestDaysToExpiry} />
             <PayoffChart data={payoffData} currentSpot={spotPrice} />
           </div>
 
@@ -313,4 +344,8 @@ export default function StrategyBuilderPage() {
       </PageContainer>
     </DashboardLayout>
   );
+}
+
+export default function StrategyBuilderPage() {
+  return <Suspense fallback={<div className="p-8 text-sm text-[var(--color-text-muted)]">Loading strategy builder…</div>}><StrategyBuilderContent /></Suspense>;
 }

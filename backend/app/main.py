@@ -21,6 +21,7 @@ from app.middleware.request_id import RequestIdMiddleware
 from app.services.alert_evaluator import alert_evaluation_loop
 from app.services.basket_monitor import basket_monitor_loop
 from app.services.broker_session_store import restore_broker_session
+from app.services.gtt_monitor import gtt_monitor_loop
 from app.services.iv_universe_backfill import iv_universe_backfill_loop
 from app.services.market_data_backfill import market_data_backfill_loop
 from app.services.session_manager import session_manager
@@ -74,6 +75,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             basket_monitor_loop(settings, basket_monitor_stop_event),
             name="basket-monitor",
         )
+    gtt_stop_event = asyncio.Event()
+    gtt_task = asyncio.create_task(gtt_monitor_loop(settings, gtt_stop_event), name="gtt-monitor")
     yield
     # Shutdown
     backfill_stop_event.set()
@@ -88,6 +91,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     basket_monitor_stop_event.set()
     if basket_monitor_task is not None:
         await basket_monitor_task
+    gtt_stop_event.set()
+    await gtt_task
     await session_manager.clear()
     logger.info("Shutting down %s", settings.app_title)
 

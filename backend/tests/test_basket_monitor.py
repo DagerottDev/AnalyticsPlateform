@@ -100,6 +100,64 @@ async def test_per_leg_target_hit_exits_that_leg_and_cancels_its_stop(
 
 
 @pytest.mark.asyncio
+async def test_target_price_exits_buy_and_sell_legs_with_side_aware_comparison(
+    test_settings: Settings, db_session: AsyncSession
+):
+    service = AsyncMock()
+    service.get_quotes.return_value = [
+        {"trading_symbol": "NFO:BUY", "last_price": 160.0},
+        {"trading_symbol": "NFO:SELL", "last_price": 80.0},
+    ]
+    await session_manager.set_session("TEST_CLIENT_001", service)
+    buy = _leg("NFO:BUY", entry=100.0)
+    buy["target_price"] = 150.0
+    sell = _leg("NFO:SELL", entry=100.0)
+    sell["side"] = "Sell"
+    sell["target_price"] = 90.0
+    basket = await create_basket(
+        db_session, owner_id="TEST_CLIENT_001", legs=[buy, sell],
+        combined_stop_loss=None, combined_take_profit=None,
+    )
+
+    await basket_monitor.run_basket_monitor(test_settings)
+
+    refreshed = await db_session.get(type(basket), basket.id)
+    assert [leg["status"] for leg in refreshed.legs] == ["Closed", "Closed"]
+    assert all(leg["close_reason"] == "Target price hit" for leg in refreshed.legs)
+
+
+@pytest.mark.asyncio
+async def test_pending_entry_is_filled_then_protected_before_monitoring(
+    test_settings: Settings, db_session: AsyncSession
+):
+    service = AsyncMock()
+    service.get_orders.return_value = [{
+        "id": "entry-1", "filled_quantity": 50, "remaining_quantity": 0,
+        "average_price": 120.0, "status": "TRADED",
+    }]
+    service.get_quotes.return_value = [{"trading_symbol": "NFO:A", "last_price": 125.0}]
+    service.place_order.return_value = {"id": "stop-1"}
+    await session_manager.set_session("TEST_CLIENT_001", service)
+    pending = _leg("NFO:A", entry=0.0)
+    pending.update({
+        "status": "PendingEntry", "quantity": 0, "requested_quantity": 50,
+        "entry_order_id": "entry-1", "stop_loss": 100.0,
+    })
+    basket = await create_basket(
+        db_session, owner_id="TEST_CLIENT_001", legs=[pending],
+        combined_stop_loss=None, combined_take_profit=None,
+    )
+
+    await basket_monitor.run_basket_monitor(test_settings)
+
+    refreshed = await db_session.get(type(basket), basket.id)
+    assert refreshed.legs[0]["status"] == "Open"
+    assert refreshed.legs[0]["quantity"] == 50
+    assert refreshed.legs[0]["entry_price"] == 120.0
+    assert refreshed.legs[0]["protective_stop_order_id"] == "stop-1"
+
+
+@pytest.mark.asyncio
 async def test_combined_stop_loss_exits_every_open_leg_and_closes_basket(
     test_settings: Settings, db_session: AsyncSession
 ):

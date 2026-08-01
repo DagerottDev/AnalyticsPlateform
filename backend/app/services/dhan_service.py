@@ -7,6 +7,7 @@ caller supplies the Client ID and a currently valid access token at login.
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -134,8 +135,7 @@ class DhanService(BrokerService):
         segment, separator, security_id = value.partition(":")
         if not separator or not segment or not security_id:
             raise BrokerConnectionError(
-                "Dhan symbols must use EXCHANGE_SEGMENT:SECURITY_ID, "
-                "for example NSE_EQ:11536."
+                "Dhan symbols must use EXCHANGE_SEGMENT:SECURITY_ID, " "for example NSE_EQ:11536."
             )
         return segment.upper(), security_id
 
@@ -154,11 +154,77 @@ class DhanService(BrokerService):
         )
 
     async def get_instruments(self, symbol: str) -> list[dict[str, Any]]:
-        # Dhan distributes its instrument master as a file and uses numeric
-        # security IDs. It has no Fyers-compatible option-chain-by-symbol API.
-        # Returning an empty list keeps generic pages functional; execution
-        # accepts explicit Dhan security references instead.
-        return []
+        # Dhan's v2 option-chain API is keyed by the underlying security id.
+        # NIFTY's public IDX_I id is documented by Dhan; other underlyings
+        # remain safely unavailable until their instrument-master mapping is
+        # loaded rather than risking an order against a guessed security id.
+        underlyings = {"NIFTY": (13, "IDX_I")}
+        reference = underlyings.get(symbol.upper())
+        if reference is None:
+            return []
+        underlying_id, underlying_segment = reference
+        expiry_response = await self._request(
+            "POST",
+            "/optionchain/expirylist",
+            json={"UnderlyingScrip": underlying_id, "UnderlyingSeg": underlying_segment},
+        )
+        expiry_values = expiry_response.get("data", [])
+        instruments: list[dict[str, Any]] = []
+        for raw_expiry in expiry_values:
+            try:
+                expiry = datetime.strptime(str(raw_expiry), "%Y-%m-%d").strftime("%d-%b-%Y")
+            except ValueError:
+                continue
+            response = await self._request(
+                "POST",
+                "/optionchain",
+                json={
+                    "UnderlyingScrip": underlying_id,
+                    "UnderlyingSeg": underlying_segment,
+                    "Expiry": raw_expiry,
+                },
+            )
+            chain = response.get("data", {}).get("oc", {})
+            for raw_strike, row in chain.items():
+                for option_key, option_type in (("ce", "CE"), ("pe", "PE")):
+                    option = row.get(option_key) if isinstance(row, dict) else None
+                    if not isinstance(option, dict) or not option.get("security_id"):
+                        continue
+                    security_id = str(option["security_id"])
+                    instruments.append(
+                        {
+                            "trading_symbol": f"NSE_FNO:{security_id}",
+                            "symbol": symbol.upper(),
+                            "instrument_type": "OPTIDX",
+                            "expiry": expiry,
+                            "strike": float(raw_strike),
+                            "option_type": option_type,
+                            "exchange": "NFO",
+                            "oi": option.get("oi"),
+                            "oi_change": float(option.get("oi", 0) or 0)
+                            - float(option.get("previous_oi", 0) or 0),
+                            "oi_change_percent": None,
+                            "lot_size": None,
+                        }
+                    )
+        return instruments
+
+    async def get_expiries(self, symbol: str) -> list[str]:
+        reference = {"NIFTY": (13, "IDX_I")}.get(symbol.upper())
+        if reference is None:
+            return []
+        response = await self._request(
+            "POST",
+            "/optionchain/expirylist",
+            json={"UnderlyingScrip": reference[0], "UnderlyingSeg": reference[1]},
+        )
+        values: list[str] = []
+        for raw_expiry in response.get("data", []):
+            try:
+                values.append(datetime.strptime(str(raw_expiry), "%Y-%m-%d").strftime("%d-%b-%Y"))
+            except ValueError:
+                continue
+        return values
 
     async def get_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
         if not symbols:
@@ -234,8 +300,44 @@ class DhanService(BrokerService):
         ]
 
     async def get_margin(self, orders: list[dict[str, Any]]) -> dict[str, Any]:
-        # Dhan has no equivalent shared basket-margin endpoint in its v2 API.
-        return {"message": "Dhan basket-margin calculation is not available through this adapter."}
+        """Calculate the combined requirement for prospective Dhan orders.
+
+        Dhan's multi-order calculator evaluates the whole basket, which is
+        essential for a hedged option position: calculating legs separately
+        would hide the broker's hedge benefit.
+        """
+        if not orders:
+            return {}
+
+        scrip_list: list[dict[str, Any]] = []
+        for order in orders:
+            segment, security_id = self._security_ref(str(order["symbol"]))
+            product_type = str(order.get("product_type") or "INTRADAY").upper()
+            scrip_list.append(
+                {
+                    "exchangeSegment": segment,
+                    "transactionType": str(order["side"]).upper(),
+                    "quantity": abs(int(order["quantity"])),
+                    "productType": self._PRODUCT_TYPES.get(product_type, product_type),
+                    "securityId": security_id,
+                    "price": float(order.get("limit_price") or 0),
+                    "triggerPrice": float(order.get("stop_price") or 0),
+                }
+            )
+
+        data = await self._request(
+            "POST",
+            "/margincalculator/multi",
+            json={
+                "dhanClientId": self.client_id,
+                "includePosition": True,
+                "includeOrder": True,
+                "scripList": scrip_list,
+            },
+        )
+        if not isinstance(data, dict):
+            raise BrokerConnectionError("Dhan margin calculator returned an invalid response")
+        return data
 
     async def get_positions(self) -> list[dict[str, Any]]:
         data = await self._request("GET", "/positions")
@@ -247,16 +349,16 @@ class DhanService(BrokerService):
             unrealized = float(row.get("unrealizedProfit", 0) or 0)
             positions.append(
                 {
-                "trading_symbol": str(row.get("tradingSymbol", row.get("securityId", ""))),
-                "symbol": f"{row.get('exchangeSegment', '')}:{row.get('securityId', '')}",
-                "product_type": str(row.get("productType", "")),
-                "quantity": quantity,
-                "side": "Buy" if quantity > 0 else "Sell" if quantity < 0 else "Flat",
-                "avg_price": float(row.get("netAvg", 0) or 0),
-                "last_price": float(row.get("ltp", 0) or 0),
-                "realized_pnl": realized,
-                "unrealized_pnl": unrealized,
-                "pnl": realized + unrealized,
+                    "trading_symbol": str(row.get("tradingSymbol", row.get("securityId", ""))),
+                    "symbol": f"{row.get('exchangeSegment', '')}:{row.get('securityId', '')}",
+                    "product_type": str(row.get("productType", "")),
+                    "quantity": quantity,
+                    "side": "Buy" if quantity > 0 else "Sell" if quantity < 0 else "Flat",
+                    "avg_price": float(row.get("netAvg", 0) or 0),
+                    "last_price": float(row.get("ltp", 0) or 0),
+                    "realized_pnl": realized,
+                    "unrealized_pnl": unrealized,
+                    "pnl": realized + unrealized,
                 }
             )
         return positions
@@ -296,6 +398,7 @@ class DhanService(BrokerService):
             "quantity": quantity,
             "filled_quantity": filled,
             "remaining_quantity": int(row.get("remainingQuantity", max(quantity - filled, 0)) or 0),
+            "average_price": float(row.get("averageTradedPrice", row.get("averagePrice", 0)) or 0),
             "limit_price": float(row.get("price", 0) or 0),
             "stop_price": float(row.get("triggerPrice", 0) or 0),
             "status": str(row.get("orderStatus", "Unknown")),
@@ -330,6 +433,37 @@ class DhanService(BrokerService):
             "id": str(data.get("orderId", "")) or None,
             "message": str(data.get("remarks", "Order submitted")),
         }
+
+    async def place_gtt_order(self, order: dict[str, Any]) -> dict[str, Any]:
+        """Create Dhan's native SINGLE Forever Order (their GTT primitive)."""
+        segment, security_id = self._security_ref(order["symbol"])
+        data = await self._request(
+            "POST",
+            "/forever/orders",
+            json={
+                "dhanClientId": self.client_id,
+                "correlationId": f"gtt-{security_id}"[:30],
+                "orderFlag": "SINGLE",
+                "transactionType": "BUY" if order["side"] == "Buy" else "SELL",
+                "exchangeSegment": segment,
+                "productType": self._PRODUCT_TYPES[order["product_type"]],
+                "orderType": order["execution_type"],
+                "validity": "DAY",
+                "securityId": security_id,
+                "quantity": order["quantity"],
+                "disclosedQuantity": 0,
+                "price": order["limit_price"],
+                "triggerPrice": order["trigger_price"],
+            },
+        )
+        return {
+            "id": str(data.get("orderId", "")) or None,
+            "message": str(data.get("remarks", "GTT submitted")),
+        }
+
+    async def cancel_gtt_order(self, order_id: str) -> dict[str, Any]:
+        data = await self._request("DELETE", f"/forever/orders/{order_id}")
+        return {"id": order_id, "message": str(data.get("remarks", "GTT cancelled"))}
 
     async def place_basket_orders(self, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Dhan's v2 API has no bulk-placement endpoint, so each leg is

@@ -84,6 +84,11 @@ class FyersService(BrokerService):
     _MAX_FETCH_RETRIES = 3
     _RETRY_BASE_DELAY_SECONDS = 1.5
     _RETRYABLE_CODES = {429, 500, 502, 503, 504}
+    # FYERS uses this non-success response for valid symbols that simply have
+    # no active F&O expiry. It is a normal empty-universe result, not a broker
+    # connectivity failure (common for symbols in a broad static universe).
+    _NO_EXPIRY_CONTRACT_CODE = -470
+    _NO_CONTRACT_CACHE_TTL_SECONDS = 10 * 60
     # A Greek workspace may request one underlying plus ten option histories
     # at once. FYERS rate-limits the history API independently and those
     # bursts can consume capacity needed by the live quote fallback. Serialize
@@ -118,6 +123,7 @@ class FyersService(BrokerService):
         # expiries endpoints are both called back-to-back for the same
         # symbol on page load, so this avoids doubling the Fyers API calls.
         self._instruments_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._no_contract_cache: dict[str, float] = {}
         # symbol -> lock, so concurrent requests for the same symbol (e.g.
         # /instruments and /expiries firing together on page load) coalesce
         # into a single fetch instead of each independently bursting
@@ -256,7 +262,7 @@ class FyersService(BrokerService):
 
     async def _fetch_option_chain(
         self, symbol: str, strikecount: int, expiry_timestamp: str = ""
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         """Call Fyers' optionchain endpoint for one expiry (or the nearest,
         if expiry_timestamp is empty). Every response includes `expiryData`
         — the full list of available expiries — regardless of which
@@ -276,6 +282,8 @@ class FyersService(BrokerService):
             if response and response.get("s") == "ok":
                 return cast(dict[str, Any], response.get("data", {}))
             last_response = response or {}
+            if last_response.get("code") == self._NO_EXPIRY_CONTRACT_CODE:
+                return None
             is_last_attempt = attempt == self._MAX_FETCH_RETRIES - 1
             if last_response.get("code") not in self._RETRYABLE_CODES or is_last_attempt:
                 break
@@ -293,6 +301,11 @@ class FyersService(BrokerService):
         merged, filtered client-side by the selected one).
         """
         cache_key = symbol.upper()
+        no_contract_at = self._no_contract_cache.get(cache_key)
+        if no_contract_at and (
+            time.monotonic() - no_contract_at
+        ) < self._NO_CONTRACT_CACHE_TTL_SECONDS:
+            return []
         cached = self._instruments_cache.get(cache_key)
         if cached and (time.monotonic() - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
             return cached[1]
@@ -310,6 +323,12 @@ class FyersService(BrokerService):
             except Exception as e:
                 raise BrokerConnectionError(f"Failed to fetch option chain expiries: {e}") from e
 
+            if first is None:
+                self._no_contract_cache[cache_key] = time.monotonic()
+                self._instruments_cache[cache_key] = (time.monotonic(), [])
+                return []
+
+            self._no_contract_cache.pop(cache_key, None)
             is_index = symbol.upper() in _INDEX_SYMBOL_MAP
             instruments: list[dict[str, Any]] = []
 
@@ -331,6 +350,9 @@ class FyersService(BrokerService):
                 except Exception:
                     # Skip an expiry Fyers fails to return (even after
                     # retries) rather than failing the whole request.
+                    continue
+
+                if chain is None:
                     continue
 
                 for row in chain.get("optionsChain", []):
@@ -611,6 +633,9 @@ class FyersService(BrokerService):
                     "quantity": quantity,
                     "filled_quantity": filled,
                     "remaining_quantity": remaining,
+                    "average_price": float(
+                        row.get("tradedPrice", row.get("avgPrice", row.get("averagePrice", 0))) or 0
+                    ),
                     "limit_price": float(row.get("limitPrice", 0) or 0),
                     "stop_price": float(row.get("stopPrice", 0) or 0),
                     "status": status,

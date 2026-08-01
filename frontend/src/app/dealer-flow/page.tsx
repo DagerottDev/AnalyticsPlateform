@@ -6,7 +6,7 @@ import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
 import { calculateGreeks, calculateImpliedVolatility } from "@/lib/greeks";
-import { timeToExpiry, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
+import { timeToExpiry, defaultSpotFallback } from "@/lib/optionMath";
 import {
   calculateContractGEX,
   calculateContractVannaExposure, 
@@ -28,6 +28,9 @@ import { ExposureChart } from "@/components/dealer-flow/ExposureChart";
 
 export default function DealerFlowPage() {
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
+  const riskFreeRate = useSettingsStore((state) => (
+    (state.analytics.riskFreeRatePercent[symbol] ?? state.analytics.riskFreeRatePercent.DEFAULT ?? 10) / 100
+  ));
   const [expiry, setExpiry] = useState<string | null>(null);
   const selectedExpiryRef = useRef(expiry);
 
@@ -67,7 +70,7 @@ export default function DealerFlowPage() {
 
   const underlyingTick = getTick(symbol);
   const S = underlyingTick?.last_price || defaultSpotFallback(symbol);
-  const r = DEFAULT_RISK_FREE_RATE;
+  const r = riskFreeRate;
   // Sourced live from the broker's symbol master via the instruments fetch
   // above (see backend's lot_size_store), not a hardcoded per-symbol table.
   const lotSize = instruments[0]?.lot_size ?? 0;

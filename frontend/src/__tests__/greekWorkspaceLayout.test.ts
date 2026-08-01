@@ -37,4 +37,15 @@ describe("Greek workspace layout", () => {
     window.localStorage.setItem("greek-workspace-layout-v1", JSON.stringify({ version: 1, visibleGreeks: ["not-a-greek"] }));
     expect(loadGreekWorkspaceLayout()).toBeNull();
   });
+
+  it("accepts Supertrend as a saved chart overlay", () => {
+    saveGreekWorkspaceLayout({
+      version: 1,
+      visibleGreeks: ["delta"],
+      panels: { delta: { overlay: "supertrend", period: 10, multiplier: 3 } },
+      educationOpen: true,
+    });
+
+    expect(loadGreekWorkspaceLayout()?.panels.delta?.overlay).toBe("supertrend");
+  });
 });

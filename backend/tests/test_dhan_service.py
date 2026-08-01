@@ -131,3 +131,55 @@ async def test_dhan_basket_orders_are_placed_sequentially_with_per_leg_isolation
     assert "RMS" in results[1]["message"]
     assert results[2]["id"] == "leg-3"
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_dhan_multi_order_margin_uses_a_single_hedged_basket_request() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v2/margincalculator/multi"
+        assert request.headers["access-token"] == "dhan-token"
+        assert json.loads(request.content) == {
+            "dhanClientId": "1100000001",
+            "includePosition": True,
+            "includeOrder": True,
+            "scripList": [
+                {
+                    "exchangeSegment": "NSE_FNO",
+                    "transactionType": "BUY",
+                    "quantity": 50,
+                    "productType": "INTRADAY",
+                    "securityId": "26009",
+                    "price": 0.0,
+                    "triggerPrice": 0.0,
+                },
+                {
+                    "exchangeSegment": "NSE_FNO",
+                    "transactionType": "SELL",
+                    "quantity": 50,
+                    "productType": "INTRADAY",
+                    "securityId": "26010",
+                    "price": 0.0,
+                    "triggerPrice": 0.0,
+                },
+            ],
+        }
+        return httpx.Response(
+            200,
+            json={"totalMargin": 1250.5, "spanMargin": 800, "exposure": 300.5},
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://api.dhan.co/v2", transport=httpx.MockTransport(handler)
+    )
+    service = DhanService("1100000001", "dhan-token", http_client=client)
+
+    result = await service.get_margin(
+        [
+            {"symbol": "NSE_FNO:26009", "quantity": 50, "side": "Buy", "product_type": "INTRADAY"},
+            {"symbol": "NSE_FNO:26010", "quantity": 50, "side": "Sell", "product_type": "INTRADAY"},
+        ]
+    )
+
+    assert result["totalMargin"] == 1250.5
+    await client.aclose()

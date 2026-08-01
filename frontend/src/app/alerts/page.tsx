@@ -23,6 +23,7 @@ const UNDERLYING_SCOPED_METRICS: AlertMetric[] = ["Net GEX", "VWAP Breakout"];
 
 export default function AlertsPage() {
   const { alerts, triggerLog, addAlert, removeAlert, clearTriggerLog } = useAlertStore();
+  const alertDefaults = useSettingsStore((state) => state.alerts);
 
   // Form State
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
@@ -30,10 +31,10 @@ export default function AlertsPage() {
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [selectedInstrumentToken, setSelectedInstrumentToken] = useState<string>("");
 
-  const [metric, setMetric] = useState<AlertMetric>("Price");
-  const [operator, setOperator] = useState<AlertOperator>(">");
+  const [metric, setMetric] = useState<AlertMetric>(() => alertDefaults.metric);
+  const [operator, setOperator] = useState<AlertOperator>(() => alertDefaults.operator);
   const [threshold, setThreshold] = useState<string>("");
-  const [cooldownMinutes, setCooldownMinutes] = useState<number>(15);
+  const [cooldownMinutes, setCooldownMinutes] = useState<number>(() => alertDefaults.cooldownMinutes);
   const [loadingInstruments, setLoadingInstruments] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);

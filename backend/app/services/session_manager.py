@@ -35,6 +35,10 @@ class SessionManager:
         """Return the sole active session for trusted background jobs."""
         return self._service
 
+    def get_active_client_id(self) -> str | None:
+        """The owner of the sole active session, for background-job scoping."""
+        return self._client_id
+
     async def clear(self) -> None:
         """Close and remove the active session, if any."""
         if self._service is not None:

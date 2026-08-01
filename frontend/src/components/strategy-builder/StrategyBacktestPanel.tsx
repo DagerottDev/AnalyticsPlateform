@@ -13,6 +13,8 @@ interface StrategyBacktestPanelProps {
   symbol: string;
   currentSpot: number;
   legs: StrategyLeg[];
+  defaultHoldingDays?: number;
+  defaultDaysToExpiry?: number;
 }
 
 function dateInputValue(date: Date): string {
@@ -51,14 +53,14 @@ function EquityCurve({ result }: { result: StrategyBacktestResult }) {
   );
 }
 
-export function StrategyBacktestPanel({ symbol, currentSpot, legs }: StrategyBacktestPanelProps) {
+export function StrategyBacktestPanel({ symbol, currentSpot, legs, defaultHoldingDays = 5, defaultDaysToExpiry = 30 }: StrategyBacktestPanelProps) {
   const today = new Date();
   const defaultStart = new Date(today);
   defaultStart.setMonth(defaultStart.getMonth() - 3);
   const [start, setStart] = useState(() => dateInputValue(defaultStart));
   const [end, setEnd] = useState(() => dateInputValue(today));
-  const [holdingDays, setHoldingDays] = useState(5);
-  const [daysToExpiry, setDaysToExpiry] = useState(30);
+  const [holdingDays, setHoldingDays] = useState(defaultHoldingDays);
+  const [daysToExpiry, setDaysToExpiry] = useState(defaultDaysToExpiry);
   const [result, setResult] = useState<StrategyBacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

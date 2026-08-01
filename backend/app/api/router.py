@@ -15,6 +15,7 @@ from app.api.v1 import (
     market,
     orders,
     portfolio,
+    settings,
     trade_journal,
     volatility,
 )
@@ -31,6 +32,7 @@ api_router.include_router(historical.router, prefix="/v1")
 api_router.include_router(volatility.router, prefix="/v1")
 api_router.include_router(greeks.router, prefix="/v1")
 api_router.include_router(alerts.router, prefix="/v1")
+api_router.include_router(settings.router, prefix="/v1")
 api_router.include_router(portfolio.router, prefix="/v1")
 api_router.include_router(orders.router, prefix="/v1")
 api_router.include_router(trade_journal.router, prefix="/v1")

@@ -12,13 +12,29 @@ import { WorkspaceSummaryStrip } from "@/components/greek-workspace/WorkspaceSum
 import { GreekMetricSelector } from "@/components/greek-workspace/GreekMetricSelector";
 import { GreekPanelSection } from "@/components/greek-workspace/GreekPanelSection";
 import { CreateGreekAlertModal } from "@/components/greek-workspace/CreateGreekAlertModal";
+import { GreekChartSyncProvider } from "@/components/greek-workspace/GreekChartSyncProvider";
+import { SelectedStrikesCard } from "@/components/greek-workspace/SelectedStrikesCard";
 import { FEATURED_GREEKS } from "@/components/greek-workspace/greekLabels";
-import { DEFAULT_GREEK_PANEL_LAYOUT, loadGreekWorkspaceLayout, saveGreekWorkspaceLayout, type GreekPanelLayout } from "@/lib/greekWorkspaceLayout";
+import { DEFAULT_GREEK_PANEL_LAYOUT, saveGreekWorkspaceLayout, type GreekPanelLayout } from "@/lib/greekWorkspaceLayout";
 import { getHistoricalCandles, getInstruments, type HistoricalCandle } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
 import { calculateGreeks, calculateImpliedVolatility } from "@/lib/greeks";
-import { DEFAULT_RISK_FREE_RATE, defaultSpotFallback, nearestStrikeTo, timeToExpiry } from "@/lib/optionMath";
-import { appendLiveGreekValues, buildStrikeGreekSeries, calculateLiveCombinedGreeks, combineGreekSeries, FIRST_ORDER_GREEKS, HIGHER_ORDER_GREEKS, type GreekMetric } from "@/lib/strikeGreekAnalysis";
+import { defaultSpotFallback, nearestStrikeTo, timeToExpiry } from "@/lib/optionMath";
+import { riskFreeRateForSymbol, useSettingsStore } from "@/stores/settingsStore";
+import { recentMarketDateRange } from "@/lib/recentHistory";
+import { appendLiveGreekValues, buildResolvedGreekSeries, calculateLiveCombinedGreeks, combineGreekSeries, FIRST_ORDER_GREEKS, HIGHER_ORDER_GREEKS, type GreekMetric } from "@/lib/strikeGreekAnalysis";
+import {
+  buildResolvedSelectionPaths,
+  currentResolvedInstruments,
+  instrumentsRequiredByPaths,
+  MAX_ANALYSIS_SELECTIONS,
+  MAX_DYNAMIC_HISTORY_CONTRACTS,
+  parseDynamicSelections,
+  parseFixedSelections,
+  dynamicSelectionLabel,
+  type AnalysisSelection,
+  type ResolvedSelectionPaths,
+} from "@/lib/analysisSelections";
 import type { Instrument } from "@/types/market";
 
 // The broker's history endpoint is much more tightly rate-limited than the
@@ -29,7 +45,8 @@ const HISTORY_FETCH_CONCURRENCY = 2;
 async function fetchOptionHistory(
   instruments: Instrument[],
   from: string,
-  to: string
+  to: string,
+  resolution: string,
 ): Promise<HistoricalCandle[][]> {
   const results: HistoricalCandle[][] = Array.from({ length: instruments.length }, () => []);
   let nextIndex = 0;
@@ -37,7 +54,8 @@ async function fetchOptionHistory(
   async function worker() {
     while (nextIndex < instruments.length) {
       const index = nextIndex++;
-      results[index] = await getHistoricalCandles(instruments[index].trading_symbol, from, to, "5");
+      try { results[index] = await getHistoricalCandles(instruments[index].trading_symbol, from, to, resolution); }
+      catch { results[index] = []; }
     }
   }
 
@@ -48,10 +66,7 @@ async function fetchOptionHistory(
 }
 
 function dates() {
-  const to = new Date();
-  const from = new Date(to);
-  from.setDate(from.getDate() - 5);
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+  return recentMarketDateRange();
 }
 
 interface AlertModalState {
@@ -60,36 +75,35 @@ interface AlertModalState {
 }
 
 function GreekAnalysisWorkspace() {
+  const initialWorkspacePreferences = useSettingsStore.getState().greekWorkspace;
   const [selected, setSelected] = useState<Instrument[]>([]);
+  const [expiryInstruments, setExpiryInstruments] = useState<Instrument[]>([]);
+  const [selectionPaths, setSelectionPaths] = useState<ResolvedSelectionPaths>({});
   const [candles, setCandles] = useState<Record<string, HistoricalCandle[]>>({});
   const [underlyingCandles, setUnderlyingCandles] = useState<HistoricalCandle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const [visibleGreeks, setVisibleGreeks] = useState<GreekMetric[]>(["delta", "gamma", "theta", "vega", "vanna", "vomma"]);
-  const [educationOpen, setEducationOpen] = useState(true);
-  const [panelLayouts, setPanelLayouts] = useState<Partial<Record<GreekMetric, GreekPanelLayout>>>({});
+  const [visibleGreeks, setVisibleGreeks] = useState<GreekMetric[]>(initialWorkspacePreferences.visibleGreeks);
+  // Keep the chart workspace compact on first open. A saved layout can still
+  // restore the user's explicit education-panel preference.
+  const [educationOpen, setEducationOpen] = useState(initialWorkspacePreferences.educationOpen);
+  const [panelLayouts, setPanelLayouts] = useState<Partial<Record<GreekMetric, GreekPanelLayout>>>(initialWorkspacePreferences.panels);
   const [layoutMessage, setLayoutMessage] = useState("");
   const [activeTab, setActiveTab] = useState("core");
   const [alertModal, setAlertModal] = useState<AlertModalState>({ open: false });
+  const [timeframe, setTimeframe] = useState(initialWorkspacePreferences.timeframe);
+  const [syncCharts, setSyncCharts] = useState(initialWorkspacePreferences.syncCharts);
 
   const searchParams = useSearchParams();
   const symbol = searchParams.get("symbol") ?? "";
   const expiry = searchParams.get("expiry") ?? "";
   const contractsQuery = searchParams.get("contracts") ?? "";
-  const contracts = useMemo(() => contractsQuery.split(",").filter(Boolean).slice(0, 10), [contractsQuery]);
-
-  // Apply the reusable presentation preset after client hydration. Contract
-  // selection and alerts deliberately remain URL-/session-specific.
-  useEffect(() => {
-    const savedLayout = loadGreekWorkspaceLayout();
-    if (!savedLayout) return;
-    setVisibleGreeks(savedLayout.visibleGreeks);
-    setPanelLayouts(savedLayout.panels);
-    setEducationOpen(savedLayout.educationOpen);
-  }, []);
+  const fixedSelections = useMemo(() => parseFixedSelections(contractsQuery), [contractsQuery]);
+  const dynamicSelections = useMemo(() => parseDynamicSelections(searchParams.get("dynamic")), [searchParams]);
+  const selections = useMemo<AnalysisSelection[]>(() => [...fixedSelections, ...dynamicSelections].slice(0, MAX_ANALYSIS_SELECTIONS), [fixedSelections, dynamicSelections]);
 
   const load = useCallback(async () => {
-    if (!symbol || contracts.length === 0) {
+    if (!symbol || selections.length === 0) {
       setLoading(false);
       return;
     }
@@ -98,35 +112,52 @@ function GreekAnalysisWorkspace() {
     try {
       const { from, to } = dates();
       const response = await getInstruments(symbol);
-      const instruments = response.instruments.filter((item) => contracts.includes(item.trading_symbol) && (!expiry || item.expiry === expiry));
-      // Start the underlying lookup with the small option-history worker
-      // pool. This replaces the former 11-way Promise.all burst for a
-      // 10-contract selection, which could exhaust FYERS' shared data quota
-      // and make the source option-chain window look frozen.
-      const [underlying, optionCandleResults] = await Promise.all([
-        getHistoricalCandles(symbol, from, to, "5"),
-        fetchOptionHistory(instruments, from, to),
-      ]);
-      setSelected(instruments);
+      const expiryContracts = response.instruments.filter((item) => !expiry || item.expiry === expiry);
+      const fixedBySymbol = Object.fromEntries(expiryContracts.map((item) => [item.trading_symbol, item]));
+      // Dynamic descriptors cannot be determined until we have the spot
+      // candle. Resolve their per-candle source set before requesting any
+      // option history, then keep broker calls at two concurrent requests.
+      const underlying = await getHistoricalCandles(symbol, from, to, timeframe);
+      const paths = buildResolvedSelectionPaths(selections, fixedBySymbol, expiryContracts, underlying);
+      const required = instrumentsRequiredByPaths(paths);
+      if (required.length > MAX_DYNAMIC_HISTORY_CONTRACTS) {
+        throw new Error(`Rolling selection needs ${required.length} source contracts; the maximum is ${MAX_DYNAMIC_HISTORY_CONTRACTS}.`);
+      }
+      const optionCandleResults = await fetchOptionHistory(required, from, to, timeframe);
+      const fixed = fixedSelections.flatMap((selection) => fixedBySymbol[selection.tradingSymbol] ? [fixedBySymbol[selection.tradingSymbol]] : []);
+      setSelected(fixed);
+      setExpiryInstruments(expiryContracts);
+      setSelectionPaths(paths);
       setUnderlyingCandles(underlying);
-      setCandles(Object.fromEntries(instruments.map((item, index) => [item.trading_symbol, optionCandleResults[index] ?? []])));
+      setCandles(Object.fromEntries(required.map((item, index) => [item.trading_symbol, optionCandleResults[index] ?? []])));
     } catch (loadError) {
       setError(loadError);
       setSelected([]);
+      setExpiryInstruments([]);
+      setSelectionPaths({});
       setCandles({});
       setUnderlyingCandles([]);
     } finally {
       setLoading(false);
     }
-  }, [contracts, expiry, symbol]);
+  }, [expiry, fixedSelections, selections, symbol, timeframe]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const liveSymbols = useMemo(() => [...selected.map((instrument) => instrument.trading_symbol), symbol], [selected, symbol]);
-  const { ticks } = useMarketData(liveSymbols);
-  const historicalGreekSeries = useMemo(() => buildStrikeGreekSeries(selected, candles, underlyingCandles), [selected, candles, underlyingCandles]);
+  // Keep the underlying subscription separate so a dynamic descriptor can
+  // immediately switch its option-symbol subscription when spot crosses a
+  // strike boundary.
+  const { ticks: underlyingTicks } = useMarketData(symbol ? [symbol] : []);
+  const spot = underlyingTicks[symbol]?.last_price ?? underlyingCandles[underlyingCandles.length - 1]?.close ?? defaultSpotFallback(symbol);
+  const currentResolved = useMemo(() => currentResolvedInstruments(selections, Object.fromEntries(selected.map((item) => [item.trading_symbol, item])), expiryInstruments, spot), [selections, selected, expiryInstruments, spot]);
+  const liveSymbols = useMemo(() => Object.values(currentResolved).flatMap((instrument) => instrument ? [instrument.trading_symbol] : []), [currentResolved]);
+  const { ticks: optionTicks } = useMarketData(liveSymbols);
+  const ticks = useMemo(() => ({ ...underlyingTicks, ...optionTicks }), [underlyingTicks, optionTicks]);
+  const riskFreeRate = riskFreeRateForSymbol(symbol);
+  const historicalGreekSeries = useMemo(() => buildResolvedGreekSeries(selectionPaths, candles, underlyingCandles, riskFreeRate), [selectionPaths, candles, underlyingCandles, riskFreeRate]);
   const historicalCombinedSeries = useMemo(() => combineGreekSeries(historicalGreekSeries), [historicalGreekSeries]);
-  const liveGreeks = useMemo(() => calculateLiveCombinedGreeks(selected, symbol, ticks), [selected, symbol, ticks]);
+  const resolvedLiveInstruments = useMemo(() => Object.values(currentResolved).flatMap((instrument) => instrument ? [instrument] : []), [currentResolved]);
+  const liveGreeks = useMemo(() => resolvedLiveInstruments.length === selections.length ? calculateLiveCombinedGreeks(resolvedLiveInstruments, symbol, ticks, riskFreeRate) : null, [resolvedLiveInstruments, selections.length, symbol, ticks, riskFreeRate]);
   const greekSeries = useMemo(() => appendLiveGreekValues(historicalCombinedSeries, liveGreeks), [historicalCombinedSeries, liveGreeks]);
 
   // Spot / DTE / ATM IV / ATM theoretical price — a one-shot summary
@@ -150,16 +181,16 @@ function GreekAnalysisWorkspace() {
           ?? candles[atmInstrument.trading_symbol]?.[candles[atmInstrument.trading_symbol].length - 1]?.close;
         const T = timeToExpiry(expiry);
         if (latestPrice) {
-          const iv = calculateImpliedVolatility(atmInstrument.option_type, spot, atmStrike, T, DEFAULT_RISK_FREE_RATE, latestPrice);
+          const iv = calculateImpliedVolatility(atmInstrument.option_type, spot, atmStrike, T, riskFreeRate, latestPrice);
           if (iv > 0) {
             atmIv = iv;
-            atmPrice = calculateGreeks(atmInstrument.option_type, spot, atmStrike, T, DEFAULT_RISK_FREE_RATE, iv).price;
+            atmPrice = calculateGreeks(atmInstrument.option_type, spot, atmStrike, T, riskFreeRate, iv).price;
           }
         }
       }
     }
     return { spot, dte, atmIv, atmPrice };
-  }, [ticks, symbol, underlyingCandles, expiry, selected, candles]);
+  }, [ticks, symbol, underlyingCandles, expiry, selected, candles, riskFreeRate]);
 
   const toggleGreek = (metric: GreekMetric) => setVisibleGreeks((current) => current.includes(metric) ? current.filter((item) => item !== metric) : [...current, metric]);
   const panelLayoutFor = useCallback((metric: GreekMetric) => panelLayouts[metric] ?? DEFAULT_GREEK_PANEL_LAYOUT, [panelLayouts]);
@@ -168,15 +199,20 @@ function GreekAnalysisWorkspace() {
   }, []);
   const saveLayout = () => {
     saveGreekWorkspaceLayout({ version: 1, visibleGreeks, panels: panelLayouts, educationOpen });
-    setLayoutMessage("Layout saved. It will load for your next strike selection.");
+    useSettingsStore.getState().updatePreferences((current) => ({
+      ...current,
+      greekWorkspace: { ...current.greekWorkspace, timeframe, visibleGreeks, panels: panelLayouts, educationOpen, syncCharts },
+    }));
+    setLayoutMessage("Layout saved to your profile. It will load for your next strike selection.");
   };
 
   const liveContracts = liveGreeks?.liveContracts ?? 0;
-  const totalContracts = selected.length;
+  const totalContracts = selections.length;
   const requestAlert = (metric: GreekMetric) => setAlertModal({ open: true, metric });
 
   return (
     <DashboardLayout>
+      <GreekChartSyncProvider enabled={syncCharts}>
       {/* This page intentionally skips PageContainer's max-w-6xl — the
           chart-dense workspace needs the full window; DashboardLayout is
           still used so the user never loses main nav. */}
@@ -184,7 +220,7 @@ function GreekAnalysisWorkspace() {
         <WorkspaceHeader
           symbol={symbol}
           expiry={expiry}
-          selectedCount={selected.length}
+          selectedCount={selections.length}
           loading={loading}
           educationOpen={educationOpen}
           layoutMessage={layoutMessage}
@@ -192,21 +228,28 @@ function GreekAnalysisWorkspace() {
           onSave={saveLayout}
           onRefresh={() => void load()}
           onCreateAlert={() => setAlertModal({ open: true })}
+          alertsDisabled={dynamicSelections.length > 0}
+          alertDisabledReason={dynamicSelections.length > 0 ? "Rolling ATM/OTM/ITM selections cannot be saved as durable broker-contract alerts." : undefined}
+          timeframe={timeframe}
+          onTimeframeChange={(nextTimeframe) => setTimeframe(nextTimeframe as typeof timeframe)}
+          syncCharts={syncCharts}
+          onToggleSyncCharts={() => setSyncCharts((current) => !current)}
         />
 
         <div className={educationOpen ? "grid items-start gap-4 xl:grid-cols-[280px_minmax(0,1fr)]" : ""}>
           {educationOpen && <GreekEducationAside onClose={() => setEducationOpen(false)} />}
           <div className="flex min-w-0 flex-col gap-4">
-            {!symbol || contracts.length === 0 ? (
+            {!symbol || selections.length === 0 ? (
               <section className="panel"><EmptyState title="Select option contracts in the Option Chain before opening this workspace." /></section>
             ) : loading ? (
               <section className="panel"><LoadingState size="lg" label="Recalculating historical option Greeks…" /></section>
             ) : error ? (
               <section className="panel flex flex-col gap-3"><EmptyState title="Could not load Greek analysis" /><ApiErrorDisplay error={error} /></section>
-            ) : selected.length === 0 ? (
+            ) : Object.keys(selectionPaths).length === 0 ? (
               <section className="panel"><EmptyState title="The selected contracts are no longer available for this expiry." /></section>
             ) : (
               <>
+                <SelectedStrikesCard instruments={selected} expiry={expiry} rollingSelections={dynamicSelections.map((selection) => ({ label: dynamicSelectionLabel(selection), instrument: currentResolved[selection.id] ?? null }))} />
                 <WorkspaceSummaryStrip
                   spot={summary.spot}
                   dte={summary.dte}
@@ -221,12 +264,15 @@ function GreekAnalysisWorkspace() {
                   <GreekPanelSection
                     metrics={FEATURED_GREEKS}
                     visibleGreeks={FEATURED_GREEKS}
+                    syncIdPrefix="featured"
                     greekSeries={greekSeries}
                     liveContracts={liveContracts}
                     totalContracts={totalContracts}
                     panelLayoutFor={panelLayoutFor}
                     onLayoutChange={updatePanelLayout}
-                    onRequestAlert={requestAlert}
+                    onRequestAlert={dynamicSelections.length ? () => undefined : requestAlert}
+                    alertsDisabled={dynamicSelections.length > 0}
+                    alertDisabledReason="Rolling ATM/OTM/ITM selections cannot be saved as durable broker-contract alerts."
                   />
                 </div>
 
@@ -235,7 +281,7 @@ function GreekAnalysisWorkspace() {
                   onTabChange={setActiveTab}
                   visibleGreeks={visibleGreeks}
                   onToggle={toggleGreek}
-                  liveCoverageLabel={liveGreeks ? `${liveGreeks.liveContracts}/${liveGreeks.totalContracts}` : `0/${selected.length}`}
+                  liveCoverageLabel={liveGreeks ? `${liveGreeks.liveContracts}/${liveGreeks.totalContracts}` : `0/${selections.length}`}
                 />
 
                 <GreekPanelSection
@@ -244,22 +290,26 @@ function GreekAnalysisWorkspace() {
                   greekSeries={greekSeries}
                   liveContracts={liveContracts}
                   totalContracts={totalContracts}
+                  syncIdPrefix={`selected-${activeTab}`}
                   panelLayoutFor={panelLayoutFor}
                   onLayoutChange={updatePanelLayout}
-                  onRequestAlert={requestAlert}
+                  onRequestAlert={dynamicSelections.length ? () => undefined : requestAlert}
+                  alertsDisabled={dynamicSelections.length > 0}
+                  alertDisabledReason="Rolling ATM/OTM/ITM selections cannot be saved as durable broker-contract alerts."
                 />
               </>
             )}
           </div>
         </div>
       </div>
+      </GreekChartSyncProvider>
 
-      <CreateGreekAlertModal
+      {dynamicSelections.length === 0 && <CreateGreekAlertModal
         isOpen={alertModal.open}
         onClose={() => setAlertModal({ open: false })}
         instruments={selected}
         initialMetric={alertModal.metric}
-      />
+      />}
     </DashboardLayout>
   );
 }

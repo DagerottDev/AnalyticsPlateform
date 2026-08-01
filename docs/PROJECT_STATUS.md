@@ -6,6 +6,41 @@ Current Milestone:
 - Targeted quality refactor (2026-07-29) — ✅ COMPLETE (see below)
 - Resilience & confidence quality pass (2026-07-30) — ✅ COMPLETE (see below)
 
+## Server-backed user settings (2026-08-01)
+
+- Settings now provide an authenticated, versioned preference profile with a
+  local offline fallback and debounced server sync. Appearance, watchlist,
+  charts/indicators, option-chain defaults, Greek layouts, replay defaults,
+  per-symbol pricing rates, strategy defaults, and alert defaults move with
+  the broker profile.
+- Alert-delivery credentials remain in their separate encrypted settings API;
+  resetting generic preferences never removes delivery channels, credentials,
+  sessions, or orders.
+
+## Option Chain basket orders (2026-08-01)
+
+- Option Chain can now collect up to ten independent call/put legs into a basket, calculate broker margin, set side-aware per-leg premium stop/target prices, set combined ₹ P&L exits, and hand the editable legs to Strategy Builder in a new window.
+- Paper baskets fill at current quotes and are protected by an app-mounted local monitor while the app is open. Live baskets submit market entries, wait for broker fill confirmation before arming exchange stops, and retain server-monitored premium targets/combined P&L exits.
+- Legacy persisted basket `target` values remain interpreted as P&L targets; new requests use `target_price` for an option-premium target.
+
+## Option Chain GTT orders (2026-08-01)
+
+- The Option Chain ticket supports single-entry GTT orders with Buy/Sell trigger validation, MARKET or LIMIT execution, and a per-order expiry time. New tickets default to 30 days; Settings stores a user-editable default validity duration.
+- Fyers GTTs are durable server-monitored orders. Dhan submits native `SINGLE` Forever Orders and the platform records/cancels them at expiry. Paper GTTs remain browser-resident and execute only while the app receives ticks.
+- The Orders workspace lists GTT state and supports cancelling pending entries.
+
+## Combined premium candle analysis (2026-08-01)
+
+- Option Chain contract selection now opens a full-window Combined Premium Analysis workspace with raw-premium synthetic candles for selected Calls, selected Puts, and all selected contracts together.
+- Each composite uses matching 5-minute broker candles from the preceding five days, sums OHLC/volume only where every component is present, receives live summed premium updates, and has independent indicator controls with EMA(20) enabled initially.
+
+## Rolling ATM / OTM / ITM analysis selections (2026-08-01)
+
+- Option Chain analysis selection now supports mixing fixed contracts with rolling `ATM`, `OTM 1–5`, and `ITM 1–5` Call/Put descriptors, within the same ten-selection limit.
+- Rolling descriptors resolve against the active expiry's actual strike ladder at every underlying candle and live underlying update. Out-of-ladder selections remain unavailable instead of silently changing to a different strike.
+- Greek and Combined Premium workspaces pass fixed symbols in `contracts` and validated descriptors in `dynamic`. Dynamic workspaces fetch the current market session only, resolve the source set before loading option history, limit that set to 40 contracts, and subscribe to the currently resolved contracts.
+- The Greek inventory displays each rolling label and its current strike. Durable Greek alerts are disabled for rolling selections because server alerts are tied to a fixed broker contract.
+
 ## Selected Option Greek Analysis (2026-07-30)
 
 - Option Chain now supports selecting up to ten individual call/put contracts and opening a shareable analysis workspace in a new window or tab.

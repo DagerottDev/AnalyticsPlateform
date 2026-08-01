@@ -10,6 +10,7 @@ import { useAlertStore, type AlertOperator } from "@/stores/alertStore";
 import { GREEK_LABEL, METRIC_TO_ALERT } from "./greekLabels";
 import type { GreekMetric } from "@/lib/strikeGreekAnalysis";
 import type { Instrument } from "@/types/market";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 interface CreateGreekAlertModalProps {
   isOpen: boolean;
@@ -27,6 +28,7 @@ function compactSymbol(symbol: string) {
 const ALL_GREEKS = Object.keys(GREEK_LABEL) as GreekMetric[];
 
 export function CreateGreekAlertModal({ isOpen, onClose, instruments, initialMetric }: CreateGreekAlertModalProps) {
+  const defaultCooldownMinutes = useSettingsStore((state) => state.alerts.cooldownMinutes);
   const symbols = instruments.map((instrument) => instrument.trading_symbol);
   const { addAlert } = useAlertStore();
 
@@ -34,7 +36,7 @@ export function CreateGreekAlertModal({ isOpen, onClose, instruments, initialMet
   const [focusSymbol, setFocusSymbol] = useState("");
   const [operator, setOperator] = useState<AlertOperator>(">");
   const [threshold, setThreshold] = useState("");
-  const [cooldownMinutes, setCooldownMinutes] = useState(15);
+  const [cooldownMinutes, setCooldownMinutes] = useState(defaultCooldownMinutes);
   const [alertError, setAlertError] = useState<unknown>(null);
   const [alertMessage, setAlertMessage] = useState("");
 
@@ -42,9 +44,10 @@ export function CreateGreekAlertModal({ isOpen, onClose, instruments, initialMet
   useEffect(() => {
     if (!isOpen) return;
     setMetric(initialMetric ?? "delta");
+    setCooldownMinutes(defaultCooldownMinutes);
     setAlertError(null);
     setAlertMessage("");
-  }, [isOpen, initialMetric]);
+  }, [isOpen, initialMetric, defaultCooldownMinutes]);
 
   if (!isOpen) return null;
 

@@ -8,3 +8,5 @@ from app.models.alert import AlertRecord, AlertTriggerRecord  # noqa
 from app.models.alert_delivery import AlertDeliverySettingsRecord  # noqa
 from app.models.trade_journal import TradeJournalRecord  # noqa
 from app.models.live_basket import LiveBasketRecord  # noqa
+from app.models.gtt_order import GttOrderRecord  # noqa
+from app.models.user_preferences import UserPreferencesRecord  # noqa

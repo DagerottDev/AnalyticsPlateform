@@ -9,7 +9,7 @@ import { getInstruments } from "@/lib/market";
 import { getHistoricalVolatility, getVolatilityMetrics, VolatilityHistoricalData, VolatilityMetrics } from "@/lib/volatility";
 import { calculateImpliedVolatility } from "@/lib/greeks";
 import { fitSvi, sviImpliedVolatility } from "@/lib/svi";
-import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
+import { timeToExpiry, nearestStrikeTo, defaultSpotFallback } from "@/lib/optionMath";
 import { Instrument } from "@/types/market";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Button } from "@/components/ui/Button";
@@ -34,6 +34,9 @@ const TABS = [
 export default function VolatilityPage() {
   const [activeTab, setActiveTab] = useState<string>("live");
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
+  const riskFreeRate = useSettingsStore((state) => (
+    (state.analytics.riskFreeRatePercent[symbol] ?? state.analytics.riskFreeRatePercent.DEFAULT ?? 10) / 100
+  ));
   const [expiry, setExpiry] = useState<string | null>(null);
   const selectedExpiryRef = useRef(expiry);
 
@@ -117,7 +120,7 @@ export default function VolatilityPage() {
   // Get underlying price
   const underlyingTick = getTick(symbol);
   const S = underlyingTick?.last_price || defaultSpotFallback(symbol);
-  const r = DEFAULT_RISK_FREE_RATE;
+  const r = riskFreeRate;
 
   // Calculate live IVs for all fetched instruments based on live ticks
   const liveIVData = useMemo(() => {
