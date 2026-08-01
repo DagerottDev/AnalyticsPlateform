@@ -77,6 +77,23 @@ class Settings(BaseSettings):
     alert_evaluation_enabled: bool = True
     alert_evaluation_interval_seconds: float = 15.0
 
+    # Daily ATM-IV/IV-Rank/IV-Percentile persistence across every NSE F&O
+    # stock, powering the IV screener. Symbols already captured today are
+    # skipped, so a short interval mostly just retries prior failures rather
+    # than re-fetching the whole universe; the per-symbol delay keeps the
+    # sequential broker calls under Fyers' rate limit.
+    iv_universe_backfill_enabled: bool = True
+    iv_universe_backfill_interval_seconds: float = 1800.0
+    iv_universe_backfill_symbol_delay_seconds: float = 0.35
+
+    # Watches open live basket orders for per-leg targets and combined
+    # stop-loss/target (see app.services.basket_monitor). Unlike the
+    # read-only jobs above, this actively exits real positions, so it polls
+    # much more frequently — it is the only thing enforcing those exits, so
+    # if this job or the process itself is down, they simply will not fire.
+    basket_monitor_enabled: bool = True
+    basket_monitor_interval_seconds: float = 10.0
+
     alert_smtp_host: str | None = None
     alert_smtp_port: int = 587
     alert_smtp_username: str | None = None

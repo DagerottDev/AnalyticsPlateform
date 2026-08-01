@@ -6,12 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.volatility_snapshot import DailyVolatilitySnapshot
-
-
-def _iv_rank(values: list[float], current: float) -> float:
-    low = min(values)
-    high = max(values)
-    return ((current - low) / (high - low)) * 100 if high > low else 0.0
+from app.services.iv_stats import iv_rank as _iv_rank
 
 
 async def get_or_create_daily_snapshot(

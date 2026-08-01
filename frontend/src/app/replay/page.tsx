@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useReplayStore } from "@/stores/replayStore";
-import { buildReplaySession, startPlayback, stopPlayback } from "@/lib/replayEngine";
+import { buildReplaySession, enrichReplaySessionWithRealPrices, startPlayback, stopPlayback } from "@/lib/replayEngine";
 import { getInstruments, getHistoricalCandles } from "@/lib/market";
 import { formatApiError } from "@/lib/apiError";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -35,6 +35,8 @@ export default function ReplayPage() {
     setIsPlaying,
     setSymbol,
     setSessionDate: setStoreSessionDate,
+    priceCoverage,
+    setPriceCoverage,
     reset,
   } = useReplayStore();
 
@@ -43,6 +45,7 @@ export default function ReplayPage() {
   const [resolution, setResolution] = useState("1");
   const [volatility, setVolatility] = useState("15"); // used to price options off the real spot path
   const [isGenerating, setIsGenerating] = useState(false);
+  const [loadingLabel, setLoadingLabel] = useState("Loading Historical Data...");
   const [error, setError] = useState<string | null>(null);
 
   const handleStart = async () => {
@@ -52,6 +55,7 @@ export default function ReplayPage() {
       return;
     }
     setIsGenerating(true);
+    setLoadingLabel("Loading Historical Data...");
     try {
       // 1. Fetch the real instruments list so we have valid strikes to price
       const [instrumentData, candles] = await Promise.all([
@@ -68,7 +72,8 @@ export default function ReplayPage() {
         return;
       }
 
-      // 2. Build the tick-by-tick session from real historical candles
+      // 2. Build the tick-by-tick session, modeling every option off the real
+      // spot with Black-Scholes as a baseline.
       const { allTicks } = buildReplaySession(
         targetSymbol,
         candles,
@@ -76,7 +81,20 @@ export default function ReplayPage() {
         Number(volatility) / 100
       );
 
-      // 3. Setup Store and Start
+      // 3. Try to replace near-the-money contracts on the nearest expiry with
+      // the broker's own real historical prices, where Fyers actually has
+      // them. Anything it doesn't cover keeps its modeled price from step 2.
+      setLoadingLabel("Fetching real option prices...");
+      const coverage = await enrichReplaySessionWithRealPrices(
+        targetSymbol,
+        allTicks,
+        instrumentData.instruments,
+        sessionDate,
+        resolution
+      );
+      setPriceCoverage(coverage);
+
+      // 4. Setup Store and Start
       setSymbol(targetSymbol);
       setStoreSessionDate(sessionDate);
       setIsActive(true);
@@ -123,6 +141,13 @@ export default function ReplayPage() {
                 Real historical ticks for {sessionDate} are currently feeding all dashboards.
                 Use the sidebar to navigate to the <b>Option Chain</b> or <b>Dealer Flow</b> to watch the market move.
               </p>
+              {priceCoverage && priceCoverage.attempted > 0 && (
+                <p className="mx-auto mt-2 max-w-md text-xs text-[var(--color-text-muted)]">
+                  {priceCoverage.matched} of {priceCoverage.attempted} near-the-money contracts are using{" "}
+                  <b className="text-[var(--color-text-secondary)]">real broker prices</b>; the rest (and everything
+                  further from the money) are modeled with Black-Scholes.
+                </p>
+              )}
             </div>
             <Button variant="outline" onClick={handleStop} className="mt-4 hover:text-[var(--color-loss)]">
               Stop Replay
@@ -142,6 +167,7 @@ export default function ReplayPage() {
                   <option value="BANKNIFTY">BANKNIFTY</option>
                   <option value="FINNIFTY">FINNIFTY</option>
                   <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+                  <option value="SENSEX">S&amp;P BSE SENSEX</option>
                 </Select>
               </div>
 
@@ -178,9 +204,10 @@ export default function ReplayPage() {
               <AlertTriangle className="h-5 w-5 shrink-0 text-[var(--color-status-warning)]" />
               <p>
                 This mode will disconnect your live broker WebSocket feed and instead replay real historical candles
-                for the chosen date. The underlying price path is real broker data; option prices are derived from
-                that real spot using Black-Scholes (the same pricing engine used elsewhere in this app) at the
-                volatility above, since the broker does not expose historical tick data per option contract.
+                for the chosen date. The underlying price path is always real broker data. For near-the-money
+                contracts on the nearest expiry, option prices are also fetched as real historical data from the
+                broker where available; everything else (further strikes, or contracts the broker has no history
+                for) falls back to a Black-Scholes model off the real spot, at the volatility above.
                 <br /><br />
                 <b>All dashboards will render this replayed session until stopped.</b>
               </p>
@@ -192,7 +219,7 @@ export default function ReplayPage() {
 
             <Button onClick={handleStart} disabled={isGenerating} size="md" className="mt-2 h-12 w-full">
               <PlayCircle className="h-5 w-5" />
-              {isGenerating ? "Loading Historical Data..." : "Start Replay"}
+              {isGenerating ? loadingLabel : "Start Replay"}
             </Button>
           </Card>
         )}

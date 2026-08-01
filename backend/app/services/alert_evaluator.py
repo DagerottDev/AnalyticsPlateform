@@ -17,6 +17,7 @@ from app.schemas.alerts import AlertResponse
 from app.schemas.market import Instrument
 from app.services.alert_delivery import DeliveryEvent, dispatch_alert_delivery
 from app.services.greeks import calculate_greeks, calculate_implied_volatility
+from app.services.lot_size_store import lot_size_store
 from app.services.session_manager import session_manager
 
 if TYPE_CHECKING:
@@ -44,17 +45,6 @@ def _time_to_expiry(expiry: object) -> float:
         except ValueError:
             continue
     return 0.0001
-
-
-def _lot_size(symbol: str) -> int:
-    symbol = symbol.upper()
-    if "BANKNIFTY" in symbol:
-        return 15
-    if "FINNIFTY" in symbol:
-        return 40
-    if "MIDCPNIFTY" in symbol:
-        return 75
-    return 50
 
 
 def _quote_price(quote: dict[str, object] | None) -> float | None:
@@ -111,6 +101,9 @@ async def _value_for_alert(
         chain = chains.get(f"{underlying}:{expiry}")
         if spot is None or not chain:
             return None
+        lot_size = await lot_size_store.get(underlying)
+        if lot_size is None:
+            return None
         net_gex = 0.0
         saw_contract = False
         for contract in chain:
@@ -147,7 +140,7 @@ async def _value_for_alert(
                 net_gex += (
                     gamma
                     * float(oi)
-                    * _lot_size(underlying)
+                    * lot_size
                     * spot
                     * (1 if contract_option_type == "CE" else -1)
                 )
@@ -194,12 +187,15 @@ async def _value_for_alert(
     if alert.metric in values:
         return values[alert.metric]
     if alert.metric in {"Call GEX", "Put GEX"}:
+        lot_size = await lot_size_store.get(underlying)
+        if lot_size is None:
+            return None
         oi = quote.get("open_interest") if quote else None
         open_interest = float(oi) if isinstance(oi, int | float) else 0.0
         return (
             greeks.gamma
             * open_interest
-            * _lot_size(underlying)
+            * lot_size
             * spot
             * (1 if typed_option_type == "CE" else -1)
         )

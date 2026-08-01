@@ -71,6 +71,20 @@ async def test_get_historical_data_no_data_returns_empty_list() -> None:
 
 
 @pytest.mark.asyncio
+async def test_history_request_starts_are_paced_per_broker_session() -> None:
+    """A Greek workspace must not burst history calls and starve live quotes."""
+    service = _make_service()
+    service.client.history = MagicMock(return_value={"s": "no_data"})
+
+    with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()) as sleep:
+        await service.get_historical_data("NSE:NIFTY50-INDEX", "2023-11-15", "2023-11-15", "1")
+        await service.get_historical_data("NSE:NIFTY26JUL23000PE", "2023-11-15", "2023-11-15", "1")
+
+    sleep.assert_awaited_once()
+    assert sleep.await_args.args[0] >= FyersService._HISTORY_REQUEST_MIN_INTERVAL_SECONDS - 0.01
+
+
+@pytest.mark.asyncio
 async def test_get_historical_data_retries_a_transient_rate_limit() -> None:
     """The history API is rate-limited too; one 429 should not fail the chart."""
     service = _make_service()
@@ -142,6 +156,8 @@ async def test_get_instruments_parses_option_chain_across_expiries() -> None:
 
     discovery_call = service.client.optionchain.call_args_list[0].args[0]
     assert discovery_call == {"symbol": "NSE:NIFTY50-INDEX", "strikecount": 1, "timestamp": ""}
+    chain_call = service.client.optionchain.call_args_list[1].args[0]
+    assert chain_call["strikecount"] == 50
 
 
 @pytest.mark.asyncio
@@ -192,6 +208,30 @@ async def test_get_instruments_maps_equity_symbols_to_nse_eq() -> None:
     assert instruments[0]["instrument_type"] == "OPTSTK"
     discovery_call = service.client.optionchain.call_args_list[0].args[0]
     assert discovery_call["symbol"] == "NSE:RELIANCE-EQ"
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_maps_sensex_to_bse_and_preserves_bfo_exchange() -> None:
+    """SENSEX is a BSE index derivative, not an NSE equity fallback."""
+    service = _make_service()
+    sensex_row = {
+        "symbol": "BFO:SENSEX25JUL80000CE",
+        "option_type": "CE",
+        "strike_price": 80000,
+    }
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            _expiry_discovery_response(("31-Jul-2025", "1753905000")),
+            _chain_response(sensex_row),
+        ]
+    )
+
+    instruments = await service.get_instruments("sensex")
+
+    assert instruments[0]["instrument_type"] == "OPTIDX"
+    assert instruments[0]["exchange"] == "BFO"
+    discovery_call = service.client.optionchain.call_args_list[0].args[0]
+    assert discovery_call["symbol"] == "BSE:SENSEX-INDEX"
 
 
 @pytest.mark.asyncio
@@ -343,6 +383,11 @@ def test_to_fyers_ws_symbol_maps_bare_index_alias() -> None:
     assert to_fyers_ws_symbol("nifty") == "NSE:NIFTY50-INDEX"
 
 
+def test_to_fyers_ws_symbol_maps_sensex_to_bse_index() -> None:
+    assert to_fyers_ws_symbol("SENSEX") == "BSE:SENSEX-INDEX"
+    assert from_fyers_ws_symbol("BSE:SENSEX-INDEX") == "SENSEX"
+
+
 def test_to_fyers_ws_symbol_maps_bare_equity_alias() -> None:
     assert to_fyers_ws_symbol("RELIANCE") == "NSE:RELIANCE-EQ"
 
@@ -486,3 +531,76 @@ async def test_get_funds_raises_on_error_response() -> None:
 
     with pytest.raises(BrokerConnectionError):
         await service.get_funds()
+
+
+def _order(symbol: str, side: str = "Buy") -> dict[str, Any]:
+    return {
+        "symbol": symbol,
+        "quantity": 50,
+        "side": side,
+        "order_type": "MARKET",
+        "product_type": "INTRADAY",
+        "limit_price": 0,
+        "stop_price": 0,
+        "validity": "DAY",
+        "disclosed_quantity": 0,
+        "offline_order": False,
+        "stop_loss": 0,
+        "take_profit": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_place_basket_orders_maps_each_leg_result_in_order() -> None:
+    service = _make_service()
+    service.client.place_basket_orders = MagicMock(
+        return_value={
+            "s": "ok",
+            "data": [
+                {"s": "ok", "id": "111", "message": "Order submitted"},
+                {"s": "error", "message": "RMS:Insufficient funds"},
+            ],
+        }
+    )
+
+    results = await service.place_basket_orders(
+        [_order("NFO:NIFTY24JULCE"), _order("NFO:NIFTY24JULPE", "Sell")]
+    )
+
+    assert results[0] == {"id": "111", "message": "Order submitted"}
+    assert results[1]["id"] is None
+    assert "RMS" in results[1]["message"]
+    submitted = service.client.place_basket_orders.call_args.args[0]
+    assert len(submitted) == 2
+    assert submitted[0]["symbol"] == "NFO:NIFTY24JULCE"
+    assert submitted[1]["side"] == -1
+
+
+@pytest.mark.asyncio
+async def test_place_basket_orders_rejects_more_than_ten_legs() -> None:
+    service = _make_service()
+    service.client.place_basket_orders = MagicMock()
+
+    with pytest.raises(BrokerConnectionError):
+        await service.place_basket_orders([_order(f"NFO:LEG{i}") for i in range(11)])
+    service.client.place_basket_orders.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_place_basket_orders_raises_on_response_shape_mismatch() -> None:
+    """Never silently claim legs succeeded when the response can't be
+    matched 1:1 to what was sent."""
+    service = _make_service()
+    service.client.place_basket_orders = MagicMock(return_value={"s": "ok", "data": [{"id": "1"}]})
+
+    with pytest.raises(BrokerConnectionError):
+        await service.place_basket_orders([_order("NFO:A"), _order("NFO:B")])
+
+
+@pytest.mark.asyncio
+async def test_place_basket_orders_empty_input_is_a_noop() -> None:
+    service = _make_service()
+    service.client.place_basket_orders = MagicMock()
+
+    assert await service.place_basket_orders([]) == []
+    service.client.place_basket_orders.assert_not_called()

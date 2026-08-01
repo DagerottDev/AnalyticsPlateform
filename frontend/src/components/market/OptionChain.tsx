@@ -6,7 +6,8 @@ import { getInstruments } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
 import { formatApiError } from "@/lib/apiError";
 import { cn, formatINR } from "@/lib/utils";
-import { BarChart3, Check, Download, Settings2, TrendingUp } from "lucide-react";
+import { BarChart3, Check, Download, ShoppingCart, Settings2, TrendingUp } from "lucide-react";
+import { BuyTicketModal } from "@/components/market/BuyTicketModal";
 import { calculateImpliedVolatility, calculateGreeks, Greeks } from "@/lib/greeks";
 import { classifyBuildup } from "@/lib/buildup";
 import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
@@ -40,9 +41,13 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   const [showGreeks, setShowGreeks] = useState(true);
   const [showBuildup, setShowBuildup] = useState(true);
   const [moneyness, setMoneyness] = useState<MoneynessFilter>("all");
-  const [strikesEachSide, setStrikesEachSide] = useState<number | null>(10);
+  // Start with every broker-provided strike. Traders can narrow this range
+  // explicitly, but the default must not hide most of an otherwise complete
+  // option chain.
+  const [strikesEachSide, setStrikesEachSide] = useState<number | null>(null);
   const [previousOiBySymbol, setPreviousOiBySymbol] = useState<Map<string, number>>(new Map());
   const [selectedAnalysisSymbols, setSelectedAnalysisSymbols] = useState<string[]>([]);
+  const [buyTarget, setBuyTarget] = useState<Instrument | null>(null);
   const latestOiBySymbol = useRef<Map<string, number>>(new Map());
 
   // Fetch instruments when symbol or expiry changes, then keep OI/buildup
@@ -241,6 +246,9 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
             <option value="10">±10 strikes</option>
             <option value="20">±20 strikes</option>
           </Select>
+          <span className="col-span-2 text-right text-[11px] text-[var(--color-text-muted)] sm:col-auto sm:text-left">
+            Showing {filteredStrikes.length} of {strikes.length} available strikes
+          </span>
           <Button className="w-full justify-center sm:w-auto" variant="outline" size="sm" onClick={downloadCsv} title="Export filtered option chain as CSV">
             <Download className="h-4 w-4" /> Export CSV
           </Button>
@@ -316,7 +324,18 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                         {side.tick ? `${side.tick.change_percent > 0 ? "+" : ""}${side.tick.change_percent.toFixed(2)}%` : "—"}
                       </span>
                     </div>
-                    <p className="tnum mt-1 text-base font-bold text-[var(--color-text-bright)]">{side.tick ? formatINR(side.tick.last_price) : "—"}</p>
+                    <p className="tnum mt-1 flex items-center gap-1.5 text-base font-bold text-[var(--color-text-bright)]">
+                      {side.tick ? formatINR(side.tick.last_price) : "—"}
+                      {side.tick?.source && (
+                        <span
+                          className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            side.tick.source === "real" ? "bg-[var(--color-profit)]" : "bg-[var(--color-text-muted)]"
+                          )}
+                          title={side.tick.source === "real" ? "Real broker price" : "Modeled (Black-Scholes)"}
+                        />
+                      )}
+                    </p>
                     <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[10px] text-[var(--color-text-muted)]">
                       <span>OI <b className="tnum text-[var(--color-text-secondary)]">{side.instrument?.oi?.toLocaleString() ?? "—"}</b></span>
                       <span>Vol <b className="tnum text-[var(--color-text-secondary)]">{side.tick?.volume.toLocaleString() ?? "—"}</b></span>
@@ -325,16 +344,25 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                       {showGreeks && <span className="tnum">Δ {side.delta?.toFixed(2) ?? "—"}</span>}
                     </div>
                     {showBuildup && side.buildup && <div className="mt-2"><Badge tone={side.buildup.tone}>{side.buildup.shortLabel}</Badge></div>}
-                    {side.instrument && <Button
-                      className="mt-3 w-full"
-                      variant={selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? "secondary" : "outline"}
-                      size="sm"
-                      onClick={() => toggleAnalysisContract(side.instrument)}
-                      disabled={!selectedAnalysisSymbols.includes(side.instrument.trading_symbol) && selectedAnalysisSymbols.length >= MAX_ANALYSIS_CONTRACTS}
-                    >
-                      {selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? <Check className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />}
-                      {selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? "Selected" : "Select"}
-                    </Button>}
+                    {side.instrument && <div className="mt-3 flex gap-2">
+                      <Button
+                        className="flex-1 bg-[var(--color-profit)] text-white hover:opacity-90"
+                        size="sm"
+                        onClick={() => setBuyTarget(side.instrument!)}
+                      >
+                        <ShoppingCart className="h-3.5 w-3.5" /> Buy
+                      </Button>
+                      <Button
+                        className="flex-1"
+                        variant={selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => toggleAnalysisContract(side.instrument)}
+                        disabled={!selectedAnalysisSymbols.includes(side.instrument.trading_symbol) && selectedAnalysisSymbols.length >= MAX_ANALYSIS_CONTRACTS}
+                      >
+                        {selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? <Check className="h-3.5 w-3.5" /> : <BarChart3 className="h-3.5 w-3.5" />}
+                        {selectedAnalysisSymbols.includes(side.instrument.trading_symbol) ? "Selected" : "Select"}
+                      </Button>
+                    </div>}
                   </div>
                 ))}
               </div>
@@ -472,6 +500,21 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                   <td className={cn("border-r border-[var(--color-border-default)] px-3 py-2 font-semibold", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
                     <div className="flex items-center justify-end gap-1.5">
                       {ceTick ? formatINR(ceTick.last_price) : "-"}
+                      {ceTick?.source && (
+                        <span
+                          className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            ceTick.source === "real" ? "bg-[var(--color-profit)]" : "bg-[var(--color-text-muted)]"
+                          )}
+                          title={ceTick.source === "real" ? "Real broker price" : "Modeled (Black-Scholes)"}
+                        />
+                      )}
+                      {row.CE && <button
+                        type="button"
+                        aria-label={`Buy ${row.CE.trading_symbol}`}
+                        onClick={() => setBuyTarget(row.CE!)}
+                        className="rounded p-1 text-[var(--color-profit)] hover:bg-[var(--color-profit)]/10"
+                      ><ShoppingCart className="h-3 w-3" /></button>}
                       {row.CE && <button
                         type="button"
                         aria-label={`${selectedAnalysisSymbols.includes(row.CE.trading_symbol) ? "Remove" : "Select"} ${row.CE.trading_symbol} for Greek analysis`}
@@ -497,7 +540,22 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
                         disabled={!selectedAnalysisSymbols.includes(row.PE.trading_symbol) && selectedAnalysisSymbols.length >= MAX_ANALYSIS_CONTRACTS}
                         className={cn("rounded p-1", selectedAnalysisSymbols.includes(row.PE.trading_symbol) ? "bg-[var(--color-accent-blue)] text-white" : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]", "disabled:cursor-not-allowed disabled:opacity-40")}
                       >{selectedAnalysisSymbols.includes(row.PE.trading_symbol) ? <Check className="h-3 w-3" /> : <BarChart3 className="h-3 w-3" />}</button>}
+                      {row.PE && <button
+                        type="button"
+                        aria-label={`Buy ${row.PE.trading_symbol}`}
+                        onClick={() => setBuyTarget(row.PE!)}
+                        className="rounded p-1 text-[var(--color-profit)] hover:bg-[var(--color-profit)]/10"
+                      ><ShoppingCart className="h-3 w-3" /></button>}
                       {peTick ? formatINR(peTick.last_price) : "-"}
+                      {peTick?.source && (
+                        <span
+                          className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            peTick.source === "real" ? "bg-[var(--color-profit)]" : "bg-[var(--color-text-muted)]"
+                          )}
+                          title={peTick.source === "real" ? "Real broker price" : "Modeled (Black-Scholes)"}
+                        />
+                      )}
                     </div>
                   </td>
                   <td className={cn("px-3 py-2", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "", peTick && peTick.change_percent > 0 ? "text-[var(--color-profit)]" : peTick && peTick.change_percent < 0 ? "text-[var(--color-loss)]" : "")}>
@@ -556,6 +614,14 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
           </tbody>
         </table>
       </div>
+      {buyTarget && (
+        <BuyTicketModal
+          symbol={symbol}
+          instrument={buyTarget}
+          tick={getTick(buyTarget.trading_symbol)}
+          onClose={() => setBuyTarget(null)}
+        />
+      )}
     </div>
   );
 }

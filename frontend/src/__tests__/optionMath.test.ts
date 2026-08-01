@@ -46,6 +46,10 @@ describe("defaultSpotFallback", () => {
     expect(defaultSpotFallback("NIFTY")).toBe(22000);
   });
 
+  it("returns the SENSEX fallback for SENSEX", () => {
+    expect(defaultSpotFallback("SENSEX")).toBe(80000);
+  });
+
   it("returns the generic fallback for any other symbol", () => {
     expect(defaultSpotFallback("BANKNIFTY")).toBe(48000);
     expect(defaultSpotFallback("RELIANCE")).toBe(48000);

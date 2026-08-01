@@ -5,9 +5,12 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.core.security import create_access_token
+from app.models.live_basket import LiveBasketRecord
 
 
 def live_headers(settings: Settings) -> dict[str, str]:
@@ -85,3 +88,133 @@ async def test_get_orders_is_read_only_in_paper_mode(
     )
     assert response.status_code == 200
     assert response.json()["orders"][0]["id"] == "12345"
+
+
+def _basket_leg(symbol: str, **overrides: object) -> dict:
+    leg = {
+        "symbol": symbol, "quantity": 50, "side": "Buy", "order_type": "MARKET",
+        "product_type": "INTRADAY",
+    }
+    leg.update(overrides)
+    return leg
+
+
+@pytest.mark.asyncio
+async def test_place_basket_order_rejects_paper_mode(
+    app: FastAPI, client: AsyncClient, access_token: str, active_broker_session: AsyncMock
+):
+    response = await client.post(
+        "/api/v1/orders/basket",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"legs": [_basket_leg("NFO:NIFTY24JULCE")]},
+    )
+    assert response.status_code == 403
+    active_broker_session.place_basket_orders.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_place_basket_order_arms_protective_stop_and_persists_basket(
+    client: AsyncClient,
+    active_broker_session: AsyncMock,
+    test_settings: Settings,
+    db_session: AsyncSession,
+):
+    active_broker_session.get_quotes.return_value = [
+        {"trading_symbol": "NFO:NIFTY24JULCE", "last_price": 150.0},
+        {"trading_symbol": "NFO:NIFTY24JULPE", "last_price": 140.0},
+    ]
+    active_broker_session.place_basket_orders.return_value = [
+        {"id": "111", "message": "Order submitted"},
+        {"id": "112", "message": "Order submitted"},
+    ]
+    active_broker_session.place_order.return_value = {"id": "999", "message": "Order submitted"}
+
+    response = await client.post(
+        "/api/v1/orders/basket",
+        headers=live_headers(test_settings),
+        json={
+            "legs": [
+                _basket_leg("NFO:NIFTY24JULCE", stop_loss=100.0, take_profit=250.0),
+                _basket_leg("NFO:NIFTY24JULPE", side="Sell"),
+            ],
+            "combined_stop_loss": 5000,
+            "combined_take_profit": 10000,
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["basket_id"] is not None
+    assert [leg["id"] for leg in body["legs"]] == ["111", "112"]
+    active_broker_session.place_basket_orders.assert_awaited_once()
+    # Only the leg with a stop_loss gets a protective STOP order, opposite side.
+    active_broker_session.place_order.assert_awaited_once()
+    stop_order = active_broker_session.place_order.await_args.args[0]
+    assert stop_order["symbol"] == "NFO:NIFTY24JULCE"
+    assert stop_order["side"] == "Sell"
+    assert stop_order["order_type"] == "STOP"
+    assert stop_order["stop_price"] == 100.0
+
+    basket = (await db_session.execute(select(LiveBasketRecord))).scalar_one()
+    assert basket.status == "Open"
+    assert basket.combined_stop_loss == 5000
+    assert len(basket.legs) == 2
+    assert basket.legs[0]["entry_price"] == 150.0
+    assert basket.legs[0]["target"] == 250.0
+    assert basket.legs[0]["protective_stop_order_id"] == "999"
+    assert basket.legs[1]["protective_stop_order_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_place_basket_order_reports_partial_failure_without_raising(
+    client: AsyncClient,
+    active_broker_session: AsyncMock,
+    test_settings: Settings,
+    db_session: AsyncSession,
+):
+    active_broker_session.get_quotes.return_value = []
+    active_broker_session.place_basket_orders.return_value = [
+        {"id": "111", "message": "Order submitted"},
+        {"id": None, "message": "RMS:Insufficient funds"},
+    ]
+
+    response = await client.post(
+        "/api/v1/orders/basket",
+        headers=live_headers(test_settings),
+        json={"legs": [_basket_leg("NFO:A"), _basket_leg("NFO:B")]},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["basket_id"] is not None  # at least one leg entered
+    assert body["legs"][0]["id"] == "111"
+    assert body["legs"][1]["id"] is None
+    assert "RMS" in body["legs"][1]["message"]
+
+    basket = (await db_session.execute(select(LiveBasketRecord))).scalar_one()
+    assert basket.legs[0]["status"] == "Open"
+    assert basket.legs[1]["status"] == "Failed"
+
+
+@pytest.mark.asyncio
+async def test_place_basket_order_skips_persistence_when_every_leg_fails(
+    client: AsyncClient,
+    active_broker_session: AsyncMock,
+    test_settings: Settings,
+    db_session: AsyncSession,
+):
+    active_broker_session.get_quotes.return_value = []
+    active_broker_session.place_basket_orders.return_value = [
+        {"id": None, "message": "RMS:Insufficient funds"},
+    ]
+
+    response = await client.post(
+        "/api/v1/orders/basket",
+        headers=live_headers(test_settings),
+        json={"legs": [_basket_leg("NFO:A")]},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["basket_id"] is None
+    count = (await db_session.execute(select(LiveBasketRecord))).scalars().all()
+    assert count == []

@@ -13,7 +13,6 @@ import {
   calculateNetGreeks,
   deriveMetricsFromProfile
 } from "@/lib/strategy";
-import { getLotSize } from "@/lib/dealerFlow";
 import { Instrument } from "@/types/market";
 import { usePositionStore } from "@/stores/positionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -86,7 +85,10 @@ export default function StrategyBuilderPage() {
   // Live Calculations
   const underlyingTick = getTick(symbol);
   const spotPrice = underlyingTick?.last_price || defaultSpotFallback(symbol);
-  const lotSize = getLotSize(symbol);
+  // Sourced live from the broker's symbol master via the instruments fetch
+  // above (see backend's lot_size_store), not a hardcoded per-symbol table —
+  // 0 until that fetch resolves, which the leg UI treats as "not ready yet".
+  const lotSize = instruments[0]?.lot_size ?? 0;
 
   // Auto-update Entry Prices and IV for legs based on live ticks if entryPrice is 0 (uninitialized)
   useEffect(() => {

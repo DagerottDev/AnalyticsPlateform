@@ -48,6 +48,10 @@ class Instrument(BaseModel):
     oi: float | None = None
     oi_change: float | None = None
     oi_change_percent: float | None = None
+    # Looked up live from the broker's symbol master (see lot_size_store),
+    # not a hardcoded per-symbol table — None only if that lookup is
+    # temporarily unavailable.
+    lot_size: int | None = None
 
 
 class ExpiryList(BaseModel):

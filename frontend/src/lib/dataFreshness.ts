@@ -1,6 +1,7 @@
 import type { MarketTick } from "@/types/market";
+import { getNseMarketSession } from "@/lib/marketSession";
 
-export type FreshnessState = "waiting" | "live" | "delayed" | "stale";
+export type FreshnessState = "waiting" | "live" | "delayed" | "stale" | "closed";
 
 export interface DataFreshness {
   state: FreshnessState;
@@ -18,6 +19,10 @@ export function describeDataFreshness(
   tick: Pick<MarketTick, "timestamp"> | null | undefined,
   nowMs: number = Date.now()
 ): DataFreshness {
+  const marketSession = getNseMarketSession(new Date(nowMs));
+  if (marketSession.state !== "open") {
+    return { state: "closed", label: marketSession.label, detail: marketSession.detail };
+  }
   if (!tick?.timestamp || !Number.isFinite(tick.timestamp)) {
     return { state: "waiting", label: "Awaiting quote", detail: "No market-data timestamp received yet." };
   }

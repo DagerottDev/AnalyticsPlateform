@@ -17,16 +17,13 @@ import { autoLoginBroker, loginWithBroker, logoutUser } from "@/lib/auth";
 // each of those mounts independently fires its own autoLoginBroker() call —
 // on a server with no FYERS_* auto-login credentials configured, that's a
 // burst of guaranteed-503 requests on every single page navigation. Caching
-// the in-flight/completed promise means the real work runs once per page
-// load; every caller just awaits the same result.
+// the hydration result means the local session is restored once per page
+// load while the broker reconnection remains a single background request.
 let hydratePromise: Promise<void> | null = null;
 
-// Mirrors hydratePromise: once hydration has settled once this page load,
-// every later DashboardLayout remount (see comment above) can skip straight
-// to the real UI instead of flashing its full-screen spinner again — that
-// spinner is driven by useAuth's local `hydrated` state, which otherwise
-// resets to false on every fresh mount even though the actual work below
-// only ever runs once.
+// Mirrors hydratePromise: DashboardLayout is rendered per-page rather than
+// from one shared layout, so later mounts should not show a startup loader
+// after the local browser state has already been restored.
 let hasHydratedOnce = false;
 
 export function isAuthHydrated(): boolean {
@@ -109,38 +106,33 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       hydrate: () => {
-        // See the module-level comment on hydratePromise — this must only
-        // do its real work once per page load, no matter how many
-        // components call it or how many times they remount.
+        // Local storage is synchronous, so the app can render as soon as
+        // that state is known. Re-registering an in-memory broker session
+        // may take several seconds, and must never keep the whole platform
+        // behind the startup loader.
         if (!hydratePromise) {
-          hydratePromise = (async () => {
-            // If a session is already persisted in localStorage, restore
-            // it. Otherwise, silently try a server-side auto-login
-            // (backend/.env credentials) before ever showing the login
-            // form — falls back to the form if that isn't configured.
-            const state = get();
-            if (state.token && state.user) {
-              set({ isAuthenticated: true });
-              // Silently re-register the backend broker session in case the
-              // server restarted or the in-memory session was lost.
-              try {
-                const response = await autoLoginBroker();
-                set({
-                  token: response.access_token,
-                  user: response.user,
-                  isAuthenticated: true,
-                  error: null,
-                  tradingMode: response.user.trading_mode,
-                  sessionLive: true,
-                });
-              } catch {
-                // Non-blocking catch for manual/custom sessions
-              }
-              return;
-            }
+          const state = get();
+          const persistedToken = state.token;
+          const hadPersistedSession = Boolean(persistedToken && state.user);
 
-            try {
-              const response = await autoLoginBroker();
+          if (hadPersistedSession) {
+            set({ isAuthenticated: true });
+          }
+
+          hasHydratedOnce = true;
+          hydratePromise = Promise.resolve();
+
+          // Silently restore the server-side broker session. A user may log
+          // out or manually log in while this request is pending, so only
+          // apply the result if this is still the same startup session.
+          void autoLoginBroker()
+            .then((response) => {
+              const current = get();
+              const startupSessionIsCurrent = hadPersistedSession
+                ? current.token === persistedToken
+                : !current.isAuthenticated;
+              if (!startupSessionIsCurrent) return;
+
               set({
                 token: response.access_token,
                 user: response.user,
@@ -149,13 +141,11 @@ export const useAuthStore = create<AuthStore>()(
                 tradingMode: response.user.trading_mode,
                 sessionLive: true,
               });
-            } catch {
-              // No server-side credentials configured, or auto-login
-              // failed — fall back to the manual login form.
-            }
-          })().finally(() => {
-            hasHydratedOnce = true;
-          });
+            })
+            .catch(() => {
+              // A manual/custom session can still use the shell and show a
+              // reconnect state. No startup error is needed here.
+            });
         }
         return hydratePromise;
       },

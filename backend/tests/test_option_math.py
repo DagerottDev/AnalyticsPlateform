@@ -38,5 +38,8 @@ class TestDefaultSpotFallback:
     def test_nifty(self):
         assert default_spot_fallback("NIFTY") == 22000.0
 
+    def test_sensex(self):
+        assert default_spot_fallback("SENSEX") == 80000.0
+
     def test_other_symbol(self):
         assert default_spot_fallback("RELIANCE") == 48000.0

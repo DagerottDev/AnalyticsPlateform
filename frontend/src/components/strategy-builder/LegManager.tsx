@@ -105,7 +105,9 @@ export function LegManager({
         <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
           <Layers className="h-4 w-4 text-[var(--color-accent-blue)]" /> Strategy Legs
         </h3>
-        <span className="text-[10px] font-medium text-[var(--color-text-muted)]">Lot Size: {lotSize}</span>
+        <span className="text-[10px] font-medium text-[var(--color-text-muted)]">
+          {lotSize > 0 ? `Lot Size: ${lotSize}` : "Lot size unavailable"}
+        </span>
       </div>
 
       <div className="flex items-center gap-2 rounded-lg border border-dashed border-[var(--color-border-default)] p-2">
@@ -119,7 +121,13 @@ export function LegManager({
             <option key={name} value={name}>{name}</option>
           ))}
         </Select>
-        <Button variant="outline" size="sm" onClick={loadPreset} disabled={!currentExpiry} className="whitespace-nowrap">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={loadPreset}
+          disabled={!currentExpiry || lotSize <= 0}
+          className="whitespace-nowrap"
+        >
           Load Preset
         </Button>
       </div>
@@ -189,8 +197,8 @@ export function LegManager({
               <label className="text-[10px] font-medium text-[var(--color-text-muted)]">Qty</label>
               <Input
                 type="number"
-                step={lotSize}
-                min={lotSize}
+                step={lotSize || 1}
+                min={lotSize || 1}
                 value={leg.quantity}
                 onChange={e => updateLeg(leg.id, { quantity: Number(e.target.value) })}
                 placeholder="Qty"
@@ -218,7 +226,7 @@ export function LegManager({
         )}
       </div>
 
-      <Button variant="outline" onClick={addLeg} className="mt-2 w-full border-dashed">
+      <Button variant="outline" onClick={addLeg} disabled={lotSize <= 0} className="mt-2 w-full border-dashed">
         <Plus className="h-4 w-4" /> Add Leg
       </Button>
     </Card>

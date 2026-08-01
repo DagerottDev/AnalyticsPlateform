@@ -9,11 +9,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
+from app.data.nse_fo_symbols import NSE_FO_SYMBOLS
 from app.db.session import get_db
 from app.models.volatility_snapshot import DailyVolatilitySnapshot
+from app.services.atm_iv import compute_atm_iv
+from app.services.fo_iv_universe_store import load_latest_snapshot_per_symbol
 from app.services.fyers_service import to_fyers_ws_symbol
 from app.services.greeks import calculate_greeks, calculate_implied_volatility
-from app.services.option_math import DEFAULT_RISK_FREE_RATE, nearest_strike_to, time_to_expiry
+from app.services.iv_stats import iv_percentile, iv_rank
+from app.services.lot_size_store import lot_size_store
+from app.services.option_math import DEFAULT_RISK_FREE_RATE, time_to_expiry
 from app.services.session_manager import session_manager
 from app.services.volatility_snapshot_store import (
     get_or_create_daily_snapshot,
@@ -30,7 +35,7 @@ RV_WINDOW_DAYS = 20  # Rolling window for realized vol, the standard "20D RV" co
 # real observations accumulate from the day this feature is deployed.
 IV_RISK_PREMIUM = 0.12
 IV_SMOOTHING_ALPHA = 0.15
-DEFAULT_RELATIVE_VALUE_SYMBOLS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")
+DEFAULT_RELATIVE_VALUE_SYMBOLS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX")
 MAX_RELATIVE_VALUE_SYMBOLS = 6
 
 # Daily candles do not change meaningfully more than once per trading day.
@@ -47,63 +52,8 @@ async def _compute_live_atm_iv(symbol: str, current_user: dict[str, Any]) -> flo
     service = session_manager.get_session(current_user["sub"])
     if not service:
         return None
-
-    instruments = await service.get_instruments(symbol)
-    today = datetime.now(UTC).date()
-    dated_contracts: list[tuple[date, dict[str, Any]]] = []
-    for instrument in instruments:
-        expiry = instrument.get("expiry")
-        if not expiry or instrument.get("option_type") not in ("CE", "PE"):
-            continue
-        try:
-            expiry_date = datetime.strptime(expiry, "%d-%b-%Y").date()
-        except ValueError:
-            continue
-        if expiry_date >= today and instrument.get("strike"):
-            dated_contracts.append((expiry_date, instrument))
-    if not dated_contracts:
-        return None
-
-    nearest_expiry = min(item[0] for item in dated_contracts)
-    contracts = [item[1] for item in dated_contracts if item[0] == nearest_expiry]
-    underlying_quotes = await service.get_quotes([symbol])
-    if not underlying_quotes or underlying_quotes[0].get("last_price", 0) <= 0:
-        return None
-    spot = float(underlying_quotes[0]["last_price"])
-    atm_strike = nearest_strike_to([float(item["strike"]) for item in contracts], spot)
-    atm_contracts = [item for item in contracts if float(item["strike"]) == atm_strike]
-    option_quotes = await service.get_quotes([item["trading_symbol"] for item in atm_contracts])
-    prices = {
-        str(item.get("trading_symbol")): float(item["last_price"])
-        for item in option_quotes
-        if item.get("last_price", 0) > 0
-    }
-    expiry_at = datetime.combine(nearest_expiry, datetime.min.time(), tzinfo=UTC)
-    maturity = time_to_expiry(expiry_at)
-
-    ivs: list[float] = []
-    for contract in atm_contracts:
-        price = prices.get(str(contract["trading_symbol"]))
-        if price is None:
-            continue
-        iv = calculate_implied_volatility(
-            contract["option_type"], spot, atm_strike, maturity, DEFAULT_RISK_FREE_RATE, price
-        )
-        if iv > 0:
-            ivs.append(iv)
-    return sum(ivs) / len(ivs) if ivs else None
-
-
-def _lot_size(symbol: str) -> int:
-    """NSE index lot sizes used to normalize GEX across underlyings."""
-    normalized = symbol.upper()
-    if "BANKNIFTY" in normalized:
-        return 15
-    if "FINNIFTY" in normalized:
-        return 40
-    if "MIDCPNIFTY" in normalized:
-        return 75
-    return 50
+    result = await compute_atm_iv(service, symbol)
+    return result[0] if result is not None else None
 
 
 def _contract_quote_price(quotes: list[dict[str, Any]], trading_symbol: str) -> float | None:
@@ -196,8 +146,11 @@ async def _relative_value_summary(
 
     # A full-chain OI total with the observed ATM volatility produces a
     # comparable gamma proxy without spending one quote request per strike.
+    lot_size = await lot_size_store.get(symbol)
+    if lot_size is None:
+        raise ValueError(f"Unable to resolve a lot size for {symbol}")
+
     net_gex = 0.0
-    lot_size = _lot_size(symbol)
     for contract in contracts:
         option_type = contract["option_type"]
         strike = float(contract["strike"])
@@ -209,12 +162,9 @@ async def _relative_value_summary(
 
     snapshots = await load_daily_snapshots(db, symbol=symbol, from_date=date.min)
     iv_observations = [snapshot.atm_iv for snapshot in snapshots]
-    if len(iv_observations) >= 2:
-        comparison_ivs = [*iv_observations, atm_iv]
-        low, high = min(comparison_ivs), max(comparison_ivs)
-        iv_rank = ((atm_iv - low) / (high - low)) * 100 if high > low else 0.0
-    else:
-        iv_rank = None
+    computed_iv_rank = (
+        iv_rank([*iv_observations, atm_iv], atm_iv) if len(iv_observations) >= 2 else None
+    )
 
     return {
         "symbol": symbol,
@@ -226,7 +176,7 @@ async def _relative_value_summary(
         "call_iv": round(call_iv, 6) if call_iv is not None else None,
         "skew": round(skew, 6) if skew is not None else None,
         "net_gex": round(net_gex, 2),
-        "iv_rank": round(iv_rank, 2) if iv_rank is not None else None,
+        "iv_rank": round(computed_iv_rank, 2) if computed_iv_rank is not None else None,
         "gex_model": "nearest-expiry OI, ATM-IV gamma proxy",
     }
 
@@ -261,6 +211,35 @@ async def compare_relative_value(
         except Exception as exc:
             comparisons.append({"symbol": symbol, "error": str(exc)})
     return {"comparisons": comparisons, "generated_at": datetime.now(UTC).isoformat()}
+
+
+@router.get("/universe")
+async def get_iv_universe(
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """ATM IV / IV Rank / IV Percentile for every NSE F&O stock.
+
+    Reads only the scheduled backfill's snapshot table — no broker calls are
+    made on this path, so it stays fast regardless of universe size.
+    """
+    snapshots = await load_latest_snapshot_per_symbol(db)
+    by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
+    symbols: list[dict[str, Any]] = []
+    for symbol, company_name in NSE_FO_SYMBOLS.items():
+        snapshot = by_symbol.get(symbol)
+        symbols.append(
+            {
+                "symbol": symbol,
+                "company_name": company_name,
+                "spot": snapshot.spot if snapshot else None,
+                "atm_iv": snapshot.atm_iv if snapshot else None,
+                "iv_rank": snapshot.iv_rank if snapshot else None,
+                "iv_percentile": snapshot.iv_percentile if snapshot else None,
+                "snapshot_date": snapshot.snapshot_date.isoformat() if snapshot else None,
+            }
+        )
+    return {"symbols": symbols, "generated_at": datetime.now(UTC).isoformat()}
 
 
 async def _capture_daily_atm_iv(
@@ -434,21 +413,14 @@ async def get_volatility_metrics(
         else [d["iv"] for d in data]
     )
     current_iv = ivs[-1]
-
-    # IV Rank = (Current IV - Min IV) / (Max IV - Min IV) * 100
     min_iv = min(ivs)
     max_iv = max(ivs)
-    ivr = ((current_iv - min_iv) / (max_iv - min_iv)) * 100 if max_iv > min_iv else 0
-
-    # IV Percentile = Percentage of days where historical IV < Current IV
-    days_below = sum(1 for iv in ivs if iv < current_iv)
-    ivp = (days_below / len(ivs)) * 100
 
     return {
         "symbol": symbol,
         "current_iv": current_iv,
-        "iv_rank": ivr,
-        "iv_percentile": ivp,
+        "iv_rank": iv_rank(ivs, current_iv),
+        "iv_percentile": iv_percentile(ivs, current_iv),
         "min_iv": min_iv,
         "max_iv": max_iv,
         "data_points": len(ivs),

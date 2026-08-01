@@ -11,16 +11,6 @@ export interface StrikeExposure {
   netCharm?: number;
 }
 
-export function getLotSize(symbol: string): number {
-  if (!symbol) return 50;
-  const clean = symbol.toUpperCase();
-  if (clean.includes("BANKNIFTY")) return 15;
-  if (clean.includes("FINNIFTY")) return 40;
-  if (clean.includes("MIDCPNIFTY")) return 75;
-  if (clean.includes("NIFTY")) return 50;
-  return 50;
-}
-
 /**
  * Fyers live ticks and quote snapshots do not include option OI. Prefer a
  * positive live value when a broker provides one, otherwise use the OI

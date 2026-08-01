@@ -22,6 +22,7 @@ from app.schemas.market import (
     SymbolSuggestion,
 )
 from app.services.fyers_service import FyersService, from_fyers_ws_symbol, to_fyers_ws_symbol
+from app.services.lot_size_store import lot_size_store
 from app.services.session_manager import session_manager
 from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
 
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/market", tags=["Market Data"])
 
 _MAX_SYMBOL_SUGGESTIONS = 8
+_INDEX_SYMBOLS = {"SENSEX": "S&P BSE SENSEX"}
 
 
 @router.get("/symbols/search", response_model=SymbolSearchResponse)
@@ -37,7 +39,7 @@ async def search_symbols(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> SymbolSearchResponse:
     """Autocomplete for the "Or Stock Symbol" field, matched against a static
-    NSE F&O-eligible symbol list (see app.data.nse_fo_symbols) — Fyers has no
+    NSE F&O-eligible symbol list plus the supported BSE index underlyings — Fyers has no
     live symbol-search API. Ranks symbol-prefix matches first, then
     symbol-substring, then company-name-substring matches.
     """
@@ -46,7 +48,7 @@ async def search_symbols(
     substring_matches: list[SymbolSuggestion] = []
     name_matches: list[SymbolSuggestion] = []
 
-    for symbol, name in NSE_FO_SYMBOLS.items():
+    for symbol, name in {**_INDEX_SYMBOLS, **NSE_FO_SYMBOLS}.items():
         suggestion = SymbolSuggestion(symbol=symbol, name=name)
         if symbol.startswith(query):
             prefix_matches.append(suggestion)
@@ -69,10 +71,11 @@ async def get_instruments(
         raise HTTPException(status_code=401, detail="Active broker session not found")
 
     raw_instruments = await service.get_instruments(symbol.upper())
+    lot_size = await lot_size_store.get(symbol.upper())
     instruments: list[Instrument] = []
     for raw_instrument in raw_instruments:
         try:
-            instruments.append(Instrument.model_validate(raw_instrument))
+            instruments.append(Instrument.model_validate({**raw_instrument, "lot_size": lot_size}))
         except ValidationError:
             logger.warning("Ignoring malformed broker instrument for %s", symbol)
     return InstrumentResponse(instruments=instruments)

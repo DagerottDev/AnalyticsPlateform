@@ -3,6 +3,7 @@
 Provides test client, mock settings, and auth helpers.
 """
 
+import time
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from unittest.mock import AsyncMock
@@ -19,8 +20,29 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
 from app.models.user import TradingMode
+from app.services.lot_size_store import lot_size_store
 from app.services.session_manager import session_manager
 from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
+
+_TEST_LOT_SIZES = {
+    "NIFTY": 65,
+    "BANKNIFTY": 30,
+    "FINNIFTY": 60,
+    "MIDCPNIFTY": 120,
+    "SENSEX": 20,
+}
+
+
+@pytest.fixture(autouse=True)
+def _seed_lot_size_cache() -> None:
+    """Pre-populate the lot size cache so tests never hit the real Fyers
+    symbol-master URLs over the network; test_lot_size_store.py covers the
+    fetch/parse behavior itself against a mocked transport."""
+    previous_sizes, previous_fetched_at = lot_size_store._lot_sizes, lot_size_store._fetched_at
+    lot_size_store._lot_sizes = dict(_TEST_LOT_SIZES)
+    lot_size_store._fetched_at = time.monotonic()
+    yield
+    lot_size_store._lot_sizes, lot_size_store._fetched_at = previous_sizes, previous_fetched_at
 
 
 class FakeTokenBlocklist(TokenBlocklist):

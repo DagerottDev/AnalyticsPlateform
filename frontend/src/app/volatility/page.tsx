@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
@@ -11,12 +12,13 @@ import { fitSvi, sviImpliedVolatility } from "@/lib/svi";
 import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
 import { Instrument } from "@/types/market";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Tabs } from "@/components/ui/Tabs";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
-import { Activity, History } from "lucide-react";
+import { Activity, History, Search } from "lucide-react";
 
 // Components
 import { IVSmileChart } from "@/components/volatility/IVSmileChart";
@@ -227,10 +229,17 @@ export default function VolatilityPage() {
   return (
     <DashboardLayout>
       <PageContainer>
-        <SectionHeader
-          title="Volatility Analytics"
-          description="IV Rank, Skew, Term Structure, and Historical Surface."
-        />
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <SectionHeader
+            title="Volatility Analytics"
+            description="IV Rank, Skew, Term Structure, and Historical Surface."
+          />
+          <Link href="/volatility/screener">
+            <Button variant="secondary">
+              <Search className="h-4 w-4" /> IV Screener (all F&O stocks)
+            </Button>
+          </Link>
+        </div>
 
         {/* Instrument controls — apply to both tabs below */}
         <Card>

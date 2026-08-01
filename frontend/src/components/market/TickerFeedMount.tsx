@@ -7,6 +7,7 @@ import { useTickerStore } from "@/stores/tickerStore";
 import { useTickStore } from "@/stores/tickStore";
 import { useReplayStore } from "@/stores/replayStore";
 import { MarketTick } from "@/types/market";
+import { useNseMarketSession } from "@/hooks/useNseMarketSession";
 
 /**
  * Dummy component (mounted once in the root layout, like AlertEngineMount)
@@ -29,6 +30,7 @@ export function TickerFeedMount() {
   const { user } = useAuth();
   const tickers = useTickerStore((state) => state.tickers);
   const replayIsActive = useReplayStore((state) => state.isActive);
+  const marketSession = useNseMarketSession();
   const prevSymbols = useRef<string[]>([]);
 
   const handleTick = useCallback((tick: MarketTick) => {
@@ -36,15 +38,13 @@ export function TickerFeedMount() {
   }, []);
 
   useEffect(() => {
-    if (replayIsActive) return;
-    if (!user?.client_id) return;
-
     const ws = getWebSocket();
+    const requestedSymbols = user?.client_id && !replayIsActive && marketSession.state === "open" ? tickers : [];
 
-    const removedSymbols = prevSymbols.current.filter((s) => !tickers.includes(s));
+    const removedSymbols = prevSymbols.current.filter((s) => !requestedSymbols.includes(s));
     if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
 
-    const addedSymbols = tickers.filter((s) => !prevSymbols.current.includes(s));
+    const addedSymbols = requestedSymbols.filter((s) => !prevSymbols.current.includes(s));
     if (addedSymbols.length > 0) {
       ws.subscribeMany(addedSymbols, handleTick);
       // The shared websocket sends an immediate broker snapshot and keeps a
@@ -52,8 +52,8 @@ export function TickerFeedMount() {
       // request for every mount/navigation.
     }
 
-    prevSymbols.current = tickers;
-  }, [tickers, user, replayIsActive, handleTick]);
+    prevSymbols.current = requestedSymbols;
+  }, [tickers, user?.client_id, replayIsActive, marketSession.state, handleTick]);
 
   return null;
 }

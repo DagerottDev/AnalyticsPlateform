@@ -17,6 +17,7 @@ import { timeToExpiry, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib
 import { calculatePaperAccountSummary } from "@/lib/paperTrading";
 import { formatDate, cn } from "@/lib/utils";
 import { BrokerAccountPanel } from "@/components/positions/BrokerAccountPanel";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Activity,
   Briefcase,
@@ -106,7 +107,9 @@ function formatMoney(val: number): string {
 
 export default function PositionsPage() {
   const { positions, closePosition, removePosition, clearClosed } = usePositionStore();
+  const { tradingMode } = useAuth();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const isLiveMode = tradingMode === "live";
 
   const openPositions = useMemo(() => positions.filter(p => p.status === "Open"), [positions]);
   const closedPositions = useMemo(() => positions.filter(p => p.status === "Closed"), [positions]);
@@ -185,8 +188,28 @@ export default function PositionsPage() {
       <PageContainer>
         <SectionHeader
           title="Positions"
-          description="Paper orders filled from the Strategy Builder, marked to live prices."
+          description={isLiveMode
+            ? "Live broker positions and your separate paper simulator portfolio."
+            : "Paper orders filled from the Strategy Builder, marked to live prices."}
         />
+
+        {isLiveMode && (
+          <section className="flex flex-col gap-4" aria-label="Live broker account">
+            <SectionHeader
+              title="Live Broker Account"
+              description="Open broker positions, holdings, funds, and P&L from your connected account."
+            />
+            <BrokerAccountPanel />
+          </section>
+        )}
+
+        <section className="flex flex-col gap-4" aria-label="Paper positions">
+          {isLiveMode && (
+            <SectionHeader
+              title="Paper Positions"
+              description="A separate simulated portfolio. Closing or deleting these positions never affects your broker account."
+            />
+          )}
 
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <StatTile label="Open Positions" value={openPositions.length} icon={Briefcase} />
@@ -204,7 +227,7 @@ export default function PositionsPage() {
             Builder session. */}
         <Card className="flex flex-col gap-4">
           <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
-            <Activity className="h-3.5 w-3.5" /> Portfolio Greeks
+            <Activity className="h-3.5 w-3.5" /> Paper Portfolio Greeks
           </h3>
           <div className="grid grid-cols-2 gap-4 text-center md:grid-cols-4">
             <div>
@@ -240,7 +263,7 @@ export default function PositionsPage() {
         {/* Open Positions */}
         <Card className="flex flex-col gap-4">
           <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
-            <Briefcase className="h-4 w-4 text-[var(--color-accent-blue)]" /> Open Positions
+            <Briefcase className="h-4 w-4 text-[var(--color-accent-blue)]" /> Open Paper Positions
           </h3>
 
           {openPositions.length === 0 ? (
@@ -365,7 +388,7 @@ export default function PositionsPage() {
         <Card className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
-              <CheckCircle2 className="h-4 w-4 text-[var(--color-status-good)]" /> Closed Positions
+              <CheckCircle2 className="h-4 w-4 text-[var(--color-status-good)]" /> Closed Paper Positions
             </h3>
             {closedPositions.length > 0 && (
               <Button variant="ghost" size="sm" onClick={clearClosed}>
@@ -414,14 +437,7 @@ export default function PositionsPage() {
           </div>
         </Card>
 
-        {/* Broker Account — real positions/holdings/funds pulled live from
-            the connected Fyers account, distinct from the paper positions
-            simulated above. */}
-        <SectionHeader
-          title="Broker Account"
-          description="Real positions, holdings, and funds from your connected broker."
-        />
-        <BrokerAccountPanel />
+        </section>
       </PageContainer>
     </DashboardLayout>
   );

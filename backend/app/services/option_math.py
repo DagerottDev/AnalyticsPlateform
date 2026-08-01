@@ -36,4 +36,9 @@ def nearest_strike_to(strikes: list[float], target: float) -> float:
 
 def default_spot_fallback(symbol: str) -> float:
     """Fallback spot price used before a live tick has arrived for a symbol."""
-    return 22000.0 if symbol == "NIFTY" else 48000.0
+    normalized = symbol.upper()
+    if normalized == "NIFTY":
+        return 22000.0
+    if normalized == "SENSEX":
+        return 80000.0
+    return 48000.0

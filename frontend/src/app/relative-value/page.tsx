@@ -12,7 +12,7 @@ import { SectionHeader } from "@/components/ui/SectionHeader";
 import { getRelativeValueComparison, type RelativeValueInstrument } from "@/lib/relativeValue";
 import { useWatchlistStore } from "@/stores/tickerStore";
 
-const QUICK_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"];
+const QUICK_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"];
 const MAX_SYMBOLS = 6;
 
 function percent(value: number | null | undefined, digits = 1): string {

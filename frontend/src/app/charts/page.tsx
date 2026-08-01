@@ -15,7 +15,6 @@ import {
 import { Instrument } from "@/types/market";
 import { getInstruments, getHistoricalCandles } from "@/lib/market";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { formatApiError } from "@/lib/apiError";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -23,14 +22,21 @@ import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { DataFreshness } from "@/components/market/DataFreshness";
+import { Select } from "@/components/ui/Select";
+
+type OptionType = "CE" | "PE";
+type SelectedOption = Instrument & { strike: number; option_type: OptionType };
 
 export default function ChartsPage() {
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
+  const [optionType, setOptionType] = useState<OptionType>("CE");
+  const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
   
   const [historicalData, setHistoricalData] = useState<OHLCVData[]>([]);
   const [loading, setLoading] = useState(false);
-  const [chartError, setChartError] = useState<string | null>(null);
+  const [chartError, setChartError] = useState<unknown>(null);
+  const [chartEmptyMessage, setChartEmptyMessage] = useState<string | null>(null);
 
   const [indicators, setIndicators] = useState(createDefaultChartIndicators);
 
@@ -50,8 +56,30 @@ export default function ChartsPage() {
   
   // For Heatmap
   const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const availableStrikes = useMemo(
+    () => Array.from(new Set(instruments.flatMap((instrument) =>
+      instrument.option_type === optionType && typeof instrument.strike === "number"
+        ? [instrument.strike]
+        : []
+    ))).sort((left, right) => left - right),
+    [instruments, optionType]
+  );
+  const selectedOption = useMemo<SelectedOption | null>(() => {
+    if (selectedStrike === null) return null;
+
+    return instruments.find((instrument): instrument is SelectedOption =>
+      instrument.strike === selectedStrike && instrument.option_type === optionType
+    ) ?? null;
+  }, [instruments, optionType, selectedStrike]);
+  const chartSymbol = selectedOption?.trading_symbol ?? symbol;
+  const chartLabel = selectedOption
+    ? `${symbol} ${selectedOption.strike} ${selectedOption.option_type} · ${expiry}`
+    : symbol;
   const tradingSymbols = useMemo(() => instruments.map((i) => i.trading_symbol), [instruments]);
-  const allSymbols = useMemo(() => [...tradingSymbols, symbol], [tradingSymbols, symbol]);
+  const allSymbols = useMemo(
+    () => Array.from(new Set([...tradingSymbols, symbol, chartSymbol])),
+    [chartSymbol, symbol, tradingSymbols]
+  );
   const { getTick } = useMarketData(allSymbols); // Subscribe to options + underlying
 
   // Load option chain for Heatmap
@@ -59,6 +87,7 @@ export default function ChartsPage() {
     let isMounted = true;
     if (!symbol || !expiry) {
       setInstruments([]);
+      setSelectedStrike(null);
       return;
     }
 
@@ -77,24 +106,32 @@ export default function ChartsPage() {
     return () => { isMounted = false; };
   }, [symbol, expiry]);
 
+  useEffect(() => {
+    setSelectedStrike((current) =>
+      current !== null && !availableStrikes.includes(current) ? null : current
+    );
+  }, [availableStrikes]);
+
   // Load Historical OHLCV for Chart
   useEffect(() => {
     let isMounted = true;
-    if (!symbol) return;
+    if (!chartSymbol) return;
 
     async function fetchHistorical() {
       setLoading(true);
       setChartError(null);
+      setChartEmptyMessage(null);
+      setHistoricalData([]);
       try {
-        // Pulled live from the broker (same path as Replay Mode) — the
-        // market_data DB table has no backfill job writing to it yet, so
-        // the DB-backed /historical/ohlcv endpoint is always empty.
+        // Pulled directly from the broker. When a strike is selected,
+        // chartSymbol is that exact exchange-qualified option contract, so
+        // this is real option OHLCV rather than a synthetic premium series.
         const rangeTo = new Date();
         const rangeFrom = new Date(rangeTo);
         rangeFrom.setDate(rangeFrom.getDate() - 7);
         const toIso = (d: Date) => d.toISOString().slice(0, 10);
 
-        const candles = await getHistoricalCandles(symbol, toIso(rangeFrom), toIso(rangeTo), "1");
+        const candles = await getHistoricalCandles(chartSymbol, toIso(rangeFrom), toIso(rangeTo), "1");
         if (isMounted) {
           if (candles.length > 0) {
             setHistoricalData(
@@ -109,14 +146,18 @@ export default function ChartsPage() {
             );
           } else {
             setHistoricalData([]);
-            setChartError("No historical data returned for this symbol.");
+            setChartEmptyMessage(
+              selectedOption
+                ? "No real historical data was returned by the broker for this option contract."
+                : "No historical data was returned for this symbol."
+            );
           }
         }
       } catch (err) {
         console.error("Failed to fetch historical data", err);
         if (!isMounted) return;
         setHistoricalData([]);
-        setChartError(formatApiError(err) || "Failed to load historical data.");
+        setChartError(err);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -125,7 +166,7 @@ export default function ChartsPage() {
     fetchHistorical();
 
     return () => { isMounted = false; };
-  }, [symbol]);
+  }, [chartSymbol, selectedOption]);
 
   // Heatmap Data Preparation
   const heatmapData = useMemo(() => {
@@ -136,39 +177,86 @@ export default function ChartsPage() {
       if (!inst.strike) return;
       if (!map.has(inst.strike)) map.set(inst.strike, { ceOI: 0, peOI: 0 });
       const group = map.get(inst.strike)!;
-      
-      const tick = getTick(inst.trading_symbol);
-      if (tick) {
-        if (inst.option_type === "CE") group.ceOI = tick.open_interest;
-        if (inst.option_type === "PE") group.peOI = tick.open_interest;
-      }
+
+      // OI is only present on the option-chain snapshot (inst.oi), not on live ticks.
+      if (inst.option_type === "CE") group.ceOI = inst.oi ?? 0;
+      if (inst.option_type === "PE") group.peOI = inst.oi ?? 0;
     });
 
     return Array.from(map.entries())
       .map(([strike, data]) => ({ strike, ceValue: data.ceOI, peValue: data.peOI }))
       .sort((a, b) => a.strike - b.strike);
-  }, [instruments, getTick]); // Recalculate when new ticks arrive
+  }, [instruments]);
 
   // Underlying tick for live chart updates
-  const underlyingTick = getTick(symbol);
-  const liveChartTick = underlyingTick ? { price: underlyingTick.last_price, timestamp: underlyingTick.timestamp } : null;
+  const chartTick = getTick(chartSymbol);
+  const liveChartTick = chartTick ? { price: chartTick.last_price, timestamp: chartTick.timestamp } : null;
+
+  const handleSymbolChange = (nextSymbol: string) => {
+    setSymbol(nextSymbol);
+    setExpiry(null);
+    setSelectedStrike(null);
+  };
+
+  const handleExpiryChange = (nextExpiry: string) => {
+    setExpiry(nextExpiry);
+    setSelectedStrike(null);
+  };
 
   return (
     <DashboardLayout>
       <PageContainer>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <SectionHeader title="Advanced Charting" description="Historical OHLCV, live overlays, and heatmaps." />
-          <DataFreshness tick={underlyingTick} />
+          <SectionHeader title="Advanced Charting" description="Broker-sourced historical OHLCV, live overlays, and heatmaps." />
+          <DataFreshness tick={chartTick} />
         </div>
 
         {/* Controls */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <InstrumentSelector
             symbol={symbol}
-            onSymbolChange={(s) => { setSymbol(s); setExpiry(null); }}
+            onSymbolChange={handleSymbolChange}
             expiry={expiry}
-            onExpiryChange={setExpiry}
+            onExpiryChange={handleExpiryChange}
           />
+
+          <Card className="flex flex-1 flex-wrap items-end gap-3 p-3">
+            <div className="min-w-40 flex-1">
+              <label htmlFor="chart-option-type" className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
+                Option type
+              </label>
+              <Select
+                id="chart-option-type"
+                value={optionType}
+                onChange={(event) => setOptionType(event.target.value as OptionType)}
+                disabled={!expiry || instruments.length === 0}
+              >
+                <option value="CE">Call (CE)</option>
+                <option value="PE">Put (PE)</option>
+              </Select>
+            </div>
+            <div className="min-w-44 flex-1">
+              <label htmlFor="chart-option-strike" className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
+                Strike price
+              </label>
+              <Select
+                id="chart-option-strike"
+                value={selectedStrike === null ? "" : String(selectedStrike)}
+                onChange={(event) => setSelectedStrike(event.target.value ? Number(event.target.value) : null)}
+                disabled={!expiry || availableStrikes.length === 0}
+              >
+                <option value="">Underlying ({symbol})</option>
+                {availableStrikes.map((strike) => (
+                  <option key={strike} value={strike}>{strike.toLocaleString()}</option>
+                ))}
+              </Select>
+            </div>
+            <p className="max-w-64 text-xs leading-5 text-[var(--color-text-secondary)]">
+              {selectedOption
+                ? `Charting real broker OHLCV for ${selectedOption.strike.toLocaleString()} ${selectedOption.option_type}.`
+                : "Select a strike to chart that option contract's real broker OHLCV."}
+            </p>
+          </Card>
 
           <Card className="flex flex-1 flex-wrap items-center gap-x-4 gap-y-3 p-3">
             <span className="text-xs font-semibold text-[var(--color-text-secondary)]">Indicators:</span>
@@ -231,12 +319,16 @@ export default function ChartsPage() {
                 <EmptyState title="Failed to load chart data" />
                 <ApiErrorDisplay error={chartError} />
               </Card>
+            ) : chartEmptyMessage ? (
+              <Card>
+                <EmptyState title="No chart data available" description={chartEmptyMessage} />
+              </Card>
             ) : (
               <TradingChart
                 data={historicalData}
                 liveTick={liveChartTick}
                 indicators={indicators}
-                symbol={symbol}
+                symbol={chartLabel}
               />
             )}
           </div>

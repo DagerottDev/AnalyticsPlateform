@@ -24,6 +24,7 @@ import { Eyebrow } from "@/components/ui/SectionHeader";
 import { AddTickerModal } from "@/components/market/AddTickerModal";
 import { MarketTick } from "@/types/market";
 import { DataFreshness } from "@/components/market/DataFreshness";
+import { useNseMarketSession } from "@/hooks/useNseMarketSession";
 import {
   BarChart3,
   CandlestickChart,
@@ -112,10 +113,12 @@ function ModuleCard({
 function IndexTickerCard({
   symbol,
   tick,
+  feedPaused,
   onRemove,
 }: {
   symbol: string;
   tick: MarketTick | null;
+  feedPaused: boolean;
   onRemove?: () => void;
 }) {
   const isUp = (tick?.change ?? 0) >= 0;
@@ -146,7 +149,12 @@ function IndexTickerCard({
 
       <div className="mt-2"><DataFreshness tick={tick} /></div>
 
-      {!tick ? (
+      {!tick && feedPaused ? (
+        <div className="mt-4 flex min-h-20 flex-col justify-center rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-tertiary)]/50 px-3">
+          <p className="text-xs font-semibold text-[var(--color-text-secondary)]">Live quotes are paused</p>
+          <p className="mt-1 text-[11px] leading-4 text-[var(--color-text-muted)]">This ticker will resume automatically when the regular session opens.</p>
+        </div>
+      ) : !tick ? (
         <div className="mt-2 h-8 w-28 animate-pulse rounded bg-[var(--color-bg-hover)]" />
       ) : (
         <>
@@ -209,6 +217,7 @@ function IndexTickerCard({
 export default function DashboardPage() {
   const router = useRouter();
   const { user, tradingMode } = useAuth();
+  const marketSession = useNseMarketSession();
   const alerts = useAlertStore((state) => state.alerts);
   const triggerLog = useAlertStore((state) => state.triggerLog);
   const activeAlertsCount = alerts.filter((a) => a.status === "Active" || a.status === "Snoozed").length;
@@ -252,13 +261,13 @@ export default function DashboardPage() {
                 </p>
               )}
             </div>
-            <div className="w-fit flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5">
+            <div title={marketSession.detail} className="w-fit flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5">
               <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-status-good)] opacity-75" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-status-good)]" />
+                {marketSession.state === "open" && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-status-good)] opacity-75" />}
+                <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${marketSession.state === "open" ? "bg-[var(--color-status-good)]" : "bg-[var(--color-text-muted)]"}`} />
               </span>
               <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                Live Feed Active
+                {marketSession.state === "open" ? "Live Feed Active" : marketSession.state === "preopen" ? "Pre-open · Feed Paused" : "Market Closed · Feed Paused"}
               </span>
             </div>
           </div>
@@ -285,6 +294,7 @@ export default function DashboardPage() {
                 key={sym}
                 symbol={sym}
                 tick={getTick(sym)}
+                feedPaused={marketSession.state !== "open"}
                 onRemove={tickers.length > 1 ? () => removeTicker(sym) : undefined}
               />
             ))}

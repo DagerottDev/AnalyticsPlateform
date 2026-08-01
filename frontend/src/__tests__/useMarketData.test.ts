@@ -29,6 +29,10 @@ vi.mock("@/stores/replayStore", () => ({
     selector(replayState),
 }));
 
+vi.mock("@/hooks/useNseMarketSession", () => ({
+  useNseMarketSession: () => ({ state: "open", label: "Market open", detail: "test session" }),
+}));
+
 vi.mock("@/lib/market", () => ({
   getMarketQuotes: vi.fn().mockResolvedValue({ quotes: [] }),
 }));

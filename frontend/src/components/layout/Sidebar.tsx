@@ -19,6 +19,7 @@ import {
   History,
   LayoutDashboard,
   LineChart,
+  Search,
   Settings,
   Waves,
   Zap,
@@ -52,6 +53,7 @@ const navigation: NavGroup[] = [
     items: [
       { icon: LineChart, label: "Charts", href: "/charts" },
       { icon: Waves, label: "Volatility", href: "/volatility" },
+      { icon: Search, label: "IV Screener", href: "/volatility/screener" },
       { icon: BarChart3, label: "Relative Value", href: "/relative-value" },
       { icon: BarChart3, label: "Dealer Flow", href: "/dealer-flow" },
     ],

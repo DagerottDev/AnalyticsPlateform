@@ -331,6 +331,20 @@ class DhanService(BrokerService):
             "message": str(data.get("remarks", "Order submitted")),
         }
 
+    async def place_basket_orders(self, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Dhan's v2 API has no bulk-placement endpoint, so each leg is
+        submitted one at a time. This is sequential and non-atomic — unlike
+        Fyers' single-call basket endpoint, a later leg's request only
+        happens after the previous one's response, and one leg failing
+        doesn't prevent the rest from being tried."""
+        results: list[dict[str, Any]] = []
+        for order in orders:
+            try:
+                results.append(await self.place_order(order))
+            except Exception as e:
+                results.append({"id": None, "message": f"Leg failed: {e}"})
+        return results
+
     async def modify_order(self, order_id: str, order: dict[str, Any]) -> dict[str, Any]:
         data = await self._request(
             "PUT",

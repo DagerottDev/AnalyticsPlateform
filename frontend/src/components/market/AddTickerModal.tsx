@@ -16,6 +16,7 @@ const PRESET_INDICES = [
   { symbol: "BANKNIFTY", label: "BANKNIFTY" },
   { symbol: "FINNIFTY", label: "FINNIFTY" },
   { symbol: "MIDCPNIFTY", label: "MIDCPNIFTY" },
+  { symbol: "SENSEX", label: "S&P BSE SENSEX" },
 ];
 
 const PRESET_STOCKS = [

@@ -51,6 +51,46 @@ class OrderActionResponse(BaseModel):
     message: str
 
 
+class BasketLegRequest(_OrderPrices):
+    """One entry leg of a prospective basket order."""
+
+    symbol: str = Field(min_length=3, max_length=80)
+    quantity: int = Field(gt=0, le=1_000_000)
+    side: OrderSide
+    product_type: ProductType = "INTRADAY"
+    validity: Literal["DAY", "IOC"] = "DAY"
+    disclosed_quantity: int = Field(default=0, ge=0)
+    offline_order: bool = False
+    order_tag: str | None = Field(default=None, max_length=20)
+    # Broker-enforced exchange stop order placed right after entry, opposite
+    # side, at this trigger price — survives the app/server going down.
+    stop_loss: float | None = Field(default=None, ge=0)
+    # Watched by the basket monitor loop, not a resting broker order — only
+    # protected while the backend job is running and connected.
+    take_profit: float | None = Field(default=None, ge=0)
+
+
+class PlaceBasketOrderRequest(BaseModel):
+    """A basket of entry legs, each optionally carrying its own protective
+    stop-loss/target, plus optional combined thresholds across the whole
+    basket (also monitor-loop enforced, not broker-native)."""
+
+    legs: list[BasketLegRequest] = Field(min_length=1, max_length=10)
+    combined_stop_loss: float | None = Field(default=None, ge=0)
+    combined_take_profit: float | None = Field(default=None, ge=0)
+
+
+class BasketLegResult(BaseModel):
+    symbol: str
+    id: str | None = None
+    message: str
+
+
+class BasketOrderResponse(BaseModel):
+    basket_id: str | None = None
+    legs: list[BasketLegResult]
+
+
 class BrokerOrder(BaseModel):
     id: str
     trading_symbol: str

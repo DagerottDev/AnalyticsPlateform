@@ -11,6 +11,9 @@ services:
       target: development
     environment:
       WATCHFILES_FORCE_POLLING: "true"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
     volumes:
       - ../backend:/app
       - backend_venv:/app/.venv

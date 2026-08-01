@@ -7,9 +7,8 @@ import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
 import { calculateGreeks, calculateImpliedVolatility } from "@/lib/greeks";
 import { timeToExpiry, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "@/lib/optionMath";
-import { 
-  getLotSize, 
-  calculateContractGEX, 
+import {
+  calculateContractGEX,
   calculateContractVannaExposure, 
   calculateContractCharmExposure,
   calculateZeroGamma,
@@ -69,7 +68,9 @@ export default function DealerFlowPage() {
   const underlyingTick = getTick(symbol);
   const S = underlyingTick?.last_price || defaultSpotFallback(symbol);
   const r = DEFAULT_RISK_FREE_RATE;
-  const lotSize = getLotSize(symbol);
+  // Sourced live from the broker's symbol master via the instruments fetch
+  // above (see backend's lot_size_store), not a hardcoded per-symbol table.
+  const lotSize = instruments[0]?.lot_size ?? 0;
 
   // Calculate live exposures for the selected expiry
   const exposures = useMemo(() => {

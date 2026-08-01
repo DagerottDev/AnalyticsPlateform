@@ -3,6 +3,7 @@ import { getWebSocket } from "@/lib/websocket";
 import { MarketTick } from "@/types/market";
 import { useAuth } from "@/hooks/useAuth";
 import { useReplayStore } from "@/stores/replayStore";
+import { useNseMarketSession } from "@/hooks/useNseMarketSession";
 
 export function useMarketData(symbols: string[]) {
   const { user } = useAuth();
@@ -11,6 +12,7 @@ export function useMarketData(symbols: string[]) {
   // Replay Interception
   const replayIsActive = useReplayStore(state => state.isActive);
   const replayTicks = useReplayStore(state => state.currentTicks);
+  const marketSession = useNseMarketSession();
 
   // Tracks the symbols currently registered with the shared websocket. Keeping
   // this separate from the render input lets us update subscriptions by diff
@@ -36,7 +38,7 @@ export function useMarketData(symbols: string[]) {
 
   useEffect(() => {
     const ws = getWebSocket();
-    const requestedSymbols = user?.client_id && !replayIsActive
+    const requestedSymbols = user?.client_id && !replayIsActive && marketSession.state === "open"
       ? (symbolsKey ? symbolsKey.split(",") : [])
       : [];
     const previousSymbols = subscribedSymbols.current;
@@ -51,7 +53,7 @@ export function useMarketData(symbols: string[]) {
     // maintains one shared REST polling fallback per broker session. A
     // separate HTTP snapshot per mounted consumer duplicates that broker
     // traffic and can exhaust the API/broker rate limit during navigation.
-  }, [symbolsKey, user?.client_id, replayIsActive, handleTick]);
+  }, [symbolsKey, user?.client_id, replayIsActive, marketSession.state, handleTick]);
 
   useEffect(() => {
     return () => {

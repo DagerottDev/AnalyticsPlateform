@@ -1,7 +1,7 @@
 """Tests for the volatility router's real-OHLCV-based historical vol computation."""
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from math import log, sqrt
 from statistics import pstdev
 from unittest.mock import AsyncMock
@@ -19,6 +19,7 @@ from app.api.v1.volatility import (
     _compute_vol_series,
 )
 from app.models.volatility_snapshot import DailyVolatilitySnapshot
+from app.services.fo_iv_universe_store import upsert_snapshot
 from app.services.volatility_snapshot_store import get_or_create_daily_snapshot
 
 
@@ -271,6 +272,38 @@ class TestVolatilityRouter:
         assert snapshots[0].symbol == "NIFTY"
         assert snapshots[0].atm_iv > 0
         assert active_broker_session.get_instruments.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_universe_reads_only_the_db_and_needs_no_broker_session(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        access_token: str,
+        db_session: AsyncSession,
+    ):
+        """No active_broker_session fixture here on purpose: this endpoint must
+        never depend on a live Fyers connection to respond."""
+        await upsert_snapshot(
+            db_session,
+            symbol="RELIANCE",
+            snapshot_date=date(2026, 7, 31),
+            atm_iv=0.18,
+            spot=2900.0,
+            iv_rank=42.0,
+            iv_percentile=55.0,
+        )
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+        response = await client.get("/api/v1/volatility/universe", headers=headers)
+
+        assert response.status_code == 200
+        rows = {row["symbol"]: row for row in response.json()["symbols"]}
+        assert rows["RELIANCE"]["atm_iv"] == 0.18
+        assert rows["RELIANCE"]["iv_rank"] == 42.0
+        assert rows["RELIANCE"]["company_name"] == "Reliance Industries"
+        # A symbol the backfill job hasn't reached yet still appears, with nulls.
+        assert rows["TCS"]["atm_iv"] is None
+        assert rows["TCS"]["snapshot_date"] is None
 
     @pytest.mark.asyncio
     async def test_metrics_404_when_not_enough_history(

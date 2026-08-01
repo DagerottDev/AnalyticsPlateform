@@ -23,12 +23,15 @@ _INDEX_SYMBOL_MAP = {
     "BANK NIFTY": "NSE:NIFTYBANK-INDEX",
     "FINNIFTY": "NSE:FINNIFTY-INDEX",
     "MIDCPNIFTY": "NSE:MIDCPNIFTY-INDEX",
+    "SENSEX": "BSE:SENSEX-INDEX",
+    "BSE SENSEX": "BSE:SENSEX-INDEX",
 }
 _REVERSE_INDEX_SYMBOL_MAP = {
     "NSE:NIFTY50-INDEX": "NIFTY",
     "NSE:NIFTYBANK-INDEX": "BANKNIFTY",
     "NSE:FINNIFTY-INDEX": "FINNIFTY",
     "NSE:MIDCPNIFTY-INDEX": "MIDCPNIFTY",
+    "BSE:SENSEX-INDEX": "SENSEX",
 }
 
 
@@ -68,7 +71,10 @@ class FyersService(BrokerService):
     # get_instruments fetches so it stays fast and doesn't hammer rate limits
     # on symbols with many months of listed expiries.
     _MAX_EXPIRIES_FETCHED = 6
-    _DEFAULT_STRIKE_COUNT = 20
+    # Request a wide chain per expiry. The UI's "All strikes" setting can
+    # only display rows returned by the broker; the previous 20-strike request
+    # silently made that setting look incomplete.
+    _DEFAULT_STRIKE_COUNT = 50
     _INSTRUMENTS_CACHE_TTL_SECONDS = 30
 
     # Fyers' optionchain endpoint rate-limits aggressively (observed 429s from
@@ -78,6 +84,12 @@ class FyersService(BrokerService):
     _MAX_FETCH_RETRIES = 3
     _RETRY_BASE_DELAY_SECONDS = 1.5
     _RETRYABLE_CODES = {429, 500, 502, 503, 504}
+    # A Greek workspace may request one underlying plus ten option histories
+    # at once. FYERS rate-limits the history API independently and those
+    # bursts can consume capacity needed by the live quote fallback. Serialize
+    # starts with a small gap for every broker session as a final safeguard,
+    # even if a client bypasses the UI's limited-concurrency loader.
+    _HISTORY_REQUEST_MIN_INTERVAL_SECONDS = 0.25
 
     # Fyers' margin calculator wants an order `type` (1=Limit, 2=Market, 3=Stop,
     # 4=StopLimit) even though no order is actually placed here — Market
@@ -85,6 +97,8 @@ class FyersService(BrokerService):
     _MARGIN_ORDER_TYPE = 2
     _ORDER_TYPE_CODES = {"LIMIT": 1, "MARKET": 2, "STOP": 3, "STOP_LIMIT": 4}
     _ORDER_TYPE_NAMES = {value: key for key, value in _ORDER_TYPE_CODES.items()}
+    # Fyers' bulk-placement endpoint caps a single call at this many legs.
+    _MAX_BASKET_ORDERS = 10
 
     def __init__(
         self,
@@ -109,6 +123,8 @@ class FyersService(BrokerService):
         # into a single fetch instead of each independently bursting
         # 1 + _MAX_EXPIRIES_FETCHED calls at Fyers at the same moment.
         self._instruments_locks: dict[str, asyncio.Lock] = {}
+        self._history_request_lock = asyncio.Lock()
+        self._next_history_request_at = 0.0
         self._market_stream: FyersMarketStreamManager | None = None
 
     def get_market_stream(
@@ -321,15 +337,16 @@ class FyersService(BrokerService):
                     option_type = row.get("option_type")
                     if option_type not in ("CE", "PE"):
                         continue  # The underlying/index row has option_type "".
+                    trading_symbol = str(row["symbol"])
                     instruments.append(
                         {
-                            "trading_symbol": row["symbol"],
+                            "trading_symbol": trading_symbol,
                             "symbol": symbol.upper(),
                             "instrument_type": "OPTIDX" if is_index else "OPTSTK",
                             "expiry": expiry_label,
                             "strike": row.get("strike_price"),
                             "option_type": option_type,
-                            "exchange": "NFO",
+                            "exchange": "BFO" if trading_symbol.startswith("BFO:") else "NFO",
                             "oi": row.get("oi"),
                             "oi_change": row.get("oich"),
                             "oi_change_percent": row.get("oichp"),
@@ -401,7 +418,7 @@ class FyersService(BrokerService):
             }
             last_response: dict[str, Any] = {}
             for attempt in range(self._MAX_FETCH_RETRIES):
-                response = await asyncio.to_thread(self.client.history, payload)
+                response = await self._fetch_history_with_pacing(payload)
                 if response and response.get("s") == "ok":
                     candles = response.get("candles", [])
                     return [
@@ -435,6 +452,18 @@ class FyersService(BrokerService):
             raise
         except Exception as e:
             raise BrokerConnectionError(f"Failed to retrieve history for {symbol}: {e}") from e
+
+    async def _fetch_history_with_pacing(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Start history requests at a safe shared cadence for this broker session."""
+        async with self._history_request_lock:
+            now = time.monotonic()
+            delay = self._next_history_request_at - now
+            self._next_history_request_at = max(now, self._next_history_request_at) + (
+                self._HISTORY_REQUEST_MIN_INTERVAL_SECONDS
+            )
+        if delay > 0:
+            await asyncio.sleep(delay)
+        return await asyncio.to_thread(self.client.history, payload)
 
     async def get_margin(self, orders: list[dict[str, Any]]) -> dict[str, Any]:
         """Calls Fyers' multi-order margin calculator for a prospective basket
@@ -591,8 +620,8 @@ class FyersService(BrokerService):
             )
         return [order for order in orders if order["id"]]
 
-    async def place_order(self, order: dict[str, Any]) -> dict[str, Any]:
-        """Submit a request whose shape has already been validated at the API boundary."""
+    def _order_payload(self, order: dict[str, Any]) -> dict[str, Any]:
+        """Shared per-order payload shaping for both single and basket placement."""
         payload = {
             "symbol": order["symbol"],
             "qty": order["quantity"],
@@ -609,8 +638,12 @@ class FyersService(BrokerService):
         }
         if order.get("order_tag"):
             payload["orderTag"] = order["order_tag"]
+        return payload
+
+    async def place_order(self, order: dict[str, Any]) -> dict[str, Any]:
+        """Submit a request whose shape has already been validated at the API boundary."""
         try:
-            response = await asyncio.to_thread(self.client.place_order, payload)
+            response = await asyncio.to_thread(self.client.place_order, self._order_payload(order))
         except Exception as e:
             raise BrokerConnectionError(f"Fyers place order request failed: {e}") from e
         response = self._require_order_success(response, "place order")
@@ -618,6 +651,61 @@ class FyersService(BrokerService):
             "id": response.get("id"),
             "message": str(response.get("message", "Order submitted")),
         }
+
+    # Fyers' bulk-placement endpoint (SDK's place_basket_orders -> POST
+    # /multi-order/sync) places legs sequentially, returning one result per
+    # order in the same order they were submitted. The exact success/failure
+    # shape of each element isn't documented beyond "the response of all the
+    # orders will be provided... in the same order", so parsing here is
+    # deliberately tolerant: it never reports a leg as succeeded unless it
+    # can find an explicit id/ok status for it, and falls back to an
+    # explicit failure message rather than guessing when the shape doesn't
+    # match what was expected.
+    async def place_basket_orders(self, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not orders:
+            return []
+        if len(orders) > self._MAX_BASKET_ORDERS:
+            raise BrokerConnectionError(
+                f"Fyers basket orders are limited to {self._MAX_BASKET_ORDERS} legs per call"
+            )
+        payload = [self._order_payload(order) for order in orders]
+        try:
+            response = await asyncio.to_thread(self.client.place_basket_orders, payload)
+        except Exception as e:
+            raise BrokerConnectionError(f"Fyers basket order request failed: {e}") from e
+
+        rows: list[Any] | None = None
+        if isinstance(response, list):
+            rows = response
+        elif isinstance(response, dict):
+            for key in ("data", "orders", "d"):
+                candidate = response.get(key)
+                if isinstance(candidate, list):
+                    rows = candidate
+                    break
+        if rows is None or len(rows) != len(orders):
+            raise BrokerConnectionError(
+                f"Fyers basket order response did not match the submitted legs: {response}"
+            )
+
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            row_data = row.get("body", row) if isinstance(row, dict) else {}
+            order_id = row_data.get("id") if isinstance(row_data, dict) else None
+            succeeded = isinstance(row, dict) and (
+                row.get("s") == "ok" or row.get("code") == 1100 or order_id is not None
+            )
+            results.append(
+                {
+                    "id": order_id if succeeded else None,
+                    "message": str(
+                        row_data.get("message", "Order submitted" if succeeded else "Leg failed")
+                        if isinstance(row_data, dict)
+                        else "Leg failed"
+                    ),
+                }
+            )
+        return results
 
     async def modify_order(self, order_id: str, order: dict[str, Any]) -> dict[str, Any]:
         payload = {

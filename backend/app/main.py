@@ -19,7 +19,9 @@ from app.db.session import async_session_maker
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_id import RequestIdMiddleware
 from app.services.alert_evaluator import alert_evaluation_loop
+from app.services.basket_monitor import basket_monitor_loop
 from app.services.broker_session_store import restore_broker_session
+from app.services.iv_universe_backfill import iv_universe_backfill_loop
 from app.services.market_data_backfill import market_data_backfill_loop
 from app.services.session_manager import session_manager
 
@@ -58,6 +60,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         alert_task = asyncio.create_task(
             alert_evaluation_loop(settings, alert_stop_event), name="alert-evaluation"
         )
+    iv_universe_stop_event = asyncio.Event()
+    iv_universe_task: asyncio.Task[None] | None = None
+    if settings.iv_universe_backfill_enabled:
+        iv_universe_task = asyncio.create_task(
+            iv_universe_backfill_loop(settings, iv_universe_stop_event),
+            name="iv-universe-backfill",
+        )
+    basket_monitor_stop_event = asyncio.Event()
+    basket_monitor_task: asyncio.Task[None] | None = None
+    if settings.basket_monitor_enabled:
+        basket_monitor_task = asyncio.create_task(
+            basket_monitor_loop(settings, basket_monitor_stop_event),
+            name="basket-monitor",
+        )
     yield
     # Shutdown
     backfill_stop_event.set()
@@ -66,6 +82,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     alert_stop_event.set()
     if alert_task is not None:
         await alert_task
+    iv_universe_stop_event.set()
+    if iv_universe_task is not None:
+        await iv_universe_task
+    basket_monitor_stop_event.set()
+    if basket_monitor_task is not None:
+        await basket_monitor_task
     await session_manager.clear()
     logger.info("Shutting down %s", settings.app_title)
 

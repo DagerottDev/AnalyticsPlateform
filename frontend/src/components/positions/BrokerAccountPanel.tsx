@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getBrokerFunds,
   getBrokerHoldings,
@@ -16,7 +16,10 @@ import { StatTile } from "@/components/ui/StatTile";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
-import { Landmark, TrendingUp, Wallet } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Landmark, RefreshCw, TrendingUp, Wallet } from "lucide-react";
+
+const BROKER_REFRESH_INTERVAL_MS = 15_000;
 
 function pnlTone(value: number): "profit" | "loss" | "neutral" {
   if (value > 0) return "profit";
@@ -39,45 +42,66 @@ export function BrokerAccountPanel() {
   const [positions, setPositions] = useState<BrokerPosition[]>([]);
   const [holdings, setHoldings] = useState<BrokerHolding[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [noSession, setNoSession] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const isMountedRef = useRef(false);
+  const hasLoadedRef = useRef(false);
+  const fetchInProgressRef = useRef(false);
 
-  useEffect(() => {
-    let isMounted = true;
+  const fetchAccount = useCallback(async () => {
+    if (fetchInProgressRef.current) return;
+    fetchInProgressRef.current = true;
+    const isInitialLoad = !hasLoadedRef.current;
 
-    async function fetchAll() {
-      setLoading(true);
-      setError(null);
-      setNoSession(false);
-      try {
-        const [fundsData, positionsData, holdingsData] = await Promise.all([
-          getBrokerFunds(),
-          getBrokerPositions(),
-          getBrokerHoldings(),
-        ]);
-        if (isMounted) {
-          setFunds(fundsData);
-          setPositions(positionsData.positions);
-          setHoldings(holdingsData.holdings);
-        }
-      } catch (err) {
-        if (!isMounted) return;
-        const status = (err as { response?: { status?: number } })?.response?.status;
-        if (status === 401) {
-          setNoSession(true);
-        } else {
-          setError(err);
-        }
-      } finally {
-        if (isMounted) setLoading(false);
+    if (isInitialLoad) setLoading(true);
+    else setRefreshing(true);
+
+    setError(null);
+    setNoSession(false);
+
+    try {
+      const [fundsData, positionsData, holdingsData] = await Promise.all([
+        getBrokerFunds(),
+        getBrokerPositions(),
+        getBrokerHoldings(),
+      ]);
+      if (!isMountedRef.current) return;
+
+      setFunds(fundsData);
+      setPositions(positionsData.positions);
+      setHoldings(holdingsData.holdings);
+      setLastUpdated(new Date());
+    } catch (err) {
+      if (!isMountedRef.current) return;
+
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 401) {
+        setNoSession(true);
+      } else {
+        setError(err);
+      }
+    } finally {
+      fetchInProgressRef.current = false;
+      if (isMountedRef.current) {
+        hasLoadedRef.current = true;
+        setLoading(false);
+        setRefreshing(false);
       }
     }
-
-    fetchAll();
-    return () => {
-      isMounted = false;
-    };
   }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    void fetchAccount();
+    const intervalId = window.setInterval(() => void fetchAccount(), BROKER_REFRESH_INTERVAL_MS);
+
+    return () => {
+      isMountedRef.current = false;
+      window.clearInterval(intervalId);
+    };
+  }, [fetchAccount]);
 
   if (loading) {
     return (
@@ -101,7 +125,7 @@ export function BrokerAccountPanel() {
   if (error) {
     return (
       <Card className="flex flex-col gap-3">
-        <EmptyState title="Failed to load broker account." />
+        <EmptyState title="Failed to load live broker account." />
         <ApiErrorDisplay error={formatApiError(error)} />
       </Card>
     );
@@ -137,7 +161,24 @@ export function BrokerAccountPanel() {
       )}
 
       <Card className="flex flex-col gap-4">
-        <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Broker Positions</h3>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Open Live Positions</h3>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : "Refreshing from your broker…"}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void fetchAccount()}
+            disabled={refreshing}
+            aria-label="Refresh live broker positions"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+            Refresh
+          </Button>
+        </div>
         {openPositions.length === 0 ? (
           <EmptyState title="No open broker positions." />
         ) : (
@@ -162,7 +203,14 @@ export function BrokerAccountPanel() {
                   >
                     <td className="px-4 py-3 font-medium text-[var(--color-text-bright)]">{p.symbol}</td>
                     <td className="px-4 py-3">{p.product_type}</td>
-                    <td className={cn("px-4 py-3", p.side === "Buy" ? "text-[var(--color-profit)]" : "text-[var(--color-loss)]")}>
+                    <td className={cn(
+                      "px-4 py-3",
+                      p.side === "Buy"
+                        ? "text-[var(--color-profit)]"
+                        : p.side === "Sell"
+                          ? "text-[var(--color-loss)]"
+                          : "text-[var(--color-text-secondary)]"
+                    )}>
                       {p.side}
                     </td>
                     <td className="tnum px-4 py-3">{Math.abs(p.quantity)}</td>

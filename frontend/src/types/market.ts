@@ -10,6 +10,9 @@ export interface Instrument {
   oi?: number | null;
   oi_change?: number | null;
   oi_change_percent?: number | null;
+  /** Looked up live from the broker's symbol master, not a hardcoded
+   * per-symbol table — null only if that lookup is temporarily unavailable. */
+  lot_size?: number | null;
 }
 
 export interface ExpiryList {
@@ -41,6 +44,8 @@ export interface MarketTick {
   ask?: number;
   bid?: number;
   atp?: number;
+  /** Only set during Replay Mode — see TickData.source. */
+  source?: "real" | "synthetic";
 }
 
 /** A tick produced by the Replay engine, driven by real historical candles. */
@@ -53,4 +58,11 @@ export interface TickData {
   timestamp: number;
   change: number;
   change_percent: number;
+  /**
+   * Replay-only provenance: "real" when priced from the broker's own
+   * historical candle for this exact contract, "synthetic" when no broker
+   * history was available and the price was modeled with Black-Scholes off
+   * the real spot instead. Absent on live (non-replay) ticks.
+   */
+  source?: "real" | "synthetic";
 }

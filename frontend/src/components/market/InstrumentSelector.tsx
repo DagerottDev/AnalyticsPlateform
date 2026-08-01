@@ -19,7 +19,7 @@ interface InstrumentSelectorProps {
   onExpiryChange: (expiry: string) => void;
 }
 
-export const INDICES = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"];
+export const INDICES = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"];
 
 export function InstrumentSelector({
   symbol,

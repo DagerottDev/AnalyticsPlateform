@@ -73,6 +73,17 @@ class BrokerService(ABC):
         pass
 
     @abstractmethod
+    async def place_basket_orders(self, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Submit multiple validated orders as one basket, in the given order.
+
+        Returns one {id, message} result per input order, in the same order
+        as `orders` — a partial failure (one leg rejected) must not raise and
+        must not silently drop a result, since callers rely on a 1:1
+        correspondence to report per-leg outcomes.
+        """
+        pass
+
+    @abstractmethod
     async def modify_order(self, order_id: str, order: dict[str, Any]) -> dict[str, Any]:
         """Modify one pending broker order."""
         pass

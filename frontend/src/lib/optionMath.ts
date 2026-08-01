@@ -28,7 +28,9 @@ export function nearestStrikeTo(strikes: number[], target: number): number {
 
 /** Fallback spot price used before a live tick has arrived for a symbol. */
 export function defaultSpotFallback(symbol: string): number {
-  return symbol === "NIFTY" ? 22000 : 48000;
+  if (symbol === "NIFTY") return 22000;
+  if (symbol === "SENSEX") return 80000;
+  return 48000;
 }
 
 /** Risk-free rate used across payoff/Greeks/IV calculations for Indian markets. */

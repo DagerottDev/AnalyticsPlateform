@@ -33,6 +33,9 @@ async def test_get_instruments(
     data = response.json()
     assert "instruments" in data
     assert len(data["instruments"]) > 0
+    # Sourced live from the broker symbol master (see conftest's
+    # _seed_lot_size_cache), not a hardcoded per-symbol guess.
+    assert all(i["lot_size"] == 65 for i in data["instruments"])
 
 @pytest.mark.asyncio
 async def test_get_expiries(
