@@ -1,4 +1,6 @@
 
+from datetime import date, datetime
+
 from pydantic import BaseModel
 
 
@@ -86,6 +88,25 @@ class MarketQuote(BaseModel):
 
 class QuotesResponse(BaseModel):
     quotes: list[MarketQuote]
+
+
+class OpenInterestSnapshotPoint(BaseModel):
+    """Aggregate Call/Put OI for one captured point in an option session."""
+
+    timestamp: datetime
+    total_call_oi: float
+    total_put_oi: float
+    total_call_change: float
+    total_put_change: float
+
+
+class OpenInterestHistoryResponse(BaseModel):
+    symbol: str
+    expiry: str
+    session_date: date | None = None
+    points: list[OpenInterestSnapshotPoint]
+    baseline: str = "broker prior-close OI"
+    scheduled_tracking: bool
 
 
 class SymbolSuggestion(BaseModel):

@@ -8,32 +8,20 @@
  * their own empty/connect states; the Accounts page is where you connect.
  */
 
-import { useAuth } from "@/hooks/useAuth";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 import { MobileNavigation } from "./MobileNavigation";
 import { ApiErrorLogPanel } from "./ApiErrorLogPanel";
-import { Loader2 } from "lucide-react";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
-  const { hydrated } = useAuth();
-
-  // Show loading state while hydrating from localStorage
-  if (!hydrated) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[var(--color-bg-primary)]">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-[var(--color-accent-blue)]" />
-          <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
+  // Keep the shell deterministic during SSR and the first client render.
+  // Auth persistence hydrates in effects; gating this layout on that
+  // client-only state produces a shell-vs-spinner hydration mismatch on
+  // direct workspace URLs and when navigating between dashboard pages.
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[var(--color-bg-primary)]">
       <a

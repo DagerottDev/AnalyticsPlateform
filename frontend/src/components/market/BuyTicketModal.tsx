@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldAlert, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/Badge";
@@ -218,14 +219,19 @@ export function BuyTicketModal({ symbol, instrument, tick, onClose, initialSide 
     }
   };
 
-  return (
+  // PageContainer has a fade-in transform. Rendering this fixed-position
+  // ticket inside that subtree would make it fixed to the option-chain panel
+  // rather than the viewport, so mount it at document.body instead.
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <aside
       role="dialog"
       aria-modal="false"
       aria-labelledby="quick-order-ticket-title"
-      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-2xl sm:p-5"
+      className="fixed bottom-20 left-4 z-50 flex max-h-[calc(100dvh-6rem)] w-[calc(100vw-2rem)] max-w-sm flex-col overflow-y-auto rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 shadow-2xl sm:bottom-5 sm:left-5 sm:max-h-[min(80dvh,42rem)] sm:w-[26rem] sm:p-4"
     >
-      <Card className="relative flex min-h-full flex-col border-0 bg-transparent p-0 shadow-none">
+      <Card className="relative flex min-h-0 flex-col border-0 bg-transparent p-0 shadow-none">
         <div className="flex items-start justify-between border-b border-[var(--color-border-subtle)] pb-3">
           <div>
             <h3 id="quick-order-ticket-title" className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
@@ -450,7 +456,8 @@ export function BuyTicketModal({ symbol, instrument, tick, onClose, initialSide 
           </div>
         )}
       </Card>
-    </aside>
+    </aside>,
+    document.body
   );
 }
 

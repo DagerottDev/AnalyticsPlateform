@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TradingChart } from "@/components/charts/TradingChart";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
@@ -12,7 +12,7 @@ import {
   createDefaultChartIndicators,
 } from "@/lib/chartIndicators";
 import { Instrument } from "@/types/market";
-import { getInstruments, getHistoricalCandles } from "@/lib/market";
+import { getInstruments, getHistoricalCandles, getMarketQuotes } from "@/lib/market";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -22,6 +22,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { DataFreshness } from "@/components/market/DataFreshness";
 import { Select } from "@/components/ui/Select";
+import { defaultSpotFallback, nearestStrikeTo } from "@/lib/optionMath";
+import { formatStrikeWithPosition } from "@/lib/strikePositions";
 
 type OptionType = "CE" | "PE";
 type SelectedOption = Instrument & { strike: number; option_type: OptionType };
@@ -41,6 +43,12 @@ export default function ChartsPage() {
   const [expiry, setExpiry] = useState<string | null>(null);
   const [optionType, setOptionType] = useState<OptionType>("CE");
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
+  const [snapshotSpot, setSnapshotSpot] = useState<number | null>(null);
+  // A picker selection is deliberately seeded from ATM, but a user's choice
+  // of an individual strike (including the underlying option) must remain
+  // stable while the live spot moves.
+  const strikePickerTouchedRef = useRef(false);
+  const autoSelectedStrikeRef = useRef<number | null>(null);
   
   const [historicalData, setHistoricalData] = useState<OHLCVData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -94,6 +102,14 @@ export default function ChartsPage() {
     [chartSymbol, symbol, tradingSymbols]
   );
   const { getTick } = useMarketData(allSymbols); // Subscribe to options + underlying
+  const underlyingTick = getTick(symbol);
+  const spot = underlyingTick?.last_price && underlyingTick.last_price > 0
+    ? underlyingTick.last_price
+    : snapshotSpot ?? defaultSpotFallback(symbol);
+  const atmStrike = useMemo(
+    () => availableStrikes.length > 0 ? nearestStrikeTo(availableStrikes, spot) : null,
+    [availableStrikes, spot]
+  );
 
   // Load option contracts for the selected expiry.
   useEffect(() => {
@@ -101,6 +117,8 @@ export default function ChartsPage() {
     if (!symbol || !expiry) {
       setInstruments([]);
       setSelectedStrike(null);
+      strikePickerTouchedRef.current = false;
+      autoSelectedStrikeRef.current = null;
       return;
     }
 
@@ -119,11 +137,51 @@ export default function ChartsPage() {
     return () => { isMounted = false; };
   }, [symbol, expiry]);
 
+  // The websocket is intentionally paused outside NSE hours. Use the
+  // broker's previous close for ATM labels in that state instead of drifting
+  // back to a hardcoded index fallback; a live tick still wins immediately
+  // when the session is open.
   useEffect(() => {
-    setSelectedStrike((current) =>
-      current !== null && !availableStrikes.includes(current) ? null : current
-    );
-  }, [availableStrikes]);
+    let isMounted = true;
+    setSnapshotSpot(null);
+
+    async function fetchSnapshotSpot() {
+      try {
+        const { quotes } = await getMarketQuotes([symbol]);
+        const quote = quotes.find((item) => item.trading_symbol === symbol) ?? quotes[0];
+        const candidate = [quote?.prev_close_price, quote?.last_price].find((value): value is number => (
+          typeof value === "number" && Number.isFinite(value) && value > 0
+        ));
+        if (isMounted && candidate !== undefined) setSnapshotSpot(candidate);
+      } catch {
+        // Keep the symbol-specific fallback when the optional snapshot is
+        // unavailable; historical chart loading must remain independent.
+      }
+    }
+
+    if (symbol) void fetchSnapshotSpot();
+    return () => {
+      isMounted = false;
+    };
+  }, [symbol]);
+
+  useEffect(() => {
+    if (availableStrikes.length === 0) {
+      setSelectedStrike(null);
+      autoSelectedStrikeRef.current = null;
+      return;
+    }
+    if (strikePickerTouchedRef.current || atmStrike === null) return;
+
+    setSelectedStrike((current) => {
+      const shouldUseAtm = current === null
+        || !availableStrikes.includes(current)
+        || current === autoSelectedStrikeRef.current;
+      if (!shouldUseAtm) return current;
+      autoSelectedStrikeRef.current = atmStrike;
+      return atmStrike;
+    });
+  }, [availableStrikes, atmStrike]);
 
   // Load Historical OHLCV for Chart
   useEffect(() => {
@@ -188,12 +246,18 @@ export default function ChartsPage() {
   const handleSymbolChange = (nextSymbol: string) => {
     setSymbol(nextSymbol);
     setExpiry(null);
+    setInstruments([]);
     setSelectedStrike(null);
+    strikePickerTouchedRef.current = false;
+    autoSelectedStrikeRef.current = null;
   };
 
   const handleExpiryChange = (nextExpiry: string) => {
     setExpiry(nextExpiry);
+    setInstruments([]);
     setSelectedStrike(null);
+    strikePickerTouchedRef.current = false;
+    autoSelectedStrikeRef.current = null;
   };
 
   return (
@@ -221,7 +285,12 @@ export default function ChartsPage() {
               <Select
                 id="chart-option-type"
                 value={optionType}
-                onChange={(event) => setOptionType(event.target.value as OptionType)}
+                onChange={(event) => {
+                  setOptionType(event.target.value as OptionType);
+                  setSelectedStrike(null);
+                  strikePickerTouchedRef.current = false;
+                  autoSelectedStrikeRef.current = null;
+                }}
                 disabled={!expiry || instruments.length === 0}
               >
                 <option value="CE">Call (CE)</option>
@@ -235,14 +304,29 @@ export default function ChartsPage() {
               <Select
                 id="chart-option-strike"
                 value={selectedStrike === null ? "" : String(selectedStrike)}
-                onChange={(event) => setSelectedStrike(event.target.value ? Number(event.target.value) : null)}
+                onChange={(event) => {
+                  strikePickerTouchedRef.current = true;
+                  setSelectedStrike(event.target.value ? Number(event.target.value) : null);
+                }}
                 disabled={!expiry || availableStrikes.length === 0}
               >
                 <option value="">Underlying ({symbol})</option>
                 {availableStrikes.map((strike) => (
-                  <option key={strike} value={strike}>{strike.toLocaleString()}</option>
+                  <option
+                    key={strike}
+                    value={strike}
+                    // Keep the numeric accessible name stable for keyboard
+                    // users while the visible option text carries the
+                    // market-relative position.
+                    aria-label={strike.toLocaleString("en-IN")}
+                  >
+                    {formatStrikeWithPosition(strike, availableStrikes, spot, optionType)}
+                  </option>
                 ))}
               </Select>
+              <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                ATM: {atmStrike === null ? "—" : atmStrike.toLocaleString("en-IN")} · spot {spot.toLocaleString("en-IN")}
+              </p>
             </div>
             <p className="max-w-64 text-xs leading-5 text-[var(--color-text-secondary)]">
               {selectedOption

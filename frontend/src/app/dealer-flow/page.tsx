@@ -7,6 +7,7 @@ import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments } from "@/lib/market";
 import { calculateGreeks, calculateImpliedVolatility } from "@/lib/greeks";
 import { timeToExpiry, defaultSpotFallback } from "@/lib/optionMath";
+import { latestExpiry } from "@/lib/expiry";
 import {
   calculateContractGEX,
   calculateContractVannaExposure, 
@@ -53,12 +54,10 @@ export default function DealerFlowPage() {
         const data = await getInstruments(symbol);
         if (isMounted) {
           setInstruments(data.instruments);
-          const expiries = Array.from(
-            new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
-          ).sort();
-          if (!selectedExpiryRef.current && expiries.length > 0) {
-            setExpiry(expiries[0]);
-          }
+          const defaultExpiry = latestExpiry(
+            data.instruments.map((instrument) => instrument.expiry).filter((value): value is string => !!value)
+          );
+          if (!selectedExpiryRef.current && defaultExpiry) setExpiry(defaultExpiry);
         }
       } catch (err) {
         console.error("Failed to fetch instruments", err);

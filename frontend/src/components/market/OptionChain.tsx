@@ -127,6 +127,10 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
             setAnalysisSelections([]);
             setBasketLegs([]);
             setBasketRisk({});
+            // A new symbol/expiry gets a fresh rolling picker. ATM is the
+            // useful starting point; the user can then step out to OTM/ITM.
+            setDynamicMoneyness("ATM");
+            setDynamicOffset(1);
           }
           if (isBackground) setError(null);
         }
@@ -457,7 +461,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
           <option value="ATM">ATM</option><option value="OTM">OTM</option><option value="ITM">ITM</option>
         </Select>
         {dynamicMoneyness !== "ATM" && <Select aria-label="Dynamic strike offset" value={dynamicOffset} onChange={(event) => setDynamicOffset(Number(event.target.value))} className="h-8 w-20 text-xs">
-          {[1, 2, 3, 4, 5].map((offset) => <option key={offset} value={offset}>{offset}</option>)}
+          {[1, 2, 3, 4, 5].map((offset) => <option key={offset} value={offset}>{dynamicMoneyness} {offset}</option>)}
         </Select>}
         <Button variant="outline" size="sm" onClick={addDynamicAnalysisSelection} disabled={analysisSelections.length >= MAX_ANALYSIS_CONTRACTS}>
           <Plus className="h-4 w-4" /> Add rolling

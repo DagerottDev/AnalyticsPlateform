@@ -1,12 +1,15 @@
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.core.exceptions import BrokerConnectionError
 from app.core.security import create_access_token
+from app.services.open_interest_snapshots import store_snapshot
 
 
 def _live_headers(settings: Settings) -> dict[str, str]:
@@ -100,6 +103,40 @@ async def test_quotes_filters_malformed_broker_rows(
             }
         ]
     }
+
+
+@pytest.mark.asyncio
+async def test_open_interest_history_returns_owner_scoped_ordered_snapshots(
+    client: AsyncClient,
+    access_token: str,
+    active_broker_session: AsyncMock,
+    db_session: AsyncSession,
+) -> None:
+    await store_snapshot(
+        db_session,
+        owner_id="TEST_CLIENT_001",
+        symbol="NIFTY",
+        expiry="25-Jul-2024",
+        observed_at=datetime(2026, 8, 3, 4, 45, tzinfo=UTC),
+        interval_seconds=30,
+        values=(120, 180, 20, -10),
+    )
+
+    response = await client.get(
+        "/api/v1/market/open-interest/history?symbol=NIFTY&expiry=25-Jul-2024",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["baseline"] == "broker prior-close OI"
+    assert payload["points"] == [{
+        "timestamp": "2026-08-03T04:45:00Z",
+        "total_call_oi": 120.0,
+        "total_put_oi": 180.0,
+        "total_call_change": 20.0,
+        "total_put_change": -10.0,
+    }]
 
 
 @pytest.mark.asyncio

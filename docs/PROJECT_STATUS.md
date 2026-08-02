@@ -55,6 +55,7 @@ Current Milestone:
 - Preserved raw API errors for recoverable order, journal, alert, and delivery-setting actions, with visible error details and safe retry paths.
 - Made durable alert channels retry transient delivery failures with correlated, secret-safe structured logs; misconfigured enabled channels are now reported.
 - Added rate-limit outcome logging and deterministic coverage for data freshness and transient delivery retries. Existing responsive layouts for the dashboard, alerts, charts, and chain retain usable controls and information hierarchy at narrow widths.
+- Validated persisted broker sessions before scheduler startup, classified Fyers invalid-token responses, and made market/IV backfills clear dead sessions and stop quietly until reconnect.
 
 ## Dealer Flow open-interest correction (2026-07-30)
 
@@ -112,6 +113,8 @@ Completed:
   - Created interactive Historical OHLCV charts with dynamic live-tick appending.
   - Developed a high-performance strike-level Open Interest Heatmap.
   - Built the dedicated `/charts` dashboard.
+  - Added durable, 30-second nearest-expiry Call/Put aggregate OI snapshots
+    and live intraday OI time-series charts in `/open-interest`.
 
 - M6: Volatility Analytics
   - Added `recharts` for complex 2D data plotting.

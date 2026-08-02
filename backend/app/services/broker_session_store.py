@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.core.crypto import decrypt_token, encrypt_token
+from app.core.exceptions import is_broker_auth_error
+from app.db.session import async_session_maker
 from app.models.broker_session import BrokerSessionRecord
 from app.models.user import TradingMode
 from app.services.dhan_service import DhanService
@@ -66,6 +68,33 @@ async def clear_broker_session(db: AsyncSession) -> None:
     await db.commit()
 
 
+async def invalidate_broker_session(db: AsyncSession | None = None) -> None:
+    """Drop the active in-memory and persisted session after auth failure.
+
+    Background jobs may discover an expired token after startup validation has
+    already completed.  Clearing both copies prevents the next scheduler pass
+    (or process restart) from retrying the same invalid credentials.
+    """
+    try:
+        await session_manager.clear()
+    except Exception:
+        # Closing a broker websocket should not prevent the persisted row from
+        # being removed; the token is unusable regardless.
+        logger.exception("Could not close the invalid broker session cleanly")
+
+    try:
+        if db is not None:
+            await clear_broker_session(db)
+        else:
+            async with async_session_maker() as cleanup_db:
+                await clear_broker_session(cleanup_db)
+    except Exception:
+        # Do not turn an already handled broker-auth failure into a scheduler
+        # traceback.  The next restart can retry the cleanup if the DB was
+        # temporarily unavailable.
+        logger.exception("Could not clear the persisted invalid broker session")
+
+
 async def restore_broker_session(db: AsyncSession, settings: Settings) -> None:
     """Reconstruct and re-activate the persisted session, if any and still fresh.
 
@@ -108,5 +137,26 @@ async def restore_broker_session(db: AsyncSession, settings: Settings) -> None:
             trading_mode=TradingMode(record.trading_mode),
             account_name=record.account_name,
         )
+    # A token can be revoked or expire before the local cache TTL.  Validate
+    # the restored session once before background jobs start; otherwise every
+    # IV/history symbol would independently retry the same dead token and fill
+    # startup logs with identical broker errors.
+    try:
+        await service.get_profile()
+    except Exception as exc:
+        try:
+            await service.close()
+        except Exception:
+            logger.exception("Could not close rejected broker session during restore")
+        if is_broker_auth_error(exc):
+            logger.warning(
+                "Persisted broker session for %s is invalid or expired; "
+                "discarding it. Reconnect the broker to resume live data.",
+                record.client_id,
+            )
+            await clear_broker_session(db)
+            return
+        raise
+
     await session_manager.set_session(record.client_id, service)
     logger.info("Restored broker session for %s from persisted state.", record.client_id)

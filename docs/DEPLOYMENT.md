@@ -31,6 +31,16 @@ refreshes frontend files and Uvicorn reloads after backend Python changes.
 Run an image rebuild only after changing a lockfile, `package.json`,
 `pyproject.toml`, or either Dockerfile.
 
+The backend container applies `alembic upgrade head` automatically after the
+Postgres health check succeeds. For a native Alembic run, use
+`./scripts/db-upgrade.sh`; it starts the host-mapped Postgres service, waits
+for readiness, and then runs the backend virtualenv's Alembic binary.
+
+Broker-backed API routes allow 120 requests per minute per client IP by
+default, which accommodates normal option-chain/Greek workspace navigation
+while retaining a runaway-request guard. Override with
+`API_RATE_LIMIT_BROKER_REQUESTS` for a deployment with different capacity.
+
 ### Option B: Native Development (Best for Coding)
 
 This approach uses Docker only for the database/cache, while you run the frontend and backend natively on your machine to take advantage of hot-reloading.

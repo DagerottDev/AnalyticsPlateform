@@ -61,6 +61,30 @@ export interface HistoricalCandle {
   open_interest: number;
 }
 
+export interface OpenInterestSnapshot {
+  timestamp: string;
+  total_call_oi: number;
+  total_put_oi: number;
+  total_call_change: number;
+  total_put_change: number;
+}
+
+export interface OpenInterestHistoryResponse {
+  symbol: string;
+  expiry: string;
+  session_date: string | null;
+  points: OpenInterestSnapshot[];
+  baseline: string;
+  scheduled_tracking: boolean;
+}
+
+export async function getOpenInterestHistory(symbol: string, expiry: string): Promise<OpenInterestHistoryResponse> {
+  const response = await apiClient.get<OpenInterestHistoryResponse>("/market/open-interest/history", {
+    params: { symbol, expiry },
+  });
+  return response.data;
+}
+
 /**
  * OHLCV candles already persisted by the market-data backfill job.  Unlike
  * getHistoricalCandles(), this does not make a broker request, which makes it

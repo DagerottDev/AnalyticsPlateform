@@ -5,19 +5,23 @@ import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useMarketData } from "@/hooks/useMarketData";
-import { getInstruments, getMarginRequirement, MarginResult } from "@/lib/market";
+import { getInstruments, getMarketQuotes, getMarginRequirement, MarginResult } from "@/lib/market";
 import { calculateImpliedVolatility } from "@/lib/greeks";
 import { timeToExpiry, defaultSpotFallback } from "@/lib/optionMath";
+import { latestExpiry } from "@/lib/expiry";
 import {
   StrategyLeg,
   calculatePayoffProfile,
   calculateNetGreeks,
   deriveMetricsFromProfile
 } from "@/lib/strategy";
-import { Instrument } from "@/types/market";
+import { Instrument, MarketTick } from "@/types/market";
 import { usePositionStore } from "@/stores/positionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useTickStore } from "@/stores/tickStore";
+import { useReplayStore } from "@/stores/replayStore";
 import { useAuth } from "@/hooks/useAuth";
+import { useNseMarketSession } from "@/hooks/useNseMarketSession";
 import { createPaperOrder } from "@/lib/paperTrading";
 import { simulateStrategyPnl } from "@/lib/monteCarlo";
 import { PageContainer } from "@/components/ui/PageContainer";
@@ -40,7 +44,9 @@ function StrategyBuilderContent() {
   const searchParams = useSearchParams();
   const basketSeeded = useRef(false);
   const executePaperOrder = usePositionStore((state) => state.executePaperOrder);
-  const { tradingMode } = useAuth();
+  const { tradingMode, user } = useAuth();
+  const marketSession = useNseMarketSession();
+  const replayIsActive = useReplayStore((state) => state.isActive);
 
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const strategyPreferences = useSettingsStore((state) => state.strategy);
@@ -50,6 +56,7 @@ function StrategyBuilderContent() {
   const [expiry, setExpiry] = useState<string | null>(null);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [legs, setLegs] = useState<StrategyLeg[]>([]);
+  const [snapshotTicks, setSnapshotTicks] = useState<Record<string, MarketTick>>({});
   const incomingBasket = useMemo(() => parseStrategyBasket(searchParams.get("basket")), [searchParams]);
 
   // Subscriptions
@@ -63,6 +70,52 @@ function StrategyBuilderContent() {
   }, [symbol, legs]);
   
   const { getTick } = useMarketData(tradingSymbols);
+  const sharedTicks = useTickStore((state) => state.ticks);
+
+  // The websocket is the preferred source during market hours, but it is
+  // intentionally paused outside the session. Fetch a broker snapshot for
+  // the underlying and selected contracts so preset strikes and premiums are
+  // based on the latest traded prices rather than a synthetic fallback.
+  const snapshotSymbolsKey = useMemo(
+    () => tradingSymbols.filter(Boolean).join(","),
+    [tradingSymbols]
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    setSnapshotTicks({});
+
+    if (replayIsActive || !user?.client_id || !snapshotSymbolsKey) return () => { isMounted = false; };
+
+    const symbols = snapshotSymbolsKey.split(",").filter(Boolean);
+    void getMarketQuotes(symbols)
+      .then(({ quotes }) => {
+        if (!isMounted) return;
+        const normalizedQuotes = quotes.map((quote) => {
+          // Fyers can expose an indicative/stale `last_price` outside market
+          // hours. The previous close is the official last traded value for
+          // the strategy's closing snapshot in that state.
+          const previousClose = quote.prev_close_price;
+          if (
+            marketSession.state !== "open"
+            && typeof previousClose === "number"
+            && Number.isFinite(previousClose)
+            && previousClose > 0
+          ) {
+            return { ...quote, last_price: previousClose, change: 0, change_percent: 0 };
+          }
+          return quote;
+        });
+        setSnapshotTicks(Object.fromEntries(normalizedQuotes.map((quote) => [quote.trading_symbol, quote])));
+      })
+      .catch(() => {
+        // The websocket can still provide live values. A snapshot failure is
+        // deliberately non-fatal and leaves the builder waiting for either
+        // source before enabling preset loading.
+      });
+
+    return () => { isMounted = false; };
+  }, [marketSession.state, replayIsActive, snapshotSymbolsKey, user?.client_id]);
 
   // Load Contracts when symbol changes
   useEffect(() => {
@@ -74,12 +127,10 @@ function StrategyBuilderContent() {
         const data = await getInstruments(symbol);
         if (isMounted) {
           setInstruments(data.instruments);
-          const expiries = Array.from(
-            new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
-          ).sort();
-          if (expiries.length > 0) {
-            setExpiry(expiries[0]);
-          }
+          const defaultExpiry = latestExpiry(
+            data.instruments.map((instrument) => instrument.expiry).filter((value): value is string => !!value)
+          );
+          if (defaultExpiry) setExpiry(defaultExpiry);
           if (!basketSeeded.current && incomingBasket.length > 0) {
             const hydrated = incomingBasket.flatMap((seed, index) => {
               const instrument = data.instruments.find(item => item.trading_symbol === seed.s);
@@ -114,7 +165,25 @@ function StrategyBuilderContent() {
 
   // Live Calculations
   const underlyingTick = getTick(symbol);
-  const spotPrice = underlyingTick?.last_price || defaultSpotFallback(symbol);
+  const sharedUnderlyingTick = sharedTicks[symbol];
+  const snapshotUnderlyingTick = snapshotTicks[symbol];
+  const preferredUnderlyingTick = replayIsActive
+    ? underlyingTick
+    : marketSession.state !== "open"
+      ? snapshotUnderlyingTick ?? underlyingTick
+      : underlyingTick;
+  const liveSpot = (replayIsActive
+    ? [preferredUnderlyingTick?.last_price]
+    : [
+      preferredUnderlyingTick?.last_price,
+      sharedUnderlyingTick?.last_price,
+      snapshotUnderlyingTick?.last_price,
+    ]
+  ).find((value): value is number => (
+    typeof value === "number" && Number.isFinite(value) && value > 0
+  ));
+  const spotReady = liveSpot !== undefined;
+  const spotPrice = liveSpot ?? defaultSpotFallback(symbol);
   // Sourced live from the broker's symbol master via the instruments fetch
   // above (see backend's lot_size_store), not a hardcoded per-symbol table —
   // 0 until that fetch resolves, which the leg UI treats as "not ready yet".
@@ -127,7 +196,16 @@ function StrategyBuilderContent() {
       const updated = currentLegs.map(leg => {
         if (!leg.instrument) return leg;
         
-        const tick = getTick(leg.instrument.trading_symbol);
+        const liveTick = getTick(leg.instrument.trading_symbol);
+        const snapshotTick = snapshotTicks[leg.instrument.trading_symbol];
+        const sharedTick = sharedTicks[leg.instrument.trading_symbol];
+        const tick = replayIsActive
+          ? liveTick
+          : (
+            marketSession.state !== "open"
+              ? snapshotTick ?? liveTick
+              : liveTick
+          ) ?? sharedTick ?? snapshotTick ?? null;
         if (!tick || !leg.instrument.expiry || !leg.instrument.strike || !leg.instrument.option_type) return leg;
 
         const newLeg = { ...leg };
@@ -160,7 +238,7 @@ function StrategyBuilderContent() {
       
       return changed ? updated : currentLegs;
     });
-  }, [getTick, riskFreeRate, spotPrice]); // Depends on ticks arriving
+  }, [getTick, marketSession.state, replayIsActive, riskFreeRate, sharedTicks, snapshotTicks, spotPrice]); // Depends on ticks arriving
 
   // Derive Strategy Data
   const payoffData = useMemo(() => {
@@ -223,7 +301,11 @@ function StrategyBuilderContent() {
     try {
       const order = createPaperOrder(
         validLegs,
-        (tradingSymbol) => getTick(tradingSymbol)?.last_price
+        (tradingSymbol) => (
+          getTick(tradingSymbol)?.last_price
+          ?? sharedTicks[tradingSymbol]?.last_price
+          ?? snapshotTicks[tradingSymbol]?.last_price
+        )
       );
       executePaperOrder({
         symbol,
@@ -292,6 +374,7 @@ function StrategyBuilderContent() {
               currentExpiry={expiry}
               lotSize={lotSize}
               spot={spotPrice}
+              spotReady={spotReady}
               defaultPreset={strategyPreferences.defaultPreset}
             />
           </div>

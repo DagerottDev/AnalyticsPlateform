@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.core.exceptions import BrokerConnectionError
+from app.core.exceptions import BrokerAuthError, BrokerConnectionError
 from app.models.user import TradingMode
 from app.services.fyers_service import FyersService, from_fyers_ws_symbol, to_fyers_ws_symbol
 
@@ -112,6 +112,39 @@ async def test_get_historical_data_error_raises_broker_connection_error() -> Non
 
     with pytest.raises(BrokerConnectionError):
         await service.get_historical_data("NSE:BADSYM-EQ", "2023-11-15", "2023-11-15", "1")
+
+
+@pytest.mark.asyncio
+async def test_fyers_invalid_token_is_typed_as_auth_error() -> None:
+    """Fyers -15 must stop callers retrying the same dead session."""
+    service = _make_service()
+    service.client.get_profile = MagicMock(
+        return_value={
+            "s": "error",
+            "code": -15,
+            "message": "Please provide valid token",
+        }
+    )
+
+    with pytest.raises(BrokerAuthError, match="invalid or expired"):
+        await service.get_profile()
+
+
+@pytest.mark.asyncio
+async def test_option_chain_invalid_token_is_not_wrapped_or_retried() -> None:
+    """An invalid option-chain token fails once and is surfaced as auth."""
+    service = _make_service()
+    service.client.optionchain = MagicMock(
+        return_value={
+            "s": "error",
+            "code": -15,
+            "message": "Please provide valid token",
+        }
+    )
+
+    with pytest.raises(BrokerAuthError, match="option chain"):
+        await service.get_instruments("NIFTY")
+    service.client.optionchain.assert_called_once()
 
 
 def _expiry_discovery_response(*expiries: tuple[str, str]) -> dict[str, Any]:

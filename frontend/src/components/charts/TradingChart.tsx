@@ -8,6 +8,7 @@ import { normalizeOHLCVData, sortAndDeduplicateChartData } from "@/lib/chartData
 import { formatMarketDateTime, MARKET_CHART_LOCALIZATION, formatMarketTick } from "@/lib/chartTime";
 import { ChartLegend } from "./ChartLegend";
 import { ChartDataTable } from "./ChartDataTable";
+import { useGreekChartSync } from "@/components/greek-workspace/GreekChartSyncProvider";
 
 // lightweight-charts renders to <canvas>, which cannot resolve CSS var() —
 // these hex literals mirror the design tokens in globals.css (documented in
@@ -30,9 +31,11 @@ interface TradingChartProps {
   indicators?: ChartIndicators;
   symbol?: string;
   timeframeLabel?: string;
+  /** Registers the chart with a workspace-level time/zoom synchronizer. */
+  syncId?: string;
 }
 
-export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabel = "1m" }: TradingChartProps) {
+export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabel = "1m", syncId }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -50,6 +53,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
   const rsiContainerRef = useRef<HTMLDivElement>(null);
   const rsiChartRef = useRef<IChartApi | null>(null);
   const rsiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const { registerChart, notifyTimeRange } = useGreekChartSync();
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -103,7 +107,15 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
 
+    const onVisibleTimeRangeChange = (range: Parameters<typeof notifyTimeRange>[1]) => {
+      if (syncId) notifyTimeRange(syncId, range);
+    };
+    if (syncId) chart.timeScale().subscribeVisibleTimeRangeChange(onVisibleTimeRangeChange);
+    const unregisterChart = syncId ? registerChart(syncId, chart) : () => undefined;
+
     return () => {
+      if (syncId) chart.timeScale().unsubscribeVisibleTimeRangeChange(onVisibleTimeRangeChange);
+      unregisterChart();
       chart.remove();
       // React Strict Mode and fast refresh can dispose a chart and then run a
       // dependent effect once more. Clear every ref so that effect cannot
@@ -119,7 +131,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
         supertrendSeriesRef.current = null;
       }
     };
-  }, []);
+  }, [notifyTimeRange, registerChart, syncId]);
 
   // Update Data and Indicators
   useEffect(() => {
@@ -236,7 +248,17 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       removeLineSeries(supertrendSeriesRef);
     }
 
-  }, [data, indicators]);
+    // setData may change the available time range. Let the workspace use the
+    // first chart's resulting range as the canonical horizontal scale.
+    if (syncId) {
+      queueMicrotask(() => {
+        if (chartRef.current !== chart) return;
+        const range = chart.timeScale().getVisibleRange();
+        if (range) notifyTimeRange(syncId, range);
+      });
+    }
+
+  }, [data, indicators, notifyTimeRange, syncId]);
 
   // RSI Pane Setup
   useEffect(() => {

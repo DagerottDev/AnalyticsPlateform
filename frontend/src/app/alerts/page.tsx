@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
-import { getInstruments } from "@/lib/market";
+import { getInstruments, getMarketQuotes } from "@/lib/market";
+import { useMarketData } from "@/hooks/useMarketData";
+import { latestExpiry } from "@/lib/expiry";
 import { Instrument } from "@/types/market";
 import { useAlertStore, AlertMetric, AlertOperator } from "@/stores/alertStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -18,6 +20,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { Bell, Trash2, CheckCircle2, Clock, Plus, Sparkles, Moon } from "lucide-react";
+import { defaultSpotFallback, nearestStrikeTo } from "@/lib/optionMath";
+import { formatStrikeWithPosition } from "@/lib/strikePositions";
 
 const UNDERLYING_SCOPED_METRICS: AlertMetric[] = ["Net GEX", "VWAP Breakout"];
 
@@ -30,6 +34,7 @@ export default function AlertsPage() {
   const [expiry, setExpiry] = useState<string | null>(null);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [selectedInstrumentToken, setSelectedInstrumentToken] = useState<string>("");
+  const [snapshotSpot, setSnapshotSpot] = useState<number | null>(null);
 
   const [metric, setMetric] = useState<AlertMetric>(() => alertDefaults.metric);
   const [operator, setOperator] = useState<AlertOperator>(() => alertDefaults.operator);
@@ -38,6 +43,36 @@ export default function AlertsPage() {
   const [loadingInstruments, setLoadingInstruments] = useState<boolean>(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
+
+  const { getTick } = useMarketData([symbol]);
+  const underlyingTick = getTick(symbol);
+  const spot = underlyingTick?.last_price && underlyingTick.last_price > 0
+    ? underlyingTick.last_price
+    : snapshotSpot ?? defaultSpotFallback(symbol);
+  const expiryInstruments = useMemo(
+    () => instruments.filter((instrument) => instrument.expiry === expiry),
+    [expiry, instruments]
+  );
+  const expiryStrikes = useMemo(
+    () => Array.from(new Set(expiryInstruments.flatMap((instrument) => (
+      typeof instrument.strike === "number" ? [instrument.strike] : []
+    )))).sort((left, right) => left - right),
+    [expiryInstruments]
+  );
+  const atmStrike = useMemo(
+    () => expiryStrikes.length > 0 ? nearestStrikeTo(expiryStrikes, spot) : null,
+    [expiryStrikes, spot]
+  );
+  const orderedExpiryInstruments = useMemo(
+    () => [...expiryInstruments].sort((left, right) => {
+      const leftDistance = atmStrike === null || left.strike === null ? Number.POSITIVE_INFINITY : Math.abs(left.strike - atmStrike);
+      const rightDistance = atmStrike === null || right.strike === null ? Number.POSITIVE_INFINITY : Math.abs(right.strike - atmStrike);
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+      if (left.strike !== right.strike) return (left.strike ?? Number.POSITIVE_INFINITY) - (right.strike ?? Number.POSITIVE_INFINITY);
+      return (left.option_type ?? "").localeCompare(right.option_type ?? "");
+    }),
+    [atmStrike, expiryInstruments]
+  );
 
   const isUnderlyingScoped = UNDERLYING_SCOPED_METRICS.includes(metric);
 
@@ -50,10 +85,10 @@ export default function AlertsPage() {
         const data = await getInstruments(symbol);
         if (isMounted) {
           setInstruments(data.instruments);
-          const expiries = Array.from(
-            new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
-          ).sort();
-          if (expiries.length > 0) setExpiry(expiries[0]);
+          const defaultExpiry = latestExpiry(
+            data.instruments.map((instrument) => instrument.expiry).filter((value): value is string => !!value)
+          );
+          if (defaultExpiry) setExpiry(defaultExpiry);
           setSelectedInstrumentToken(""); // Reset selection
         }
       } catch (cause) {
@@ -65,6 +100,37 @@ export default function AlertsPage() {
     fetchContracts();
     return () => { isMounted = false; };
   }, [symbol]);
+
+  // Keep the strike labels useful after hours too. The live tick wins during
+  // the session; outside it, previous close is a safer ATM reference than a
+  // hardcoded index fallback.
+  useEffect(() => {
+    let isMounted = true;
+    setSnapshotSpot(null);
+
+    async function fetchSnapshotSpot() {
+      try {
+        const { quotes } = await getMarketQuotes([symbol]);
+        const quote = quotes.find((item) => item.trading_symbol === symbol) ?? quotes[0];
+        const candidate = [quote?.prev_close_price, quote?.last_price].find((value): value is number => (
+          typeof value === "number" && Number.isFinite(value) && value > 0
+        ));
+        if (isMounted && candidate !== undefined) setSnapshotSpot(candidate);
+      } catch {
+        // Alerts remain usable with the symbol-specific fallback.
+      }
+    }
+
+    void fetchSnapshotSpot();
+    return () => {
+      isMounted = false;
+    };
+  }, [symbol]);
+
+  const handleExpiryChange = (nextExpiry: string) => {
+    setExpiry(nextExpiry);
+    setSelectedInstrumentToken("");
+  };
 
   // Net GEX / VWAP Breakout apply to the whole underlying/chain, not a single contract
   useEffect(() => {
@@ -178,7 +244,7 @@ export default function AlertsPage() {
             symbol={symbol}
             onSymbolChange={setSymbol}
             expiry={expiry}
-            onExpiryChange={setExpiry}
+            onExpiryChange={handleExpiryChange}
           />
 
           {/* One-click presets */}
@@ -214,12 +280,17 @@ export default function AlertsPage() {
                 disabled={isUnderlyingScoped}
               >
                 <option value="">{symbol} (Underlying{isUnderlyingScoped ? " / Chain" : ""})</option>
-                {instruments.filter(i => i.expiry === expiry).map(i => (
-                  <option key={i.trading_symbol} value={i.trading_symbol}>
-                    {i.strike} {i.option_type}
+                {orderedExpiryInstruments.map(i => (
+                  <option key={i.trading_symbol} value={i.trading_symbol} aria-label={i.strike == null ? i.trading_symbol : i.strike.toLocaleString("en-IN")}>
+                    {i.strike == null
+                      ? `${i.option_type ?? "Option"} · position unavailable`
+                      : `${formatStrikeWithPosition(i.strike, expiryStrikes, spot, i.option_type ?? "BOTH")} · ${i.option_type ?? "Option"}`}
                   </option>
                 ))}
               </Select>
+              <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                ATM: {atmStrike === null ? "—" : atmStrike.toLocaleString("en-IN")} · spot {spot.toLocaleString("en-IN")}
+              </p>
             </div>
 
             <div className="lg:col-span-2">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { StrategyLeg } from "@/lib/strategy";
 import {
   StrategyPresetName,
@@ -21,6 +21,7 @@ import { Select } from "@/components/ui/Select";
 import { Input } from "@/components/ui/Input";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Trash2, Plus, Layers, Sparkles } from "lucide-react";
+import { formatStrikeWithPosition } from "@/lib/strikePositions";
 
 interface LegManagerProps {
   legs: StrategyLeg[];
@@ -29,6 +30,8 @@ interface LegManagerProps {
   currentExpiry: string | null;
   lotSize: number;
   spot: number;
+  /** True only after an actual broker/live/replay LTP has been received. */
+  spotReady: boolean;
   defaultPreset?: StrategyPresetName;
 }
 
@@ -41,12 +44,40 @@ export function LegManager({
   currentExpiry,
   lotSize,
   spot,
+  spotReady,
   defaultPreset = "Iron Condor",
 }: LegManagerProps) {
   const [selectedPreset, setSelectedPreset] = useState<StrategyPresetName>(defaultPreset);
+  const expiryInstruments = useMemo(
+    () => availableInstruments.filter((instrument) => instrument.expiry === currentExpiry),
+    [availableInstruments, currentExpiry]
+  );
+  const expiryStrikes = useMemo(
+    () => Array.from(new Set(expiryInstruments.flatMap((instrument) => (
+      typeof instrument.strike === "number" ? [instrument.strike] : []
+    )))).sort((left, right) => left - right),
+    [expiryInstruments]
+  );
+  const atmStrike = useMemo(() => {
+    if (expiryStrikes.length === 0) return null;
+    return expiryStrikes.reduce((closest, strike) => (
+      Math.abs(strike - spot) < Math.abs(closest - spot) ? strike : closest
+    ), expiryStrikes[0]);
+  }, [expiryStrikes, spot]);
+  const orderedExpiryInstruments = useMemo(
+    () => [...expiryInstruments].sort((left, right) => {
+      const leftDistance = atmStrike === null || left.strike === null ? Number.POSITIVE_INFINITY : Math.abs(left.strike - atmStrike);
+      const rightDistance = atmStrike === null || right.strike === null ? Number.POSITIVE_INFINITY : Math.abs(right.strike - atmStrike);
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+      if (left.strike !== right.strike) return (left.strike ?? Number.POSITIVE_INFINITY) - (right.strike ?? Number.POSITIVE_INFINITY);
+      // Keep calls beside puts at the same strike in a deterministic order.
+      return (left.option_type ?? "").localeCompare(right.option_type ?? "");
+    }),
+    [atmStrike, expiryInstruments]
+  );
 
   const loadPreset = () => {
-    if (!currentExpiry) return;
+    if (!currentExpiry || lotSize <= 0 || !spotReady) return;
 
     const expiries = Array.from(
       new Set(availableInstruments.map(i => i.expiry).filter((e): e is string => !!e))
@@ -127,12 +158,18 @@ export function LegManager({
           variant="outline"
           size="sm"
           onClick={loadPreset}
-          disabled={!currentExpiry || lotSize <= 0}
+          disabled={!currentExpiry || lotSize <= 0 || !spotReady}
+          title={!spotReady ? "Waiting for the latest underlying price before selecting preset strikes." : undefined}
           className="whitespace-nowrap"
         >
           Load Preset
         </Button>
       </div>
+      {!spotReady && (
+        <p className="-mt-2 text-[11px] text-[var(--color-text-muted)]">
+          Waiting for the latest traded price before loading a preset. You can still add a leg manually.
+        </p>
+      )}
 
       <div className="flex flex-col gap-2">
         {legs.map((leg) => (
@@ -180,10 +217,12 @@ export function LegManager({
                     updateLeg(leg.id, { instrument: inst || null });
                   }}
                 >
-                  <option value="">Select Strike...</option>
-                  {availableInstruments.filter(i => i.expiry === currentExpiry).map(i => (
+                  <option value="">Select Strike (ATM first)…</option>
+                  {orderedExpiryInstruments.map(i => (
                     <option key={i.trading_symbol} value={i.trading_symbol}>
-                      {i.strike} {i.option_type}
+                      {i.strike === null
+                        ? `${i.option_type ?? "Option"} · position unavailable`
+                        : `${formatStrikeWithPosition(i.strike, expiryStrikes, spot, i.option_type ?? "BOTH")} · ${i.option_type ?? "Option"}`}
                     </option>
                   ))}
                 </Select>

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useReplayStore } from "@/stores/replayStore";
 import { buildReplaySession, enrichReplaySessionWithRealPrices, startPlayback, stopPlayback } from "@/lib/replayEngine";
-import { getInstruments, getHistoricalCandles } from "@/lib/market";
+import { getInstruments, getHistoricalCandles, getMarketQuotes } from "@/lib/market";
 import { formatApiError } from "@/lib/apiError";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Card } from "@/components/ui/Card";
@@ -14,6 +14,9 @@ import { Input } from "@/components/ui/Input";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { History, PlayCircle, Settings2, AlertTriangle } from "lucide-react";
 import type { Instrument } from "@/types/market";
+import { defaultSpotFallback, nearestStrikeTo } from "@/lib/optionMath";
+import { latestExpiry, sortExpiries } from "@/lib/expiry";
+import { formatStrikeWithPosition } from "@/lib/strikePositions";
 
 function yesterday(): string {
   const d = new Date();
@@ -66,6 +69,7 @@ export default function ReplayPage() {
   const [instrumentError, setInstrumentError] = useState<string | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState("");
   const [selectedStrike, setSelectedStrike] = useState("");
+  const [marketSpot, setMarketSpot] = useState<number | null>(null);
   const [optionSide, setOptionSide] = useState<"BOTH" | "CE" | "PE">(() => replayPreferences.optionSide);
   const [sessionDate, setSessionDate] = useState(yesterday());
   const [resolution, setResolution] = useState(() => replayPreferences.resolution);
@@ -73,6 +77,7 @@ export default function ReplayPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [loadingLabel, setLoadingLabel] = useState("Loading Historical Data...");
   const [error, setError] = useState<string | null>(null);
+  const autoSelectedStrikeRef = useRef("");
 
   useEffect(() => {
     let mounted = true;
@@ -81,16 +86,19 @@ export default function ReplayPage() {
     setAvailableInstruments([]);
     setSelectedExpiry("");
     setSelectedStrike("");
+    setMarketSpot(null);
+    autoSelectedStrikeRef.current = "";
 
     getInstruments(targetSymbol)
       .then((response) => {
         if (!mounted) return;
         setAvailableInstruments(response.instruments);
-        const firstExpiry = response.instruments
-          .map((instrument) => instrument.expiry)
-          .filter((expiry): expiry is string => Boolean(expiry))
-          .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())[0] ?? "";
-        setSelectedExpiry(firstExpiry);
+        const defaultExpiry = latestExpiry(
+          response.instruments
+            .map((instrument) => instrument.expiry)
+            .filter((expiry): expiry is string => Boolean(expiry))
+        );
+        setSelectedExpiry(defaultExpiry ?? "");
       })
       .catch((cause) => {
         if (!mounted) return;
@@ -105,13 +113,48 @@ export default function ReplayPage() {
     };
   }, [targetSymbol]);
 
+  // A replay can be opened outside market hours, so use the broker's latest
+  // quote to seed ATM when it is available and keep the symbol-specific
+  // fallback for an offline/unauthenticated session. This is a single quote
+  // request per underlying change and is independent of historical replay
+  // requests.
+  useEffect(() => {
+    let mounted = true;
+
+    async function fetchSpot() {
+      try {
+        const { quotes } = await getMarketQuotes([targetSymbol]);
+        const quote = quotes.find((item) => item.trading_symbol === targetSymbol) ?? quotes[0];
+        // Outside the regular session the broker can expose an indicative
+        // last price; previous close is the stable reference for choosing an
+        // ATM replay strike. During the session the live feed will supersede
+        // this picker seed when it is available.
+        const latest = quote?.prev_close_price ?? quote?.last_price;
+        if (mounted && typeof latest === "number" && Number.isFinite(latest) && latest > 0) {
+          setMarketSpot(latest);
+        }
+      } catch {
+        // Instrument selection and replay remain usable with the safe
+        // symbol-specific fallback when the quote endpoint is unavailable.
+      }
+    }
+
+    void fetchSpot();
+    return () => {
+      mounted = false;
+    };
+  }, [targetSymbol]);
+
   useEffect(() => {
     setFallbackIv(String(replayPreferences.fallbackIvPercent[targetSymbol] ?? replayPreferences.fallbackIvPercent.DEFAULT ?? DEFAULT_FALLBACK_IV_PERCENT[targetSymbol] ?? 15));
   }, [replayPreferences.fallbackIvPercent, targetSymbol]);
 
   const expiries = useMemo(
-    () => Array.from(new Set(availableInstruments.map((instrument) => instrument.expiry).filter((value): value is string => Boolean(value))))
-      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime()),
+    () => sortExpiries(
+      availableInstruments
+        .map((instrument) => instrument.expiry)
+        .filter((value): value is string => Boolean(value))
+    ),
     [availableInstruments]
   );
 
@@ -126,11 +169,31 @@ export default function ReplayPage() {
     [expiryInstruments]
   );
 
+  const strikeSpot = marketSpot ?? defaultSpotFallback(targetSymbol);
+  const atmStrike = useMemo(
+    () => strikes.length > 0 ? nearestStrikeTo(strikes, strikeSpot) : null,
+    [strikes, strikeSpot]
+  );
+
   useEffect(() => {
-    if (!strikes.some((strike) => String(strike) === selectedStrike)) {
-      setSelectedStrike(strikes.length > 0 ? String(strikes[Math.floor(strikes.length / 2)]) : "");
+    if (strikes.length === 0 || atmStrike === null) {
+      setSelectedStrike("");
+      autoSelectedStrikeRef.current = "";
+      return;
     }
-  }, [selectedStrike, strikes]);
+
+    setSelectedStrike((current) => {
+      // If the current value was chosen automatically, follow a newly
+      // arrived spot quote. Once the user chooses a strike, leave it alone.
+      const shouldUseAtm = !current
+        || !strikes.includes(Number(current))
+        || current === autoSelectedStrikeRef.current;
+      if (!shouldUseAtm) return current;
+      const next = String(atmStrike);
+      autoSelectedStrikeRef.current = next;
+      return next;
+    });
+  }, [atmStrike, strikes]);
 
   const selectedInstruments = useMemo(
     () => expiryInstruments.filter((instrument) =>
@@ -297,7 +360,11 @@ export default function ReplayPage() {
                 <label className="text-sm text-[var(--color-text-muted)]">Option Expiry</label>
                 <Select
                   value={selectedExpiry}
-                  onChange={(event) => setSelectedExpiry(event.target.value)}
+                  onChange={(event) => {
+                    setSelectedExpiry(event.target.value);
+                    setSelectedStrike("");
+                    autoSelectedStrikeRef.current = "";
+                  }}
                   disabled={isLoadingInstruments || expiries.length === 0}
                 >
                   {expiries.length === 0 ? (
@@ -312,15 +379,25 @@ export default function ReplayPage() {
                 <label className="text-sm text-[var(--color-text-muted)]">Option Strike</label>
                 <Select
                   value={selectedStrike}
-                  onChange={(event) => setSelectedStrike(event.target.value)}
+                  onChange={(event) => {
+                    setSelectedStrike(event.target.value);
+                    // A manual choice should not be replaced by the next
+                    // quote tick, even when the selected strike is ATM.
+                    autoSelectedStrikeRef.current = "__manual__";
+                  }}
                   disabled={isLoadingInstruments || strikes.length === 0}
                 >
                   {strikes.length === 0 ? (
                     <option value="">{isLoadingInstruments ? "Loading strikes…" : "No strike available"}</option>
                   ) : strikes.map((strike) => (
-                    <option key={strike} value={strike}>{strike.toLocaleString("en-IN")}</option>
+                    <option key={strike} value={strike} aria-label={strike.toLocaleString("en-IN")}>
+                      {formatStrikeWithPosition(strike, strikes, strikeSpot, optionSide)}
+                    </option>
                   ))}
                 </Select>
+                <span className="text-[11px] text-[var(--color-text-muted)]">
+                  ATM: {atmStrike === null ? "—" : atmStrike.toLocaleString("en-IN")} · spot {strikeSpot.toLocaleString("en-IN")}
+                </span>
                 <span className="text-[11px] text-[var(--color-text-muted)]">
                   {selectedInstruments.length} contract{selectedInstruments.length === 1 ? "" : "s"} will be replayed.
                 </span>

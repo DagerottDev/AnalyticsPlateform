@@ -3,7 +3,7 @@
 import asyncio
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from fyers_apiv3 import fyersModel
 
@@ -96,6 +96,10 @@ class FyersService(BrokerService):
     # even if a client bypasses the UI's limited-concurrency loader.
     _HISTORY_REQUEST_MIN_INTERVAL_SECONDS = 0.25
 
+    # Fyers returns these codes for an expired/invalid access token.  Keep the
+    # mapping here so every REST path can stop retrying the same dead session.
+    _AUTH_ERROR_CODES = {-15, -16, 401, 403}
+
     # Fyers' margin calculator wants an order `type` (1=Limit, 2=Market, 3=Stop,
     # 4=StopLimit) even though no order is actually placed here — Market
     # gives a same-side-agnostic estimate without needing a limit price.
@@ -167,9 +171,59 @@ class FyersService(BrokerService):
                     account_name=real_name,
                     funds=None,
                 )
-            raise BrokerAuthError(f"Failed to get profile: {response}")
+            if self._is_auth_response(response):
+                raise self._auth_error(response, "profile")
+            raise BrokerConnectionError(f"Failed to retrieve profile: {response}")
+        except (BrokerAuthError, BrokerConnectionError):
+            raise
         except Exception as e:
             raise BrokerConnectionError(f"Failed to retrieve profile: {e}") from e
+
+    @classmethod
+    def _is_auth_response(cls, response: object) -> bool:
+        """Identify Fyers' invalid-session responses without parsing SDK text."""
+        if not isinstance(response, dict):
+            return False
+        code = response.get("code")
+        if isinstance(code, int | str):
+            try:
+                if int(code) in cls._AUTH_ERROR_CODES:
+                    return True
+            except ValueError:
+                pass
+        message = " ".join(
+            str(response.get(key, ""))
+            for key in ("message", "messageBody", "remarks", "error")
+        ).lower()
+        return any(
+            phrase in message
+            for phrase in (
+                "valid token",
+                "invalid token",
+                "token expired",
+                "token has expired",
+                "authenticate",
+                "unauthorized",
+            )
+        )
+
+    @classmethod
+    def _auth_error(cls, response: object, action: str) -> BrokerAuthError:
+        """Create a safe, actionable auth error for a failed Fyers response."""
+        detail = ""
+        if isinstance(response, dict):
+            detail = str(response.get("message") or response.get("remarks") or "").strip()
+        suffix = f": {detail}" if detail else ""
+        return BrokerAuthError(
+            f"Fyers session token is invalid or expired while retrieving {action}{suffix}"
+        )
+
+    @classmethod
+    def _raise_api_error(cls, response: object, action: str) -> NoReturn:
+        """Raise the right typed error for a non-success Fyers response."""
+        if cls._is_auth_response(response):
+            raise cls._auth_error(response, action)
+        raise BrokerConnectionError(f"Fyers {action} request failed: {response}")
 
     async def get_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
         """Fetch live quotes for a list of symbols from Fyers REST API."""
@@ -282,6 +336,8 @@ class FyersService(BrokerService):
             if response and response.get("s") == "ok":
                 return cast(dict[str, Any], response.get("data", {}))
             last_response = response or {}
+            if self._is_auth_response(last_response):
+                raise self._auth_error(last_response, "option chain")
             if last_response.get("code") == self._NO_EXPIRY_CONTRACT_CODE:
                 return None
             is_last_attempt = attempt == self._MAX_FETCH_RETRIES - 1
@@ -320,6 +376,8 @@ class FyersService(BrokerService):
 
             try:
                 first = await self._fetch_option_chain(symbol, strikecount=1)
+            except BrokerAuthError:
+                raise
             except Exception as e:
                 raise BrokerConnectionError(f"Failed to fetch option chain expiries: {e}") from e
 
@@ -347,6 +405,8 @@ class FyersService(BrokerService):
                     chain = await self._fetch_option_chain(
                         symbol, strikecount=self._DEFAULT_STRIKE_COUNT, expiry_timestamp=timestamp
                     )
+                except BrokerAuthError:
+                    raise
                 except Exception:
                     # Skip an expiry Fyers fails to return (even after
                     # retries) rather than failing the whole request.
@@ -467,9 +527,13 @@ class FyersService(BrokerService):
                 await asyncio.sleep(
                     compute_backoff_delay(attempt, self._RETRY_BASE_DELAY_SECONDS)
                 )
+            if self._is_auth_response(last_response):
+                raise self._auth_error(last_response, "history")
             raise BrokerConnectionError(
                 f"Failed to retrieve history for {symbol}: {last_response}"
             )
+        except BrokerAuthError:
+            raise
         except BrokerConnectionError:
             raise
         except Exception as e:
@@ -605,7 +669,7 @@ class FyersService(BrokerService):
     @staticmethod
     def _require_order_success(response: dict[str, Any] | None, action: str) -> dict[str, Any]:
         if not response or response.get("s") != "ok":
-            raise BrokerConnectionError(f"Fyers {action} request failed: {response}")
+            FyersService._raise_api_error(response, action)
         return response
 
     async def get_orders(self) -> list[dict[str, Any]]:

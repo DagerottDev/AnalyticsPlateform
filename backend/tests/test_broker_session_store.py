@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import BrokerAuthError
 from app.models.user import TradingMode
 from app.services.broker_session_store import (
     clear_broker_session,
@@ -192,3 +193,36 @@ async def test_restore_discards_a_stale_session(db_session: AsyncSession) -> Non
 
     assert session_manager.get_session("CLIENT_A") is None
     assert await load_broker_session(db_session) is None
+
+
+@pytest.mark.asyncio
+async def test_restore_discards_a_persisted_session_rejected_by_the_broker(
+    db_session: AsyncSession,
+) -> None:
+    """A revoked token is cleared before scheduler jobs can hammer Fyers."""
+    settings = get_test_settings().model_copy(update={"broker_token_cache_ttl_seconds": 3600})
+    await save_broker_session(
+        db_session,
+        settings,
+        client_id="CLIENT_A",
+        app_id="APP-100",
+        access_token="token-a",
+        trading_mode=TradingMode.PAPER,
+        account_name="Default",
+    )
+
+    service = AsyncMock()
+    service.get_profile.side_effect = BrokerAuthError("Fyers session token is invalid or expired")
+    service.close.return_value = None
+    try:
+        with patch(
+            "app.services.broker_session_store.FyersService", return_value=service
+        ) as mock_fyers_service:
+            await restore_broker_session(db_session, settings)
+            mock_fyers_service.assert_called_once()
+
+        assert session_manager.get_session("CLIENT_A") is None
+        assert await load_broker_session(db_session) is None
+        service.close.assert_awaited_once()
+    finally:
+        await session_manager.clear()

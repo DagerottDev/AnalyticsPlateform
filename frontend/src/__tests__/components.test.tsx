@@ -2,6 +2,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const push = vi.fn();
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal("ResizeObserver", ResizeObserverMock);
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => "/dashboard" }));
 vi.mock("@/lib/market", () => ({
   getInstruments: vi.fn().mockResolvedValue({ instruments: [] }),
@@ -18,6 +24,8 @@ import { ChartDataTable } from "@/components/charts/ChartDataTable";
 import { Tabs } from "@/components/ui/Tabs";
 import { SelectedStrikesCard } from "@/components/greek-workspace/SelectedStrikesCard";
 import { WorkspaceHeader } from "@/components/greek-workspace/WorkspaceHeader";
+import { OpenInterestTotalsChart } from "@/components/open-interest/OpenInterestTotalsChart";
+import { OpenInterestTimeSeriesChart } from "@/components/open-interest/OpenInterestTimeSeriesChart";
 
 describe("core UI components", () => {
   it("navigates and collapses the sidebar", () => {
@@ -30,11 +38,11 @@ describe("core UI components", () => {
 
   it("adds and updates strategy legs", () => {
     const onChange = vi.fn();
-    const { rerender } = render(<LegManager legs={[]} onChange={onChange} availableInstruments={[]} currentExpiry="2026-08-27" lotSize={50} spot={22000} />);
+    const { rerender } = render(<LegManager legs={[]} onChange={onChange} availableInstruments={[]} currentExpiry="2026-08-27" lotSize={50} spot={22000} spotReady />);
     fireEvent.click(screen.getByRole("button", { name: /add leg/i }));
     const added = onChange.mock.calls[0][0];
     expect(added).toHaveLength(1);
-    rerender(<LegManager legs={added} onChange={onChange} availableInstruments={[]} currentExpiry="2026-08-27" lotSize={50} spot={22000} />);
+    rerender(<LegManager legs={added} onChange={onChange} availableInstruments={[]} currentExpiry="2026-08-27" lotSize={50} spot={22000} spotReady />);
     fireEvent.click(screen.getByRole("button", { name: "Sell" }));
     expect(onChange.mock.calls.at(-1)?.[0][0].action).toBe("Sell");
   });
@@ -134,5 +142,27 @@ describe("core UI components", () => {
 
     fireEvent.change(screen.getByRole("combobox", { name: "Greek workspace timeframe" }), { target: { value: "15" } });
     expect(onTimeframeChange).toHaveBeenCalledWith("15");
+  });
+
+  it("shows aggregate call and put OI with its broker-baseline session change", () => {
+    render(<OpenInterestTotalsChart totalCallOi={1250} totalPutOi={1800} totalCallChange={-45} totalPutChange={70} />);
+
+    expect(screen.getByText("Call vs Put Open Interest")).toBeTruthy();
+    expect(screen.getByText("Session OI Change")).toBeTruthy();
+    expect(screen.getByText(/Broker change versus prior close/i)).toBeTruthy();
+    expect(screen.getByRole("img", { name: /calls 1,250, puts 1,800/i })).toBeTruthy();
+    expect(screen.getByRole("img", { name: /calls -45, puts 70/i })).toBeTruthy();
+  });
+
+  it("shows an empty state when neither side has aggregate OI", () => {
+    render(<OpenInterestTotalsChart totalCallOi={0} totalPutOi={0} totalCallChange={0} totalPutChange={0} />);
+
+    expect(screen.getByText("No aggregate call or put OI is available for this expiry.")).toBeTruthy();
+  });
+
+  it("shows a useful empty state before the first live OI snapshot", () => {
+    render(<OpenInterestTimeSeriesChart points={[]} scheduledTracking={false} />);
+
+    expect(screen.getByText("Live OI history will appear after the first option-chain snapshot.")).toBeTruthy();
   });
 });

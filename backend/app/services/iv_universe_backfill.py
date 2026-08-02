@@ -15,9 +15,11 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from app.config import Settings
+from app.core.exceptions import is_broker_auth_error
 from app.data.nse_fo_symbols import NSE_FO_SYMBOLS
 from app.db.session import async_session_maker
 from app.services.atm_iv import compute_atm_iv
+from app.services.broker_session_store import invalidate_broker_session
 from app.services.fo_iv_universe_store import (
     load_snapshotted_symbols_today,
     load_symbol_history,
@@ -70,7 +72,14 @@ async def run_iv_universe_backfill(settings: Settings) -> None:
                     iv_rank=rank,
                     iv_percentile=percentile,
                 )
-        except Exception:
+        except Exception as exc:
+            if is_broker_auth_error(exc):
+                logger.warning(
+                    "Stopping IV universe backfill: broker session is invalid or expired. "
+                    "Reconnect the broker to resume live data."
+                )
+                await invalidate_broker_session()
+                return
             # One unavailable chain should not stop the rest of the universe
             # from being captured this cycle.
             logger.exception("IV universe backfill failed for %s", symbol)

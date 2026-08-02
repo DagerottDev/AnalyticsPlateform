@@ -8,6 +8,8 @@ import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { DataFreshness } from "@/components/market/DataFreshness";
 import { OpenInterestChangeChart } from "@/components/open-interest/OpenInterestChangeChart";
 import { OpenInterestProfileChart } from "@/components/open-interest/OpenInterestProfileChart";
+import { OpenInterestTimeSeriesChart } from "@/components/open-interest/OpenInterestTimeSeriesChart";
+import { OpenInterestTotalsChart } from "@/components/open-interest/OpenInterestTotalsChart";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -19,7 +21,9 @@ import { StatTile } from "@/components/ui/StatTile";
 import { useMarketData } from "@/hooks/useMarketData";
 import { analyzeOpenInterest, type OpenInterestLevel } from "@/lib/openInterestAnalysis";
 import { defaultSpotFallback } from "@/lib/optionMath";
-import { getInstruments } from "@/lib/market";
+import { getInstruments, getOpenInterestHistory, type OpenInterestHistoryResponse, type OpenInterestSnapshot } from "@/lib/market";
+import { mergeOpenInterestSnapshots } from "@/lib/openInterestHistory";
+import { isNseRegularMarketOpen } from "@/lib/marketSession";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { Instrument } from "@/types/market";
 
@@ -41,10 +45,12 @@ function OpenInterestWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [oiHistory, setOiHistory] = useState<OpenInterestHistoryResponse | null>(null);
 
   const load = useCallback(async () => {
     if (!symbol || !expiry) {
       setInstruments([]);
+      setOiHistory(null);
       return;
     }
 
@@ -52,8 +58,26 @@ function OpenInterestWorkspace() {
     setError(null);
     try {
       const response = await getInstruments(symbol);
-      setInstruments(response.instruments.filter((instrument) => instrument.expiry === expiry));
-      setLastUpdated(new Date());
+      const filtered = response.instruments.filter((instrument) => instrument.expiry === expiry);
+      const refreshedAt = new Date();
+      setInstruments(filtered);
+      setLastUpdated(refreshedAt);
+      try {
+        const history = await getOpenInterestHistory(symbol, expiry);
+        const totals = analyzeOpenInterest(filtered, 0);
+        const livePoint: OpenInterestSnapshot | null = isNseRegularMarketOpen(refreshedAt) ? {
+          timestamp: refreshedAt.toISOString(),
+          total_call_oi: totals.totalCallOi,
+          total_put_oi: totals.totalPutOi,
+          total_call_change: totals.totalCallChange,
+          total_put_change: totals.totalPutChange,
+        } : null;
+        setOiHistory({ ...history, points: mergeOpenInterestSnapshots(history.points, livePoint) });
+      } catch {
+        // The existing profile remains useful if persisted-history retrieval
+        // is temporarily unavailable; the next refresh retries it.
+        setOiHistory(null);
+      }
     } catch (loadError) {
       setError(loadError);
       setInstruments([]);
@@ -78,6 +102,7 @@ function OpenInterestWorkspace() {
     setSymbol(nextSymbol);
     setExpiry(null);
     setInstruments([]);
+    setOiHistory(null);
   };
 
   return (
@@ -133,6 +158,18 @@ function OpenInterestWorkspace() {
               <Insight label="Strongest put addition" level={analysis.strongestPutAddition} detail="Largest positive session put OI change" tone="profit" />
               <Insight label="Strongest call addition" level={analysis.strongestCallAddition} detail="Largest positive session call OI change" tone="loss" />
             </Card>
+
+            <OpenInterestTimeSeriesChart
+              points={oiHistory?.points ?? []}
+              scheduledTracking={oiHistory?.scheduled_tracking ?? false}
+            />
+
+            <OpenInterestTotalsChart
+              totalCallOi={analysis.totalCallOi}
+              totalPutOi={analysis.totalPutOi}
+              totalCallChange={analysis.totalCallChange}
+              totalPutChange={analysis.totalPutChange}
+            />
 
             <div className="grid min-w-0 gap-4 2xl:grid-cols-2">
               <OpenInterestProfileChart

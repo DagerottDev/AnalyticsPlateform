@@ -190,6 +190,30 @@ bare UI symbol (`NIFTY`) or an already Fyers-qualified trading symbol.
 }
 ```
 
+### GET `/market/open-interest/history?symbol=NIFTY&expiry=28-Aug-2026`
+Owner-scoped aggregate Call/Put OI snapshots for one expiry's latest recorded
+IST session. During regular market hours, requesting an expiry also captures
+its current point. `scheduled_tracking` is true for the nearest expiry of a
+configured tracked underlying; other expiries begin history on first view.
+
+**Response (200):**
+```json
+{
+  "symbol": "NIFTY",
+  "expiry": "28-Aug-2026",
+  "session_date": "2026-08-03",
+  "baseline": "broker prior-close OI",
+  "scheduled_tracking": true,
+  "points": [{
+    "timestamp": "2026-08-03T04:45:00Z",
+    "total_call_oi": 125000,
+    "total_put_oi": 140000,
+    "total_call_change": 4200,
+    "total_put_change": -1800
+  }]
+}
+```
+
 ### WS `/market/ws?token={jwt}`
 Proxies live Fyers ticks to the browser. The JWT is passed as a query param
 since the browser WebSocket API can't set an Authorization header.

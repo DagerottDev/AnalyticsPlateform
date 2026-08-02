@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.core.exceptions import BrokerAuthError
 from app.services import iv_universe_backfill
 from app.services.fo_iv_universe_store import (
     load_latest_snapshot_per_symbol,
@@ -103,6 +104,32 @@ async def test_one_failing_symbol_does_not_block_the_rest(
     }
     assert "BROKEN" not in latest
     assert latest["TCS"].atm_iv == 0.30
+
+
+@pytest.mark.asyncio
+async def test_invalid_broker_token_stops_the_cycle_without_a_traceback(
+    db_session: AsyncSession,
+    fast_settings: Settings,
+    active_broker_session: AsyncMock,
+    monkeypatch,
+):
+    monkeypatch.setattr(iv_universe_backfill, "NSE_FO_SYMBOLS", {"NIFTY": "Nifty"})
+    monkeypatch.setattr(
+        iv_universe_backfill,
+        "compute_atm_iv",
+        AsyncMock(side_effect=BrokerAuthError("Fyers session token is invalid or expired")),
+    )
+    invalidate = AsyncMock()
+    monkeypatch.setattr(iv_universe_backfill, "invalidate_broker_session", invalidate)
+    monkeypatch.setattr(
+        iv_universe_backfill,
+        "async_session_maker",
+        lambda: _FakeSessionContext(db_session),
+    )
+
+    await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
+
+    invalidate.assert_awaited_once_with()
 
 
 class _FakeSessionContext:

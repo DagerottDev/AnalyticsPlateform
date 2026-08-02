@@ -18,6 +18,8 @@ export interface OpenInterestAnalysis {
   strikes: OpenInterestStrike[];
   totalCallOi: number;
   totalPutOi: number;
+  totalCallChange: number;
+  totalPutChange: number;
   putCallRatio: number | null;
   support: OpenInterestLevel | null;
   resistance: OpenInterestLevel | null;
@@ -81,6 +83,8 @@ export function analyzeOpenInterest(
   const strikes = Array.from(byStrike.values()).sort((left, right) => left.strike - right.strike);
   const totalCallOi = strikes.reduce((sum, row) => sum + row.callOi, 0);
   const totalPutOi = strikes.reduce((sum, row) => sum + row.putOi, 0);
+  const totalCallChange = strikes.reduce((sum, row) => sum + row.callChange, 0);
+  const totalPutChange = strikes.reduce((sum, row) => sum + row.putChange, 0);
   const supportRows = strikes.filter((row) => row.strike <= spot);
   const resistanceRows = strikes.filter((row) => row.strike >= spot);
   const maxPain = calculateMaxPain(strikes);
@@ -89,6 +93,8 @@ export function analyzeOpenInterest(
     strikes,
     totalCallOi,
     totalPutOi,
+    totalCallChange,
+    totalPutChange,
     putCallRatio: totalCallOi > 0 ? totalPutOi / totalCallOi : null,
     support: maxLevel(supportRows.length > 0 ? supportRows : strikes, (row) => row.putOi, (row) => row.putChange),
     resistance: maxLevel(resistanceRows.length > 0 ? resistanceRows : strikes, (row) => row.callOi, (row) => row.callChange),

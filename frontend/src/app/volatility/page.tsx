@@ -10,6 +10,7 @@ import { getHistoricalVolatility, getVolatilityMetrics, VolatilityHistoricalData
 import { calculateImpliedVolatility } from "@/lib/greeks";
 import { fitSvi, sviImpliedVolatility } from "@/lib/svi";
 import { timeToExpiry, nearestStrikeTo, defaultSpotFallback } from "@/lib/optionMath";
+import { latestExpiry } from "@/lib/expiry";
 import { Instrument } from "@/types/market";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Button } from "@/components/ui/Button";
@@ -102,12 +103,10 @@ export default function VolatilityPage() {
         if (isMounted) {
           setInstruments(data.instruments);
           // Set initial expiry if none selected
-          const expiries = Array.from(
-            new Set(data.instruments.map(i => i.expiry).filter((e): e is string => !!e))
-          ).sort();
-          if (!selectedExpiryRef.current && expiries.length > 0) {
-            setExpiry(expiries[0]);
-          }
+          const defaultExpiry = latestExpiry(
+            data.instruments.map((instrument) => instrument.expiry).filter((value): value is string => !!value)
+          );
+          if (!selectedExpiryRef.current && defaultExpiry) setExpiry(defaultExpiry);
         }
       } catch (err) {
         console.error("Failed to fetch instruments", err);

@@ -2,14 +2,16 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, Link2, RefreshCw } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TradingChart } from "@/components/charts/TradingChart";
+import { GreekChartSyncProvider } from "@/components/greek-workspace/GreekChartSyncProvider";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadingState } from "@/components/ui/LoadingState";
+import { Select } from "@/components/ui/Select";
 import {
   CHART_INDICATOR_DEFINITIONS,
   ChartIndicatorId,
@@ -36,7 +38,9 @@ import {
 
 const HISTORY_FETCH_CONCURRENCY = 2;
 const HISTORY_DAYS = 5;
-const HISTORY_RESOLUTION = "5";
+const TIMEFRAME_OPTIONS = ["1", "3", "5", "10", "15"] as const;
+type PremiumTimeframe = (typeof TIMEFRAME_OPTIONS)[number];
+const DEFAULT_TIMEFRAME: PremiumTimeframe = "5";
 
 type PremiumGroup = "calls" | "puts" | "both";
 
@@ -59,14 +63,14 @@ function historyRange(): { from: string; to: string } {
   return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
 }
 
-async function fetchOptionHistory(instruments: Instrument[], from: string, to: string): Promise<HistoricalCandle[][]> {
+async function fetchOptionHistory(instruments: Instrument[], from: string, to: string, resolution: PremiumTimeframe): Promise<HistoricalCandle[][]> {
   const results: HistoricalCandle[][] = Array.from({ length: instruments.length }, () => []);
   let next = 0;
   async function worker() {
     while (next < instruments.length) {
       const index = next++;
       try {
-        results[index] = await getHistoricalCandles(instruments[index].trading_symbol, from, to, HISTORY_RESOLUTION);
+        results[index] = await getHistoricalCandles(instruments[index].trading_symbol, from, to, resolution);
       } catch {
         // A single contract with no broker history should produce an explicit
         // empty composite, not prevent the other premium groups from loading.
@@ -134,7 +138,7 @@ function IndicatorControls({ group, indicators, onChange }: {
   </Card>;
 }
 
-function PremiumChart({ group, instruments, selectionIds, paths, underlyingCandles, candles, ticks, indicators, onIndicatorsChange }: {
+function PremiumChart({ group, instruments, selectionIds, paths, underlyingCandles, candles, ticks, indicators, onIndicatorsChange, timeframe, syncId }: {
   group: PremiumGroup;
   instruments: Instrument[];
   selectionIds?: string[];
@@ -144,6 +148,8 @@ function PremiumChart({ group, instruments, selectionIds, paths, underlyingCandl
   ticks: ReturnType<typeof useMarketData>["ticks"];
   indicators: ChartIndicators;
   onIndicatorsChange: (next: ChartIndicators) => void;
+  timeframe: PremiumTimeframe;
+  syncId: string;
 }) {
   const symbols = instruments.map((instrument) => instrument.trading_symbol);
   const data = useMemo(() => selectionIds && paths && underlyingCandles
@@ -162,7 +168,8 @@ function PremiumChart({ group, instruments, selectionIds, paths, underlyingCandl
       indicators={indicators}
       liveTick={premium === null ? null : { price: premium, timestamp }}
       symbol={`${GROUP_LABELS[group]} · ${instruments.length} contract${instruments.length === 1 ? "" : "s"}`}
-      timeframeLabel="5m"
+      timeframeLabel={`${timeframe}m`}
+      syncId={syncId}
     />
   </section>;
 }
@@ -181,6 +188,8 @@ function PremiumAnalysisWorkspace() {
   const [candles, setCandles] = useState<Record<string, HistoricalCandle[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
+  const [timeframe, setTimeframe] = useState<PremiumTimeframe>(DEFAULT_TIMEFRAME);
+  const [syncCharts, setSyncCharts] = useState(true);
   const [indicators, setIndicators] = useState<Record<PremiumGroup, ChartIndicators>>(() => ({
     calls: initialIndicators(), puts: initialIndicators(), both: initialIndicators(),
   }));
@@ -194,11 +203,11 @@ function PremiumAnalysisWorkspace() {
       const contracts = response.instruments.filter((instrument) => !expiry || instrument.expiry === expiry);
       const fixedBySymbol = Object.fromEntries(contracts.map((instrument) => [instrument.trading_symbol, instrument]));
       const { from, to } = dynamicSelections.length ? recentMarketDateRange() : historyRange();
-      const underlying = await getHistoricalCandles(symbol, from, to, HISTORY_RESOLUTION);
+      const underlying = await getHistoricalCandles(symbol, from, to, timeframe);
       const resolvedPaths = buildResolvedSelectionPaths(selections, fixedBySymbol, contracts, underlying);
       const required = instrumentsRequiredByPaths(resolvedPaths);
       if (required.length > MAX_DYNAMIC_HISTORY_CONTRACTS) throw new Error(`Rolling selection needs ${required.length} source contracts; the maximum is ${MAX_DYNAMIC_HISTORY_CONTRACTS}.`);
-      const histories = await fetchOptionHistory(required, from, to);
+      const histories = await fetchOptionHistory(required, from, to, timeframe);
       setSelected(fixedSelections.flatMap((selection) => fixedBySymbol[selection.tradingSymbol] ? [fixedBySymbol[selection.tradingSymbol]] : []));
       setExpiryInstruments(contracts);
       setPaths(resolvedPaths);
@@ -212,7 +221,7 @@ function PremiumAnalysisWorkspace() {
       setCandles({});
       setError(loadError);
     } finally { setLoading(false); }
-  }, [dynamicSelections.length, expiry, fixedSelections, selections, symbol]);
+  }, [dynamicSelections.length, expiry, fixedSelections, selections, symbol, timeframe]);
 
   useEffect(() => { void load(); }, [load]);
   const { ticks: underlyingTicks } = useMarketData(symbol ? [symbol] : []);
@@ -228,9 +237,10 @@ function PremiumAnalysisWorkspace() {
   const calls = currentInstruments.filter((instrument) => instrument.option_type === "CE");
   const puts = currentInstruments.filter((instrument) => instrument.option_type === "PE");
   return <DashboardLayout><div className="mx-auto flex max-w-[1800px] flex-col gap-4">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-xl font-bold text-[var(--color-text-bright)]">Combined Premium Analysis</h1><p className="mt-1 text-sm text-[var(--color-text-secondary)]">{symbol} {expiry ? `· ${expiry}` : ""} · {dynamicSelections.length ? "current-session" : "5-day"}, 5-minute synthetic candles from selected option premiums.</p></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => window.close()}><ArrowLeft className="h-4 w-4" /> Close window</Button><Button variant="secondary" size="sm" disabled={loading} onClick={() => void load()}><RefreshCw className="h-4 w-4" /> Refresh</Button></div></div>
-    <Card className="border-[var(--color-accent-orange)]/40 bg-[var(--color-accent-orange)]/5"><p className="text-xs text-[var(--color-text-secondary)]">Composite OHLC values are sums of each selected contract’s matching 5-minute premium candle. They are derived analytics, not exchange-traded instruments.</p></Card>
-    {loading ? <Card><LoadingState size="lg" label="Loading selected option histories…" /></Card> : error ? <Card className="flex flex-col gap-3"><EmptyState title="Could not load combined premium history" /><ApiErrorDisplay error={error} /></Card> : selections.length === 0 ? <Card><EmptyState title="Select Option Chain contracts first" description="Choose up to ten call/put contracts in the Option Chain, then open Combined Premium." /></Card> : <div className="flex flex-col gap-6"><PremiumChart group="calls" instruments={calls} selectionIds={callIds} paths={paths} underlyingCandles={underlyingCandles} candles={candles} ticks={ticks} indicators={indicators.calls} onIndicatorsChange={(next) => setIndicators((current) => ({ ...current, calls: next }))} /><PremiumChart group="puts" instruments={puts} selectionIds={putIds} paths={paths} underlyingCandles={underlyingCandles} candles={candles} ticks={ticks} indicators={indicators.puts} onIndicatorsChange={(next) => setIndicators((current) => ({ ...current, puts: next }))} /><PremiumChart group="both" instruments={currentInstruments} selectionIds={selections.map((selection) => selection.id)} paths={paths} underlyingCandles={underlyingCandles} candles={candles} ticks={ticks} indicators={indicators.both} onIndicatorsChange={(next) => setIndicators((current) => ({ ...current, both: next }))} /></div>}
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-xl font-bold text-[var(--color-text-bright)]">Combined Premium Analysis</h1><p className="mt-1 text-sm text-[var(--color-text-secondary)]">{symbol} {expiry ? `· ${expiry}` : ""} · {dynamicSelections.length ? "current-session" : "5-day"}, {timeframe}-minute synthetic candles from selected option premiums.</p></div><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => window.close()}><ArrowLeft className="h-4 w-4" /> Close window</Button><Button variant="secondary" size="sm" disabled={loading} onClick={() => void load()}><RefreshCw className="h-4 w-4" /> Refresh</Button></div></div>
+    <Card className="flex flex-wrap items-end justify-between gap-4"><div className="flex flex-wrap items-end gap-4"><label className="text-sm text-[var(--color-text-primary)]">Candle timeframe<span className="mt-1 block text-xs text-[var(--color-text-secondary)]">Reloads all three composites using the selected broker candle resolution.</span><Select aria-label="Combined premium timeframe" className="mt-2 h-8 w-32 text-xs" value={timeframe} onChange={(event) => setTimeframe(event.target.value as PremiumTimeframe)}>{TIMEFRAME_OPTIONS.map((value) => <option key={value} value={value}>{value} minute{value === "1" ? "" : "s"}</option>)}</Select></label><Button variant={syncCharts ? "primary" : "outline"} size="sm" onClick={() => setSyncCharts((current) => !current)} aria-pressed={syncCharts} title="Synchronize the visible time window and horizontal zoom across all premium charts"><Link2 className="h-4 w-4" /> {syncCharts ? "Charts synced" : "Sync charts"}</Button></div><p className="max-w-xl text-xs leading-5 text-[var(--color-text-secondary)]">When enabled, dragging or zooming any Calls, Puts, or Combined chart applies the same time window and horizontal scale to the others. Price axes remain independent because each premium group can have a different value range.</p></Card>
+    <Card className="border-[var(--color-accent-orange)]/40 bg-[var(--color-accent-orange)]/5"><p className="text-xs text-[var(--color-text-secondary)]">Composite OHLC values are sums of each selected contract’s matching {timeframe}-minute premium candle. They are derived analytics, not exchange-traded instruments.</p></Card>
+    {loading ? <Card><LoadingState size="lg" label="Loading selected option histories…" /></Card> : error ? <Card className="flex flex-col gap-3"><EmptyState title="Could not load combined premium history" /><ApiErrorDisplay error={error} /></Card> : selections.length === 0 ? <Card><EmptyState title="Select Option Chain contracts first" description="Choose up to ten call/put contracts in the Option Chain, then open Combined Premium." /></Card> : <GreekChartSyncProvider enabled={syncCharts}><div className="flex flex-col gap-6"><PremiumChart group="calls" syncId="combined-premium-calls" timeframe={timeframe} instruments={calls} selectionIds={callIds} paths={paths} underlyingCandles={underlyingCandles} candles={candles} ticks={ticks} indicators={indicators.calls} onIndicatorsChange={(next) => setIndicators((current) => ({ ...current, calls: next }))} /><PremiumChart group="puts" syncId="combined-premium-puts" timeframe={timeframe} instruments={puts} selectionIds={putIds} paths={paths} underlyingCandles={underlyingCandles} candles={candles} ticks={ticks} indicators={indicators.puts} onIndicatorsChange={(next) => setIndicators((current) => ({ ...current, puts: next }))} /><PremiumChart group="both" syncId="combined-premium-both" timeframe={timeframe} instruments={currentInstruments} selectionIds={selections.map((selection) => selection.id)} paths={paths} underlyingCandles={underlyingCandles} candles={candles} ticks={ticks} indicators={indicators.both} onIndicatorsChange={(next) => setIndicators((current) => ({ ...current, both: next }))} /></div></GreekChartSyncProvider>}
   </div></DashboardLayout>;
 }
 

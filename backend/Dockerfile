@@ -19,6 +19,13 @@ COPY pyproject.toml poetry.lock* ./
 RUN poetry config virtualenvs.in-project true && \
     poetry install --no-interaction --no-ansi --without dev --no-root
 
+# Keep Alembic and its migration scripts in the image so the API can bring a
+# fresh database to the current head before serving traffic.
+COPY alembic/ ./alembic/
+COPY alembic.ini ./alembic.ini
+COPY docker-entrypoint.sh /usr/local/bin/oap-entrypoint.sh
+RUN chmod +x /usr/local/bin/oap-entrypoint.sh
+
 # Development image. docker-compose.dev.yml bind-mounts the backend source
 # and keeps this virtual environment in a named volume, allowing Uvicorn's
 # reloader to restart only the API process after a Python save.
@@ -30,6 +37,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 EXPOSE 8000
 
+ENTRYPOINT ["/usr/local/bin/oap-entrypoint.sh"]
 CMD ["poetry", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
 
 # Stage 2: Production image
@@ -47,6 +55,9 @@ RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser
 
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/alembic /app/alembic
+COPY --from=builder /app/alembic.ini /app/alembic.ini
+COPY --from=builder /usr/local/bin/oap-entrypoint.sh /usr/local/bin/oap-entrypoint.sh
 
 # Copy application code
 COPY app/ ./app/
@@ -65,6 +76,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Expose port
 EXPOSE 8000
+
+# Apply migrations before starting the API process.
+ENTRYPOINT ["/usr/local/bin/oap-entrypoint.sh"]
 
 # Run with uvicorn
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

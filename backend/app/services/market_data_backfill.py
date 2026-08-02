@@ -10,8 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.core.exceptions import is_broker_auth_error
 from app.db.session import async_session_maker
 from app.models.market_data import MarketData
+from app.services.broker_session_store import invalidate_broker_session
 from app.services.fyers_service import to_fyers_ws_symbol
 from app.services.session_manager import session_manager
 
@@ -104,7 +106,14 @@ async def run_market_data_backfill(settings: Settings) -> list[BackfillResult]:
                     result.symbol,
                     result.persisted,
                 )
-            except Exception:
+            except Exception as exc:
+                if is_broker_auth_error(exc):
+                    logger.warning(
+                        "Stopping market-data backfill: broker session is invalid or expired. "
+                        "Reconnect the broker to resume live data."
+                    )
+                    await invalidate_broker_session(db)
+                    return results
                 # One unavailable symbol should not stop the remainder of
                 # the configured watchlist from being persisted.
                 logger.exception("Market-data backfill failed for %s", symbol)

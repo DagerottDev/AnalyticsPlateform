@@ -53,13 +53,16 @@ class Settings(BaseSettings):
     market_quote_poll_interval_seconds: float = 3.0
 
     # API protection before requests can reach Fyers. Values are per client
-    # IP per fixed window; broker-heavy routes are intentionally tighter.
+    # IP per fixed window. Broker-heavy routes still have a guard, but the
+    # previous 30-request budget was too small for normal option-chain and
+    # Greek-workspace navigation (one screen can legitimately make several
+    # instruments, expiries, history, and portfolio calls).
     # Quote snapshots have their own higher budget: they are lightweight and
     # power time-sensitive UI recovery, unlike history/chain broker reads.
     api_rate_limit_enabled: bool = True
     api_rate_limit_window_seconds: float = 60.0
     api_rate_limit_default_requests: int = 120
-    api_rate_limit_broker_requests: int = 30
+    api_rate_limit_broker_requests: int = 120
     api_rate_limit_quote_requests: int = 120
     api_rate_limit_auth_requests: int = 10
 
@@ -71,6 +74,13 @@ class Settings(BaseSettings):
     market_data_backfill_interval_seconds: float = 3600.0
     market_data_backfill_initial_lookback_days: int = 365
     market_data_backfill_overlap_days: int = 7
+
+    # Expiry-level Call/Put OI history is broker-snapshot data rather than
+    # historical candles. Capture only the nearest expiry for the existing
+    # tracked underlyings to stay within option-chain broker limits.
+    open_interest_snapshot_enabled: bool = True
+    open_interest_snapshot_interval_seconds: float = 30.0
+    open_interest_snapshot_retention_trading_days: int = 30
 
     # Durable alerts are evaluated by the API process even while no browser
     # tab is open. Keep this comfortably above a broker quote burst interval.

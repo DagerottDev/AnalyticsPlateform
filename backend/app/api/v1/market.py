@@ -6,10 +6,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.security import decode_token, ensure_not_revoked, get_current_user
 from app.data.nse_fo_symbols import NSE_FO_SYMBOLS
+from app.db.session import get_db
 from app.schemas.market import (
     ExpiryList,
     Instrument,
@@ -17,6 +19,8 @@ from app.schemas.market import (
     MarginRequest,
     MarginResponse,
     MarketQuote,
+    OpenInterestHistoryResponse,
+    OpenInterestSnapshotPoint,
     QuotesResponse,
     SymbolSearchResponse,
     SymbolSuggestion,
@@ -24,6 +28,14 @@ from app.schemas.market import (
 from app.services.dhan_service import DhanService
 from app.services.fyers_service import FyersService, from_fyers_ws_symbol, to_fyers_ws_symbol
 from app.services.lot_size_store import lot_size_store
+from app.services.open_interest_snapshots import (
+    capture_expiry,
+    is_regular_market_open,
+    nearest_expiry,
+)
+from app.services.open_interest_snapshots import (
+    load_history as load_open_interest_history,
+)
 from app.services.session_manager import session_manager
 from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
 
@@ -161,6 +173,69 @@ async def get_history(
     fyers_symbol = to_fyers_ws_symbol(symbol)
     candles = await service.get_historical_data(fyers_symbol, range_from, range_to, resolution)
     return {"candles": candles}
+
+
+@router.get("/open-interest/history", response_model=OpenInterestHistoryResponse)
+async def get_open_interest_history(
+    symbol: str = Query(..., min_length=1),
+    expiry: str = Query(..., min_length=1),
+    date: datetime.date | None = Query(None, description="Optional IST session date, YYYY-MM-DD"),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> OpenInterestHistoryResponse:
+    """Return owner-scoped intraday Call/Put OI totals for one expiry.
+
+    During the regular session, opening an otherwise untracked expiry stores
+    its first point so the chart immediately begins collecting history.
+    """
+    service = session_manager.get_session(current_user["sub"])
+    if not service:
+        raise HTTPException(status_code=401, detail="Active broker session not found")
+
+    normalized_symbol = symbol.upper()
+    raw_instruments = await service.get_instruments(normalized_symbol)
+    scheduled_tracking = (
+        normalized_symbol in settings.market_data_backfill_symbol_list
+        and nearest_expiry(raw_instruments) == expiry
+    )
+    if is_regular_market_open():
+        await capture_expiry(
+            db,
+            service,
+            owner_id=current_user["sub"],
+            symbol=normalized_symbol,
+            expiry=expiry,
+            interval_seconds=settings.open_interest_snapshot_interval_seconds,
+            instruments=raw_instruments,
+        )
+    session_date, snapshots = await load_open_interest_history(
+        db,
+        owner_id=current_user["sub"],
+        symbol=normalized_symbol,
+        expiry=expiry,
+        session_date=date,
+    )
+    return OpenInterestHistoryResponse(
+        symbol=normalized_symbol,
+        expiry=expiry,
+        session_date=session_date,
+        scheduled_tracking=scheduled_tracking,
+        points=[
+            OpenInterestSnapshotPoint(
+                timestamp=(
+                    snapshot.timestamp.replace(tzinfo=datetime.UTC)
+                    if snapshot.timestamp.tzinfo is None
+                    else snapshot.timestamp
+                ),
+                total_call_oi=snapshot.total_call_oi,
+                total_put_oi=snapshot.total_put_oi,
+                total_call_change=snapshot.total_call_change,
+                total_put_change=snapshot.total_put_change,
+            )
+            for snapshot in snapshots
+        ],
+    )
 
 
 @router.post("/margin", response_model=MarginResponse)

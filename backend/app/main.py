@@ -24,6 +24,7 @@ from app.services.broker_session_store import restore_broker_session
 from app.services.gtt_monitor import gtt_monitor_loop
 from app.services.iv_universe_backfill import iv_universe_backfill_loop
 from app.services.market_data_backfill import market_data_backfill_loop
+from app.services.open_interest_snapshots import open_interest_snapshot_loop
 from app.services.session_manager import session_manager
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     gtt_stop_event = asyncio.Event()
     gtt_task = asyncio.create_task(gtt_monitor_loop(settings, gtt_stop_event), name="gtt-monitor")
+    open_interest_stop_event = asyncio.Event()
+    open_interest_task: asyncio.Task[None] | None = None
+    if settings.open_interest_snapshot_enabled:
+        open_interest_task = asyncio.create_task(
+            open_interest_snapshot_loop(settings, open_interest_stop_event),
+            name="open-interest-snapshots",
+        )
     yield
     # Shutdown
     backfill_stop_event.set()
@@ -93,6 +101,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await basket_monitor_task
     gtt_stop_event.set()
     await gtt_task
+    open_interest_stop_event.set()
+    if open_interest_task is not None:
+        await open_interest_task
     await session_manager.clear()
     logger.info("Shutting down %s", settings.app_title)
 

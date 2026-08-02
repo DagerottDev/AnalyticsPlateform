@@ -73,6 +73,15 @@ describe("Strategy presets", () => {
     expect(put.action).toBe("Buy");
   });
 
+  it("uses the broker spot rather than the default fallback when selecting ATM", () => {
+    // NIFTY's generic fallback is 22,000. A live quote at 22,680 must select
+    // the nearest 22,700 strike instead of silently reusing that fallback.
+    const liveSpot = 22680;
+    const legs = buildStraddleLegs(chain, NEAR_EXPIRY, liveSpot, LOT_SIZE);
+    expect(legs[0].instrument!.strike).toBe(22700);
+    expect(legs[1].instrument!.strike).toBe(22700);
+  });
+
   it("builds a Strangle with Call above spot and Put below spot", () => {
     const legs = buildStrangleLegs(chain, NEAR_EXPIRY, SPOT, LOT_SIZE);
     expect(legs).toHaveLength(2);

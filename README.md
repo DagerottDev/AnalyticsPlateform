@@ -40,6 +40,16 @@ npm install
 npm run dev
 ```
 
+When running Alembic natively, start the local Postgres container first:
+
+```bash
+./scripts/db-upgrade.sh
+```
+
+The Docker backend applies `alembic upgrade head` automatically after Postgres
+is healthy. Set `RUN_MIGRATIONS=false` only when migrations are managed by a
+separate deployment step.
+
 The Docker development override bind-mounts `frontend/` and `backend/`, runs
 `next dev` and Uvicorn reload, and refreshes source changes automatically at
 `http://localhost:3001` and `http://localhost:8001`. Rebuild only after a
