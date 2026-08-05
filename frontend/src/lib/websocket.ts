@@ -117,8 +117,18 @@ class MarketWebSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private noTokenLogged = false;
+  private readonly handlePageHide = (event: PageTransitionEvent) => {
+    // Keep the connection if the browser places the page in the back/forward
+    // cache; a real unload/reload should close it cleanly.
+    if (!event.persisted) this.destroy();
+  };
 
   constructor() {
+    if (typeof window !== "undefined") {
+      // A browser reload otherwise reports the old socket as code 1006 before
+      // the replacement page has a chance to establish its new connection.
+      window.addEventListener("pagehide", this.handlePageHide);
+    }
     this.connect();
   }
 
@@ -165,12 +175,14 @@ class MarketWebSocketClient {
     };
 
     ws.onclose = (event) => {
-      this.ws = null;
+      // A late close event from an older socket must not clear a newer one.
+      const isCurrentSocket = this.ws === ws;
+      if (isCurrentSocket) this.ws = null;
       if (!this.destroyed && event.code !== 1000) {
         const reason = WS_CLOSE_REASONS[event.code] || event.reason || "Connection closed unexpectedly.";
         logWsFailure(`Market stream disconnected (code ${event.code}): ${reason}`, event.code);
       }
-      this.scheduleReconnect();
+      if (isCurrentSocket) this.scheduleReconnect();
     };
 
     ws.onerror = () => {

@@ -60,7 +60,7 @@ export const CHART_INDICATOR_DEFINITIONS: ChartIndicatorDefinition[] = [
     label: "Supertrend",
     parameters: [
       { key: "period", label: "ATR length", min: 2, max: 500, step: 1 },
-      { key: "multiplier", label: "Multiplier", min: 0.1, max: 10, step: 0.1 },
+      { key: "multiplier", label: "Multiplier", min: 1, max: 10, step: 1 },
     ],
     defaults: { period: 10, multiplier: 3 },
   },

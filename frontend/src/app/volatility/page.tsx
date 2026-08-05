@@ -10,7 +10,7 @@ import { getHistoricalVolatility, getVolatilityMetrics, VolatilityHistoricalData
 import { calculateImpliedVolatility } from "@/lib/greeks";
 import { fitSvi, sviImpliedVolatility } from "@/lib/svi";
 import { timeToExpiry, nearestStrikeTo, defaultSpotFallback } from "@/lib/optionMath";
-import { latestExpiry } from "@/lib/expiry";
+import { nearestExpiry } from "@/lib/expiry";
 import { Instrument } from "@/types/market";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Button } from "@/components/ui/Button";
@@ -103,7 +103,7 @@ export default function VolatilityPage() {
         if (isMounted) {
           setInstruments(data.instruments);
           // Set initial expiry if none selected
-          const defaultExpiry = latestExpiry(
+          const defaultExpiry = nearestExpiry(
             data.instruments.map((instrument) => instrument.expiry).filter((value): value is string => !!value)
           );
           if (!selectedExpiryRef.current && defaultExpiry) setExpiry(defaultExpiry);

@@ -8,7 +8,7 @@ describe("describeDataFreshness", () => {
   it("normalizes second timestamps and identifies fresh quotes", () => {
     expect(describeDataFreshness({ timestamp: now / 1000 - 5 }, now)).toMatchObject({
       state: "live",
-      label: "Live · 5s ago",
+      label: "Live",
     });
   });
 
@@ -24,5 +24,12 @@ describe("describeDataFreshness", () => {
       state: "closed",
       label: "Market closed",
     });
+  });
+
+  it("uses the applicable post-CAS close for each market segment", () => {
+    // 3 Aug 2026, 15:35 IST: F&O is open; cash equity is closed.
+    const at1535 = Date.parse("2026-08-03T10:05:00Z");
+    expect(describeDataFreshness({ timestamp: at1535 }, at1535, "fno").state).toBe("live");
+    expect(describeDataFreshness({ timestamp: at1535 }, at1535, "cash").state).toBe("closed");
   });
 });

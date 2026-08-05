@@ -24,6 +24,7 @@ from typing import Any
 from app.config import Settings
 from app.db.session import async_session_maker
 from app.services import live_basket_store
+from app.services.market_session import is_regular_market_open
 from app.services.session_manager import session_manager
 
 logger = logging.getLogger(__name__)
@@ -250,7 +251,7 @@ async def run_basket_monitor(settings: Settings) -> None:
     the rest from being checked — same isolation as the other scheduled jobs."""
     service = session_manager.get_active_session()
     owner_id = session_manager.get_active_client_id()
-    if service is None or owner_id is None:
+    if service is None or owner_id is None or not is_regular_market_open(segment="fno"):
         return
     async with async_session_maker() as db:
         baskets = await live_basket_store.load_open_baskets(db, owner_id=owner_id)

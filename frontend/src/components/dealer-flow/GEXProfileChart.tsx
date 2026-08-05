@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import type { ReactNode } from "react";
 import {
   BarChart,
   Bar,
@@ -15,13 +16,16 @@ import {
 import { StrikeExposure } from "@/lib/dealerFlow";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ChartDataTable } from "@/components/charts/ChartDataTable";
+import { ChartZoomControls } from "@/components/charts/ChartZoomControls";
+import { useCategoryChartZoom } from "@/hooks/useCategoryChartZoom";
 
 interface GEXProfileChartProps {
   data: StrikeExposure[];
   spotPrice: number;
+  education?: ReactNode;
 }
 
-export function GEXProfileChart({ data, spotPrice }: GEXProfileChartProps) {
+export function GEXProfileChart({ data, spotPrice, education }: GEXProfileChartProps) {
   const chartData = useMemo(() => {
     return data
       .filter(d => d.totalExposure !== 0)
@@ -33,6 +37,8 @@ export function GEXProfileChart({ data, spotPrice }: GEXProfileChartProps) {
         "Net GEX (M)": Number((d.totalExposure / 1000000).toFixed(2)),
       }));
   }, [data]);
+  const centreIndex = useMemo(() => chartData.reduce((best, row, index) => Math.abs(row.strike - spotPrice) < Math.abs(chartData[best].strike - spotPrice) ? index : best, 0), [chartData, spotPrice]);
+  const zoom = useCategoryChartZoom(chartData, centreIndex);
 
   if (!chartData || chartData.length === 0) {
     return (
@@ -49,10 +55,10 @@ export function GEXProfileChart({ data, spotPrice }: GEXProfileChartProps) {
 
   return (
     <div className="panel flex flex-col gap-2">
-      <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Gamma Exposure (GEX) Profile</h3>
+      <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-1 text-sm font-bold text-[var(--color-text-bright)]">Gamma Exposure (GEX) Profile{education}</h3><ChartZoomControls label="gamma exposure profile" onZoomIn={zoom.zoomIn} onZoomOut={zoom.zoomOut} onReset={zoom.resetZoom} /></div>
       <div role="img" aria-label={`Gamma exposure profile across ${chartData.length} strikes. Spot price is ${spotPrice.toFixed(2)}. Exact call and put exposure values are available in the following data table.`} className="h-[400px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} layout="vertical">
+          <BarChart data={zoom.visibleData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} layout="vertical">
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" horizontal={true} vertical={false} />
             <XAxis
               type="number"

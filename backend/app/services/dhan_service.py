@@ -77,6 +77,9 @@ class DhanService(BrokerService):
     """Concrete ``BrokerService`` implementation for Dhan."""
 
     _BASE_URL = "https://api.dhan.co/v2"
+    # Dhan's LTP endpoint uses the public NIFTY index reference rather than
+    # the exchange-qualified security references used by option contracts.
+    _INDEX_QUOTE_REFS = {"NIFTY": ("IDX_I", "13")}
     _ORDER_TYPES = {
         "MARKET": "MARKET",
         "LIMIT": "LIMIT",
@@ -232,12 +235,24 @@ class DhanService(BrokerService):
         grouped: dict[str, list[int]] = {}
         names: dict[tuple[str, str], str] = {}
         for symbol in symbols:
-            segment, security_id = self._security_ref(symbol)
+            normalized_symbol = str(symbol).strip()
+            if ":" in normalized_symbol:
+                segment, security_id = self._security_ref(normalized_symbol)
+                quote_name = normalized_symbol
+            else:
+                reference = self._INDEX_QUOTE_REFS.get(normalized_symbol.upper())
+                if reference is None:
+                    raise BrokerConnectionError(
+                        "Dhan bare quote symbols are unsupported; use "
+                        "EXCHANGE_SEGMENT:SECURITY_ID or a supported index alias."
+                    )
+                segment, security_id = reference
+                quote_name = normalized_symbol.upper()
             try:
                 grouped.setdefault(segment, []).append(int(security_id))
             except ValueError as exc:
                 raise BrokerConnectionError(f"Invalid Dhan security ID: {security_id}") from exc
-            names[(segment, security_id)] = symbol
+            names[(segment, security_id)] = quote_name
 
         data = await self._request("POST", "/marketfeed/ltp", json=grouped)
         rows: list[dict[str, Any]] = []
@@ -252,7 +267,11 @@ class DhanService(BrokerService):
                 rows.append(
                     {
                         "symbol": ref,
-                        "trading_symbol": value.get("tradingSymbol", ref),
+                        # Keep the exact symbol requested by the UI. Dhan may
+                        # return a display-only tradingSymbol for an option,
+                        # but the websocket handler is keyed by this request
+                        # symbol (for example NIFTY or NSE_FNO:26009).
+                        "trading_symbol": ref,
                         "last_price": float(ltp or 0),
                         "volume": int(value.get("volume", 0) or 0),
                         "open_interest": int(value.get("oi", 0) or 0),

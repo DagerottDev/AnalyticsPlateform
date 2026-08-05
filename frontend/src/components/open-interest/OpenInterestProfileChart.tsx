@@ -14,6 +14,8 @@ import {
 } from "recharts";
 import { ChartDataTable } from "@/components/charts/ChartDataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ChartZoomControls } from "@/components/charts/ChartZoomControls";
+import { useCategoryChartZoom } from "@/hooks/useCategoryChartZoom";
 import type { OpenInterestLevel, OpenInterestStrike } from "@/lib/openInterestAnalysis";
 
 interface OpenInterestProfileChartProps {
@@ -29,6 +31,8 @@ export function OpenInterestProfileChart({ data, spot, support, resistance }: Op
     "Call OI": row.callOi,
     "Put OI": -row.putOi,
   })), [data]);
+  const centreIndex = useMemo(() => chartData.reduce((best, row, index) => Math.abs(row.strike - spot) < Math.abs(chartData[best].strike - spot) ? index : best, 0), [chartData, spot]);
+  const zoom = useCategoryChartZoom(chartData, centreIndex);
 
   if (chartData.length === 0) {
     return <section className="panel"><EmptyState title="No open-interest data is available for this expiry." /></section>;
@@ -36,19 +40,18 @@ export function OpenInterestProfileChart({ data, spot, support, resistance }: Op
 
   return (
     <section className="panel flex min-w-0 flex-col gap-3">
-      <div>
+      <div className="flex items-start justify-between gap-2"><div>
         <h2 className="text-sm font-bold text-[var(--color-text-bright)]">Open Interest by Strike</h2>
         <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
           Calls are plotted to the right; puts are plotted to the left. Dashed levels show the largest relevant OI concentrations.
-        </p>
-      </div>
+        </p></div><ChartZoomControls label="open interest by strike" onZoomIn={zoom.zoomIn} onZoomOut={zoom.zoomOut} onReset={zoom.resetZoom} /></div>
       <div
         role="img"
         aria-label={`Open interest profile across ${chartData.length} strikes. Spot is ${spot.toFixed(2)}. Support is ${support?.strike ?? "unavailable"}; resistance is ${resistance?.strike ?? "unavailable"}. Exact values are available in the following data table.`}
         className="h-[440px] w-full"
       >
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} layout="vertical" margin={{ top: 12, right: 30, left: 12, bottom: 8 }}>
+          <BarChart data={zoom.visibleData} layout="vertical" margin={{ top: 12, right: 30, left: 12, bottom: 8 }}>
             <CartesianGrid stroke="var(--color-chart-grid)" strokeDasharray="3 3" horizontal={true} vertical={false} />
             <XAxis
               type="number"

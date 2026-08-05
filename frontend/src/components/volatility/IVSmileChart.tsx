@@ -13,6 +13,8 @@ import {
 } from "recharts";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ChartDataTable } from "@/components/charts/ChartDataTable";
+import { ChartZoomControls } from "@/components/charts/ChartZoomControls";
+import { useCategoryChartZoom } from "@/hooks/useCategoryChartZoom";
 
 interface IVSmileChartProps {
   data: {
@@ -32,6 +34,7 @@ export function IVSmileChart({ data }: IVSmileChartProps) {
         "Put IV": d.peIV > 0 ? Number((d.peIV * 100).toFixed(2)) : null,
       }));
   }, [data]);
+  const zoom = useCategoryChartZoom(chartData);
 
   if (!chartData || chartData.length === 0) {
     return (
@@ -43,10 +46,10 @@ export function IVSmileChart({ data }: IVSmileChartProps) {
 
   return (
     <div className="panel flex flex-col gap-2">
-      <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Volatility Smile</h3>
+      <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-bold text-[var(--color-text-bright)]">Volatility Smile</h3><ChartZoomControls label="volatility smile" onZoomIn={zoom.zoomIn} onZoomOut={zoom.zoomOut} onReset={zoom.resetZoom} /></div>
       <div role="img" aria-label={`Volatility smile line chart across ${chartData.length} strikes. Exact call and put implied volatility values are available in the following data table.`} className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+          <LineChart data={zoom.visibleData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" vertical={false} />
             <XAxis
               dataKey="strike"

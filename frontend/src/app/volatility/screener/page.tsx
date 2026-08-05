@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, BookOpen, Loader2, RefreshCw, Search } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { EducationPopover } from "@/components/ui/EducationPopover";
 import { Input } from "@/components/ui/Input";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { IVScreenerEducationAside } from "@/components/volatility/IVScreenerEducationAside";
 import { getIvUniverse, type IvUniverseSymbol } from "@/lib/ivUniverse";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +19,7 @@ const REFRESH_INTERVAL_MS = 60_000;
 
 type SortKey = "symbol" | "spot" | "atm_iv" | "iv_rank" | "iv_percentile";
 type SortDir = "asc" | "desc";
+type Status = IvUniverseSymbol["status"];
 
 const COLUMNS: { key: SortKey; label: string; align?: "right" }[] = [
   { key: "symbol", label: "Symbol" },
@@ -34,6 +37,14 @@ function points(value: number | null | undefined): string {
   return value === null || value === undefined ? "—" : `${value.toFixed(1)}`;
 }
 
+function statusLabel(status: Status): string {
+  return status === "ready" ? "Ready" : status === "stale" ? "Stale" : "Building";
+}
+
+function statusTone(status: Status): "blue" | "orange" | "profit" {
+  return status === "ready" ? "profit" : status === "stale" ? "orange" : "blue";
+}
+
 export default function VolatilityScreenerPage() {
   const [symbols, setSymbols] = useState<IvUniverseSymbol[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
@@ -42,6 +53,7 @@ export default function VolatilityScreenerPage() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("iv_rank");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [educationOpen, setEducationOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -100,92 +112,126 @@ export default function VolatilityScreenerPage() {
     <DashboardLayout>
       <PageContainer>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <SectionHeader
-            title="IV Screener"
-            description="ATM implied volatility, IV Rank, and IV Percentile across every NSE F&O stock."
-          />
-          <Button variant="secondary" onClick={() => void refresh()} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Refresh
-          </Button>
-        </div>
-
-        <Card className="flex flex-col gap-3">
-          <div className="relative max-w-sm">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search symbol or company name…"
-              className="pl-9"
+          <div className="flex items-start gap-2">
+            <SectionHeader
+              title="IV Screener"
+              description="ATM implied volatility, IV Rank, and IV Percentile across every NSE F&O stock."
+            />
+            <EducationPopover
+              title="IV Screener analytics"
+              description="This screener compares daily ATM implied-volatility observations across the NSE F&O universe. IV Rank and IV Percentile are historical context, not directional forecasts."
+              tips={["Rank and Percentile are different measures of where today's IV sits in its history.", "Universe Rank and Percentile need at least 20 prior daily observations before becoming ready."]}
+              links={[{ label: "OIC: Volatility and the Greeks", href: "https://www.optionseducation.org/advancedconcepts/volatility-the-greeks" }]}
             />
           </div>
-          <p className="text-xs text-[var(--color-text-secondary)]">
-            Backed by a scheduled backfill job, not live per-request broker calls — refreshes roughly every 30 minutes as the
-            job progresses through the full F&O universe. Click a column header to sort.
-          </p>
-        </Card>
-
-        {error !== null && <ApiErrorDisplay error={error} />}
-
-        <Card className="overflow-hidden p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="border-b border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-                <tr>
-                  {COLUMNS.map((column) => (
-                    <th
-                      key={column.key}
-                      className={cn(
-                        "cursor-pointer select-none px-4 py-3 hover:text-[var(--color-text-primary)]",
-                        column.align === "right" && "text-right"
-                      )}
-                      onClick={() => toggleSort(column.key)}
-                    >
-                      <span className={cn("inline-flex items-center gap-1", column.align === "right" && "flex-row-reverse")}>
-                        {column.label}
-                        {sortKey === column.key ? (
-                          sortDir === "asc" ? (
-                            <ArrowUp className="h-3 w-3" />
-                          ) : (
-                            <ArrowDown className="h-3 w-3" />
-                          )
-                        ) : (
-                          <ArrowUpDown className="h-3 w-3 opacity-30" />
-                        )}
-                      </span>
-                    </th>
-                  ))}
-                  <th className="px-4 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <ScreenerRow key={row.symbol} row={row} />
-                ))}
-                {rows.length === 0 && !loading && (
-                  <tr>
-                    <td colSpan={COLUMNS.length + 1} className="px-4 py-8 text-center text-sm text-[var(--color-text-muted)]">
-                      No symbols match your search.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="flex items-center gap-2">
+            {!educationOpen && (
+              <Button variant="outline" size="sm" onClick={() => setEducationOpen(true)}>
+                <BookOpen className="h-4 w-4" /> Show education
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => void refresh()} disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Refresh
+            </Button>
           </div>
-        </Card>
+        </div>
 
-        <p className="text-xs text-[var(--color-text-muted)]">
-          {generatedAt ? `Last loaded: ${new Date(generatedAt).toLocaleString()}. ` : ""}
-          Showing {rows.length} of {symbols.length} F&O stocks. IV Rank/Percentile need at least two daily observations to
-          appear and show &quot;Building&quot; until then.
-        </p>
+        <div className={educationOpen ? "grid items-start gap-4 xl:grid-cols-[280px_minmax(0,1fr)]" : ""}>
+          {educationOpen && <IVScreenerEducationAside onClose={() => setEducationOpen(false)} />}
+          <div className="flex min-w-0 flex-col gap-4">
+            <Card className="flex flex-col gap-3">
+              <div className="relative max-w-sm">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+                <Input
+                  aria-label="Search IV screener symbols"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search symbol or company name…"
+                  className="pl-9"
+                />
+              </div>
+              <p className="text-xs text-[var(--color-text-secondary)]">
+                Backed by a scheduled backfill job, not live per-request broker calls — refreshes roughly every 30 minutes as the
+                job progresses through the full F&O universe. Click a column header to sort.
+              </p>
+            </Card>
+
+            {error !== null && <ApiErrorDisplay error={error} />}
+
+            <Card className="overflow-hidden p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <caption className="sr-only">ATM implied volatility and volatility ranking for NSE F&amp;O stocks</caption>
+                  <thead className="border-b border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                    <tr>
+                      {COLUMNS.map((column) => (
+                        <th
+                          key={column.key}
+                          scope="col"
+                          aria-sort={sortKey === column.key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                          className={cn("px-4 py-2", column.align === "right" && "text-right")}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => toggleSort(column.key)}
+                            className={cn(
+                              "focus-ring inline-flex w-full items-center gap-1 rounded px-2 py-1 text-left hover:text-[var(--color-text-primary)]",
+                              column.align === "right" && "justify-end text-right"
+                            )}
+                            aria-label={`Sort by ${column.label}`}
+                          >
+                            <span>{column.label}</span>
+                            {sortKey === column.key ? (
+                              sortDir === "asc" ? (
+                                <ArrowUp className="h-3 w-3 shrink-0" aria-hidden="true" />
+                              ) : (
+                                <ArrowDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+                              )
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 shrink-0 opacity-30" aria-hidden="true" />
+                            )}
+                          </button>
+                        </th>
+                      ))}
+                      <th scope="col" className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <ScreenerRow key={row.symbol} row={row} />
+                    ))}
+                    {loading && rows.length === 0 && (
+                      <tr>
+                        <td colSpan={COLUMNS.length + 1} className="px-4 py-10 text-center text-sm text-[var(--color-text-secondary)]">
+                          <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading IV universe…</span>
+                        </td>
+                      </tr>
+                    )}
+                    {rows.length === 0 && !loading && (
+                      <tr>
+                        <td colSpan={COLUMNS.length + 1} className="px-4 py-8 text-center text-sm text-[var(--color-text-muted)]">
+                          No symbols match your search.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            <p className="text-xs text-[var(--color-text-muted)]">
+              {generatedAt ? `Last loaded: ${new Date(generatedAt).toLocaleString()}. ` : ""}
+              Showing {rows.length} of {symbols.length} F&amp;O stocks. IV Rank/Percentile need at least 20 prior daily observations
+              to be meaningful. Stale rows have not refreshed within the expected broker snapshot window.
+            </p>
+          </div>
+        </div>
       </PageContainer>
     </DashboardLayout>
   );
 }
 
 function ScreenerRow({ row }: { row: IvUniverseSymbol }) {
-  const isReady = row.atm_iv !== null;
   return (
     <tr className="border-b border-[var(--color-border-subtle)] last:border-0">
       <td className="px-4 py-3">
@@ -199,7 +245,8 @@ function ScreenerRow({ row }: { row: IvUniverseSymbol }) {
       <td className="tnum px-4 py-3 text-right">{points(row.iv_rank)}</td>
       <td className="tnum px-4 py-3 text-right">{points(row.iv_percentile)}</td>
       <td className="px-4 py-3">
-        <Badge tone={isReady ? "profit" : "orange"}>{isReady ? "Ready" : "Building"}</Badge>
+        <Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge>
+        {row.updated_at && <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">Updated {new Date(row.updated_at).toLocaleTimeString()}</div>}
       </td>
     </tr>
   );

@@ -16,6 +16,13 @@ export function timeToDate(time: Time): Date | null {
   return null;
 }
 
+/** Return a lightweight-charts time value as Unix seconds for cross-chart lookups. */
+export function timeToUnixSeconds(time: Time): number | null {
+  const date = timeToDate(time);
+  if (!date || !Number.isFinite(date.getTime())) return null;
+  return date.getTime() / 1000;
+}
+
 function format(time: Time, options: Intl.DateTimeFormatOptions): string {
   const date = timeToDate(time);
   return date ? new Intl.DateTimeFormat("en-IN", { timeZone: MARKET_TIME_ZONE, hour12: false, ...options }).format(date) : "";

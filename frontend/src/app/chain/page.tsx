@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { OptionChain } from "@/components/market/OptionChain";
@@ -8,10 +8,23 @@ import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useReplayStore } from "@/stores/replayStore";
 
 export default function OptionChainPage() {
   const [symbol, setSymbol] = useState<string>(() => useSettingsStore.getState().defaultSymbol);
   const [expiry, setExpiry] = useState<string | null>(null);
+  const replayIsActive = useReplayStore((state) => state.isActive);
+  const replaySymbol = useReplayStore((state) => state.symbol);
+  const replayExpiry = useReplayStore((state) => state.expiry);
+
+  // Starting a replay from a different symbol/expiry should lead directly to
+  // the same ladder when the user opens Option Chain from the replay card.
+  // Manual changes remain respected after this initial synchronization.
+  useEffect(() => {
+    if (!replayIsActive || !replaySymbol) return;
+    setSymbol(replaySymbol);
+    if (replayExpiry) setExpiry(replayExpiry);
+  }, [replayExpiry, replayIsActive, replaySymbol]);
 
   return (
     <DashboardLayout>

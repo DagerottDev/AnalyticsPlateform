@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { TradingChart } from "@/components/charts/TradingChart";
+import { NumericParameterInput } from "@/components/charts/NumericParameterInput";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { useMarketData } from "@/hooks/useMarketData";
 import { OHLCVData } from "@/lib/indicators";
@@ -13,7 +14,7 @@ import {
 } from "@/lib/chartIndicators";
 import { Instrument } from "@/types/market";
 import { getInstruments, getHistoricalCandles, getMarketQuotes } from "@/lib/market";
-import { useSettingsStore } from "@/stores/settingsStore";
+import { useSettingsStore, type ChartTimeframe } from "@/stores/settingsStore";
 import { Card } from "@/components/ui/Card";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -24,6 +25,7 @@ import { DataFreshness } from "@/components/market/DataFreshness";
 import { Select } from "@/components/ui/Select";
 import { defaultSpotFallback, nearestStrikeTo } from "@/lib/optionMath";
 import { formatStrikeWithPosition } from "@/lib/strikePositions";
+import { quoteLastPrice } from "@/lib/marketTick";
 
 type OptionType = "CE" | "PE";
 type SelectedOption = Instrument & { strike: number; option_type: OptionType };
@@ -40,6 +42,7 @@ export default function ChartsPage() {
     () => useSettingsStore.getState().charts ?? FALLBACK_CHART_PREFERENCES,
     []
   );
+  const [timeframe, setTimeframe] = useState<ChartTimeframe>(chartPreferences.timeframe);
   const [expiry, setExpiry] = useState<string | null>(null);
   const [optionType, setOptionType] = useState<OptionType>("CE");
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
@@ -85,21 +88,10 @@ export default function ChartsPage() {
     ))).sort((left, right) => left - right),
     [instruments, optionType]
   );
-  const selectedOption = useMemo<SelectedOption | null>(() => {
-    if (selectedStrike === null) return null;
-
-    return instruments.find((instrument): instrument is SelectedOption =>
-      instrument.strike === selectedStrike && instrument.option_type === optionType
-    ) ?? null;
-  }, [instruments, optionType, selectedStrike]);
-  const chartSymbol = selectedOption?.trading_symbol ?? symbol;
-  const chartLabel = selectedOption
-    ? `${symbol} ${selectedOption.strike} ${selectedOption.option_type} · ${expiry}`
-    : symbol;
   const tradingSymbols = useMemo(() => instruments.map((i) => i.trading_symbol), [instruments]);
   const allSymbols = useMemo(
-    () => Array.from(new Set([...tradingSymbols, symbol, chartSymbol])),
-    [chartSymbol, symbol, tradingSymbols]
+    () => Array.from(new Set([...tradingSymbols, symbol])),
+    [symbol, tradingSymbols]
   );
   const { getTick } = useMarketData(allSymbols); // Subscribe to options + underlying
   const underlyingTick = getTick(symbol);
@@ -110,6 +102,21 @@ export default function ChartsPage() {
     () => availableStrikes.length > 0 ? nearestStrikeTo(availableStrikes, spot) : null,
     [availableStrikes, spot]
   );
+  // Resolve the ATM strike during the render that receives the option ladder,
+  // so the chart never briefly falls back to the underlying before the
+  // selection effect commits. An explicit picker choice always wins.
+  const activeStrike = selectedStrike ?? (!strikePickerTouchedRef.current ? atmStrike : null);
+  const selectedOption = useMemo<SelectedOption | null>(() => {
+    if (activeStrike === null) return null;
+
+    return instruments.find((instrument): instrument is SelectedOption =>
+      instrument.strike === activeStrike && instrument.option_type === optionType
+    ) ?? null;
+  }, [activeStrike, instruments, optionType]);
+  const chartSymbol = selectedOption?.trading_symbol ?? symbol;
+  const chartLabel = selectedOption
+    ? `${symbol} ${selectedOption.strike} ${selectedOption.option_type} · ${expiry}`
+    : symbol;
 
   // Load option contracts for the selected expiry.
   useEffect(() => {
@@ -138,9 +145,8 @@ export default function ChartsPage() {
   }, [symbol, expiry]);
 
   // The websocket is intentionally paused outside NSE hours. Use the
-  // broker's previous close for ATM labels in that state instead of drifting
-  // back to a hardcoded index fallback; a live tick still wins immediately
-  // when the session is open.
+  // broker's latest traded quote for ATM labels in that state instead of
+  // drifting back to a hardcoded index fallback.
   useEffect(() => {
     let isMounted = true;
     setSnapshotSpot(null);
@@ -149,10 +155,8 @@ export default function ChartsPage() {
       try {
         const { quotes } = await getMarketQuotes([symbol]);
         const quote = quotes.find((item) => item.trading_symbol === symbol) ?? quotes[0];
-        const candidate = [quote?.prev_close_price, quote?.last_price].find((value): value is number => (
-          typeof value === "number" && Number.isFinite(value) && value > 0
-        ));
-        if (isMounted && candidate !== undefined) setSnapshotSpot(candidate);
+        const candidate = quoteLastPrice(quote);
+        if (isMounted && candidate !== null) setSnapshotSpot(candidate);
       } catch {
         // Keep the symbol-specific fallback when the optional snapshot is
         // unavailable; historical chart loading must remain independent.
@@ -202,7 +206,7 @@ export default function ChartsPage() {
         rangeFrom.setDate(rangeFrom.getDate() - chartPreferences.historyDays);
         const toIso = (d: Date) => d.toISOString().slice(0, 10);
 
-        const candles = await getHistoricalCandles(chartSymbol, toIso(rangeFrom), toIso(rangeTo), chartPreferences.timeframe);
+        const candles = await getHistoricalCandles(chartSymbol, toIso(rangeFrom), toIso(rangeTo), timeframe);
         if (isMounted) {
           if (candles.length > 0) {
             setHistoricalData(
@@ -237,7 +241,7 @@ export default function ChartsPage() {
     fetchHistorical();
 
     return () => { isMounted = false; };
-  }, [chartPreferences.historyDays, chartPreferences.timeframe, chartSymbol, selectedOption]);
+  }, [chartPreferences.historyDays, chartSymbol, selectedOption, timeframe]);
 
   // The active chart instrument receives live updates on top of broker history.
   const chartTick = getTick(chartSymbol);
@@ -260,6 +264,14 @@ export default function ChartsPage() {
     autoSelectedStrikeRef.current = null;
   };
 
+  const handleTimeframeChange = (nextTimeframe: ChartTimeframe) => {
+    setTimeframe(nextTimeframe);
+    useSettingsStore.getState().updatePreferences((current) => ({
+      ...current,
+      charts: { ...current.charts, timeframe: nextTimeframe },
+    }));
+  };
+
   return (
     <DashboardLayout>
       <PageContainer>
@@ -278,6 +290,22 @@ export default function ChartsPage() {
           />
 
           <Card className="flex flex-1 flex-wrap items-end gap-3 p-3">
+            <div className="min-w-36 flex-1">
+              <label htmlFor="chart-timeframe" className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
+                Timeframe
+              </label>
+              <Select
+                id="chart-timeframe"
+                value={timeframe}
+                onChange={(event) => handleTimeframeChange(event.target.value as ChartTimeframe)}
+                title="Reload the chart with a different broker candle interval"
+              >
+                {["1", "3", "5", "10", "15"].map((value) => (
+                  <option key={value} value={value}>{value} minute{value === "1" ? "" : "s"}</option>
+                ))}
+              </Select>
+              <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Reloads broker OHLCV candles.</p>
+            </div>
             <div className="min-w-40 flex-1">
               <label htmlFor="chart-option-type" className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
                 Option type
@@ -303,7 +331,7 @@ export default function ChartsPage() {
               </label>
               <Select
                 id="chart-option-strike"
-                value={selectedStrike === null ? "" : String(selectedStrike)}
+                value={activeStrike === null ? "" : String(activeStrike)}
                 onChange={(event) => {
                   strikePickerTouchedRef.current = true;
                   setSelectedStrike(event.target.value ? Number(event.target.value) : null);
@@ -357,23 +385,14 @@ export default function ChartsPage() {
                 {indicators[indicator.id].enabled && indicator.parameters.map((parameter) => (
                   <label key={parameter.key} className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)]">
                     <span>{parameter.label}</span>
-                    <input
-                      aria-label={`${indicator.label} ${parameter.label}`}
-                      type="number"
+                    <NumericParameterInput
+                      ariaLabel={`${indicator.label} ${parameter.label}`}
+                      value={indicators[indicator.id].parameters[parameter.key]}
                       min={parameter.min}
                       max={parameter.max}
                       step={parameter.step}
-                      value={indicators[indicator.id].parameters[parameter.key]}
-                      onChange={(event) => {
-                        const value = event.target.valueAsNumber;
-                        if (Number.isFinite(value)) {
-                          updateIndicatorParameter(
-                            indicator.id,
-                            parameter.key,
-                            Math.min(parameter.max, Math.max(parameter.min, value))
-                          );
-                        }
-                      }}
+                      integer={parameter.step === 1}
+                      onValueChange={(value) => updateIndicatorParameter(indicator.id, parameter.key, value)}
                       className="w-14 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-primary)] px-1.5 py-1 text-xs text-[var(--color-text-bright)] outline-none focus:border-[var(--color-accent-blue)]"
                     />
                   </label>
@@ -404,7 +423,7 @@ export default function ChartsPage() {
             liveTick={liveChartTick}
             indicators={indicators}
             symbol={chartLabel}
-            timeframeLabel={`${chartPreferences.timeframe}m`}
+            timeframeLabel={`${timeframe}m`}
           />
         )}
       </PageContainer>

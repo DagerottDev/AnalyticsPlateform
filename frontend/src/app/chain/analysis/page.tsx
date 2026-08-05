@@ -14,18 +14,18 @@ import { GreekPanelSection } from "@/components/greek-workspace/GreekPanelSectio
 import { CreateGreekAlertModal } from "@/components/greek-workspace/CreateGreekAlertModal";
 import { GreekChartSyncProvider } from "@/components/greek-workspace/GreekChartSyncProvider";
 import { SelectedStrikesCard } from "@/components/greek-workspace/SelectedStrikesCard";
-import { FEATURED_GREEKS } from "@/components/greek-workspace/greekLabels";
 import { DEFAULT_GREEK_PANEL_LAYOUT, saveGreekWorkspaceLayout, type GreekPanelLayout } from "@/lib/greekWorkspaceLayout";
 import { getHistoricalCandles, getInstruments, type HistoricalCandle } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
+import { useReplayStore } from "@/stores/replayStore";
 import { calculateGreeks, calculateImpliedVolatility } from "@/lib/greeks";
 import { defaultSpotFallback, nearestStrikeTo, timeToExpiry } from "@/lib/optionMath";
 import { riskFreeRateForSymbol, useSettingsStore } from "@/stores/settingsStore";
 import { recentMarketDateRange } from "@/lib/recentHistory";
-import { appendLiveGreekValues, buildResolvedGreekSeries, calculateLiveCombinedGreeks, combineGreekSeries, FIRST_ORDER_GREEKS, HIGHER_ORDER_GREEKS, type GreekMetric } from "@/lib/strikeGreekAnalysis";
+import { appendLiveGreekValues, buildReplayResolvedGreekSeries, buildResolvedGreekSeries, calculateLiveResolvedGreeks, combineGreekSeries, FIRST_ORDER_GREEKS, HIGHER_ORDER_GREEKS, type GreekMetric } from "@/lib/strikeGreekAnalysis";
 import {
   buildResolvedSelectionPaths,
-  currentResolvedInstruments,
+  currentResolvedSelections,
   instrumentsRequiredByPaths,
   MAX_ANALYSIS_SELECTIONS,
   MAX_DYNAMIC_HISTORY_CONTRACTS,
@@ -35,7 +35,7 @@ import {
   type AnalysisSelection,
   type ResolvedSelectionPaths,
 } from "@/lib/analysisSelections";
-import type { Instrument } from "@/types/market";
+import type { Instrument, MarketTick } from "@/types/market";
 
 // The broker's history endpoint is much more tightly rate-limited than the
 // websocket stream. Keep the analysis workspace deliberately gentle so
@@ -69,6 +69,33 @@ function dates() {
   return recentMarketDateRange();
 }
 
+function tickTimeMs(timestamp: number | undefined): number | null {
+  if (timestamp == null || !Number.isFinite(timestamp)) return null;
+  const milliseconds = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
+  return Number.isFinite(milliseconds) ? milliseconds : null;
+}
+
+function replayUnderlyingCandles(
+  timeline: Array<Record<string, MarketTick>>,
+  symbol: string,
+): HistoricalCandle[] {
+  return timeline.flatMap((step) => {
+    const tick = step[symbol];
+    const timestamp = tickTimeMs(tick?.timestamp);
+    if (!tick || timestamp === null || !Number.isFinite(tick.last_price)) return [];
+    const price = tick.last_price;
+    return [{
+      timestamp: new Date(timestamp).toISOString(),
+      open: price,
+      high: price,
+      low: price,
+      close: price,
+      volume: tick.volume ?? 0,
+      open_interest: tick.open_interest ?? 0,
+    }];
+  });
+}
+
 interface AlertModalState {
   open: boolean;
   metric?: GreekMetric;
@@ -93,6 +120,14 @@ function GreekAnalysisWorkspace() {
   const [alertModal, setAlertModal] = useState<AlertModalState>({ open: false });
   const [timeframe, setTimeframe] = useState(initialWorkspacePreferences.timeframe);
   const [syncCharts, setSyncCharts] = useState(initialWorkspacePreferences.syncCharts);
+  const rollingSelectionMode = useSettingsStore((state) => state.optionChain.rollingSelectionMode);
+  const updatePreferences = useSettingsStore((state) => state.updatePreferences);
+  const replayIsActive = useReplayStore((state) => state.isActive);
+  const replaySymbol = useReplayStore((state) => state.symbol);
+  const replaySessionDate = useReplayStore((state) => state.sessionDate);
+  const replayInstruments = useReplayStore((state) => state.replayInstruments);
+  const replayTimeline = useReplayStore((state) => state.replayTimeline);
+  const replayStep = useReplayStore((state) => state.currentStep);
 
   const searchParams = useSearchParams();
   const symbol = searchParams.get("symbol") ?? "";
@@ -111,17 +146,33 @@ function GreekAnalysisWorkspace() {
     setError(null);
     try {
       const { from, to } = dates();
-      const response = await getInstruments(symbol);
-      const expiryContracts = response.instruments.filter((item) => !expiry || item.expiry === expiry);
+      const sourceInstruments = replayIsActive && replaySymbol === symbol && replayInstruments.length > 0
+        ? replayInstruments
+        : (await getInstruments(symbol)).instruments;
+      const expiryContracts = sourceInstruments.filter((item) => !expiry || item.expiry === expiry);
       const fixedBySymbol = Object.fromEntries(expiryContracts.map((item) => [item.trading_symbol, item]));
+      if (replayIsActive && replaySymbol === symbol && replayTimeline.length > 0) {
+        // Replay already contains the underlying timeline and every contract
+        // in the selected expiry. Do not issue a second broker history burst;
+        // the same ticks now become the Greek workspace's source candles.
+        const replayUnderlying = replayUnderlyingCandles(replayTimeline, symbol);
+        const paths = buildResolvedSelectionPaths(selections, fixedBySymbol, expiryContracts, replayUnderlying, rollingSelectionMode);
+        const fixed = fixedSelections.flatMap((selection) => fixedBySymbol[selection.tradingSymbol] ? [fixedBySymbol[selection.tradingSymbol]] : []);
+        setSelected(fixed);
+        setExpiryInstruments(expiryContracts);
+        setSelectionPaths(paths);
+        setUnderlyingCandles(replayUnderlying);
+        setCandles({});
+        return;
+      }
       // Dynamic descriptors cannot be determined until we have the spot
       // candle. Resolve their per-candle source set before requesting any
       // option history, then keep broker calls at two concurrent requests.
       const underlying = await getHistoricalCandles(symbol, from, to, timeframe);
-      const paths = buildResolvedSelectionPaths(selections, fixedBySymbol, expiryContracts, underlying);
-      const required = instrumentsRequiredByPaths(paths);
+      const paths = buildResolvedSelectionPaths(selections, fixedBySymbol, expiryContracts, underlying, rollingSelectionMode);
+      const required = instrumentsRequiredByPaths(paths, selections, fixedBySymbol, expiryContracts, underlying, rollingSelectionMode);
       if (required.length > MAX_DYNAMIC_HISTORY_CONTRACTS) {
-        throw new Error(`Rolling selection needs ${required.length} source contracts; the maximum is ${MAX_DYNAMIC_HISTORY_CONTRACTS}.`);
+        throw new Error(`Rolling selection needs ${required.length} source contracts; the maximum is ${MAX_DYNAMIC_HISTORY_CONTRACTS}. Reduce selections or switch to Raw rolling mode.`);
       }
       const optionCandleResults = await fetchOptionHistory(required, from, to, timeframe);
       const fixed = fixedSelections.flatMap((selection) => fixedBySymbol[selection.tradingSymbol] ? [fixedBySymbol[selection.tradingSymbol]] : []);
@@ -140,7 +191,7 @@ function GreekAnalysisWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [expiry, fixedSelections, selections, symbol, timeframe]);
+  }, [expiry, fixedSelections, replayInstruments, replayIsActive, replaySymbol, replayTimeline, rollingSelectionMode, selections, symbol, timeframe]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -149,16 +200,30 @@ function GreekAnalysisWorkspace() {
   // strike boundary.
   const { ticks: underlyingTicks } = useMarketData(symbol ? [symbol] : []);
   const spot = underlyingTicks[symbol]?.last_price ?? underlyingCandles[underlyingCandles.length - 1]?.close ?? defaultSpotFallback(symbol);
-  const currentResolved = useMemo(() => currentResolvedInstruments(selections, Object.fromEntries(selected.map((item) => [item.trading_symbol, item])), expiryInstruments, spot), [selections, selected, expiryInstruments, spot]);
-  const liveSymbols = useMemo(() => Object.values(currentResolved).flatMap((instrument) => instrument ? [instrument.trading_symbol] : []), [currentResolved]);
+  const fixedBySymbol = useMemo(() => Object.fromEntries(selected.map((item) => [item.trading_symbol, item])), [selected]);
+  const currentResolved = useMemo(() => currentResolvedSelections(selections, fixedBySymbol, expiryInstruments, spot, rollingSelectionMode), [selections, fixedBySymbol, expiryInstruments, spot, rollingSelectionMode]);
+  const liveSymbols = useMemo(() => Array.from(new Set(Object.values(currentResolved).flatMap((resolution) => resolution?.components.map(({ instrument }) => instrument.trading_symbol) ?? []))), [currentResolved]);
   const { ticks: optionTicks } = useMarketData(liveSymbols);
   const ticks = useMemo(() => ({ ...underlyingTicks, ...optionTicks }), [underlyingTicks, optionTicks]);
   const riskFreeRate = riskFreeRateForSymbol(symbol);
-  const historicalGreekSeries = useMemo(() => buildResolvedGreekSeries(selectionPaths, candles, underlyingCandles, riskFreeRate), [selectionPaths, candles, underlyingCandles, riskFreeRate]);
+  const historicalGreekSeries = useMemo(() => buildResolvedGreekSeries(selectionPaths, candles, underlyingCandles, riskFreeRate, selections, fixedBySymbol, expiryInstruments, rollingSelectionMode), [selectionPaths, candles, underlyingCandles, riskFreeRate, selections, fixedBySymbol, expiryInstruments, rollingSelectionMode]);
   const historicalCombinedSeries = useMemo(() => combineGreekSeries(historicalGreekSeries), [historicalGreekSeries]);
-  const resolvedLiveInstruments = useMemo(() => Object.values(currentResolved).flatMap((instrument) => instrument ? [instrument] : []), [currentResolved]);
-  const liveGreeks = useMemo(() => resolvedLiveInstruments.length === selections.length ? calculateLiveCombinedGreeks(resolvedLiveInstruments, symbol, ticks, riskFreeRate) : null, [resolvedLiveInstruments, selections.length, symbol, ticks, riskFreeRate]);
-  const greekSeries = useMemo(() => appendLiveGreekValues(historicalCombinedSeries, liveGreeks), [historicalCombinedSeries, liveGreeks]);
+  const resolvedLiveSelections = useMemo(() => selections.map((selection) => currentResolved[selection.id] ?? null), [selections, currentResolved]);
+  const liveGreeks = useMemo(() => calculateLiveResolvedGreeks(resolvedLiveSelections, symbol, ticks, riskFreeRate), [resolvedLiveSelections, symbol, ticks, riskFreeRate]);
+  const replayCombinedSeries = useMemo(() => {
+    if (!replayIsActive || replaySymbol !== symbol || replayTimeline.length === 0) return null;
+    return combineGreekSeries(buildReplayResolvedGreekSeries(
+      selections,
+      fixedBySymbol,
+      expiryInstruments,
+      replayTimeline,
+      replayStep,
+      symbol,
+      riskFreeRate,
+      rollingSelectionMode,
+    ));
+  }, [expiryInstruments, fixedBySymbol, replayIsActive, replayStep, replaySymbol, replayTimeline, riskFreeRate, rollingSelectionMode, selections, symbol]);
+  const greekSeries = useMemo(() => appendLiveGreekValues(replayCombinedSeries ?? historicalCombinedSeries, liveGreeks), [historicalCombinedSeries, liveGreeks, replayCombinedSeries]);
 
   // Spot / DTE / ATM IV / ATM theoretical price — a one-shot summary
   // computed from data already fetched above, purely for the summary strip.
@@ -167,7 +232,8 @@ function GreekAnalysisWorkspace() {
     const spot = ticks[symbol]?.last_price
       ?? underlyingCandles[underlyingCandles.length - 1]?.close
       ?? defaultSpotFallback(symbol);
-    const dte = Math.round(timeToExpiry(expiry) * 365);
+    const valuationTime = tickTimeMs(ticks[symbol]?.timestamp) ?? Date.now();
+    const dte = Math.round(timeToExpiry(expiry, valuationTime) * 365);
 
     const strikes = selected.map((instrument) => instrument.strike).filter((strike): strike is number => strike != null);
     let atmIv: number | null = null;
@@ -179,7 +245,7 @@ function GreekAnalysisWorkspace() {
       if (atmInstrument?.option_type) {
         const latestPrice = ticks[atmInstrument.trading_symbol]?.last_price
           ?? candles[atmInstrument.trading_symbol]?.[candles[atmInstrument.trading_symbol].length - 1]?.close;
-        const T = timeToExpiry(expiry);
+        const T = timeToExpiry(expiry, valuationTime);
         if (latestPrice) {
           const iv = calculateImpliedVolatility(atmInstrument.option_type, spot, atmStrike, T, riskFreeRate, latestPrice);
           if (iv > 0) {
@@ -234,6 +300,11 @@ function GreekAnalysisWorkspace() {
           onTimeframeChange={(nextTimeframe) => setTimeframe(nextTimeframe as typeof timeframe)}
           syncCharts={syncCharts}
           onToggleSyncCharts={() => setSyncCharts((current) => !current)}
+          rollingSelectionMode={rollingSelectionMode}
+          rollingToggleDisabled={dynamicSelections.length === 0}
+          onToggleRollingMode={() => updatePreferences((current) => ({ ...current, optionChain: { ...current.optionChain, rollingSelectionMode: current.optionChain.rollingSelectionMode === "smooth" ? "raw" : "smooth" } }))}
+          replayActive={replayIsActive && replaySymbol === symbol}
+          replaySessionDate={replaySessionDate}
         />
 
         <div className={educationOpen ? "grid items-start gap-4 xl:grid-cols-[280px_minmax(0,1fr)]" : ""}>
@@ -249,7 +320,7 @@ function GreekAnalysisWorkspace() {
               <section className="panel"><EmptyState title="The selected contracts are no longer available for this expiry." /></section>
             ) : (
               <>
-                <SelectedStrikesCard instruments={selected} expiry={expiry} rollingSelections={dynamicSelections.map((selection) => ({ label: dynamicSelectionLabel(selection), instrument: currentResolved[selection.id] ?? null }))} />
+                <SelectedStrikesCard instruments={selected} expiry={expiry} rollingSelections={dynamicSelections.map((selection) => ({ label: dynamicSelectionLabel(selection), resolution: currentResolved[selection.id] ?? null }))} />
                 <WorkspaceSummaryStrip
                   spot={summary.spot}
                   dte={summary.dte}
@@ -258,23 +329,6 @@ function GreekAnalysisWorkspace() {
                   liveContracts={liveContracts}
                   totalContracts={totalContracts}
                 />
-
-                <div>
-                  <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]">Featured</h2>
-                  <GreekPanelSection
-                    metrics={FEATURED_GREEKS}
-                    visibleGreeks={FEATURED_GREEKS}
-                    syncIdPrefix="featured"
-                    greekSeries={greekSeries}
-                    liveContracts={liveContracts}
-                    totalContracts={totalContracts}
-                    panelLayoutFor={panelLayoutFor}
-                    onLayoutChange={updatePanelLayout}
-                    onRequestAlert={dynamicSelections.length ? () => undefined : requestAlert}
-                    alertsDisabled={dynamicSelections.length > 0}
-                    alertDisabledReason="Rolling ATM/OTM/ITM selections cannot be saved as durable broker-contract alerts."
-                  />
-                </div>
 
                 <GreekMetricSelector
                   activeTab={activeTab}

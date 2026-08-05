@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import { MarketTick } from "@/types/market";
+import { mergeMarketTick } from "@/lib/marketTick";
 
 interface TickState {
   ticks: Record<string, MarketTick>;
   setTick: (tick: MarketTick) => void;
   setTicks: (ticks: MarketTick[]) => void;
+  clear: () => void;
 }
 
 /**
@@ -16,11 +18,17 @@ interface TickState {
 export const useTickStore = create<TickState>((set) => ({
   ticks: {},
   setTick: (tick) =>
-    set((state) => ({ ticks: { ...state.ticks, [tick.trading_symbol]: tick } })),
+    set((state) => ({
+      ticks: {
+        ...state.ticks,
+        [tick.trading_symbol]: mergeMarketTick(state.ticks[tick.trading_symbol], tick),
+      },
+    })),
   setTicks: (ticks) =>
     set((state) => {
       const updated = { ...state.ticks };
-      for (const tick of ticks) updated[tick.trading_symbol] = tick;
+      for (const tick of ticks) updated[tick.trading_symbol] = mergeMarketTick(updated[tick.trading_symbol], tick);
       return { ticks: updated };
     }),
+  clear: () => set({ ticks: {} }),
 }));

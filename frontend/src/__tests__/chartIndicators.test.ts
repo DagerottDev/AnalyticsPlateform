@@ -18,4 +18,9 @@ describe("chart indicator definitions", () => {
     expect(CHART_INDICATOR_DEFINITIONS.every((indicator) => indicator.parameters.length > 0)).toBe(true);
     expect(indicatorParameter(undefined, "rsi", "period")).toBe(14);
   });
+
+  it("uses integer values for Supertrend multipliers", () => {
+    const supertrend = CHART_INDICATOR_DEFINITIONS.find((indicator) => indicator.id === "supertrend");
+    expect(supertrend?.parameters.find((parameter) => parameter.key === "multiplier")).toMatchObject({ min: 1, max: 10, step: 1 });
+  });
 });

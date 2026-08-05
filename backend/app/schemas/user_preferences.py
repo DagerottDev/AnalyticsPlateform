@@ -14,6 +14,8 @@ ReplayResolution = Literal["1", "5", "15"]
 ReplaySpeed = Literal[1, 5, 10, 100]
 OptionSide = Literal["BOTH", "CE", "PE"]
 MoneynessFilter = Literal["all", "itm", "atm", "otm"]
+RollingSelectionMode = Literal["smooth", "raw"]
+PremiumChartSeriesType = Literal["candlestick", "line"]
 GreekOverlay = Literal["none", "sma", "ema", "bbands", "supertrend"]
 GreekMetric = Literal[
     "delta", "gamma", "theta", "vega", "rho", "vanna", "vomma", "charm",
@@ -123,8 +125,9 @@ class OptionChainPreferences(PreferenceModel):
     show_greeks: bool = True
     show_buildup: bool = True
     moneyness: MoneynessFilter = "all"
-    strikes_each_side: Literal[5, 10, 20] | None = None
+    strikes_each_side: Literal[5, 10, 20] | None = 10
     default_gtt_validity_days: int = Field(30, ge=1)
+    rolling_selection_mode: RollingSelectionMode = "smooth"
 
 
 class GreekPanelPreferences(PreferenceModel):
@@ -152,6 +155,31 @@ class GreekWorkspacePreferences(PreferenceModel):
         if len(set(value)) != len(value):
             raise ValueError("visible_greeks cannot contain duplicates")
         return value
+
+
+def _premium_indicators() -> ChartIndicatorsPreferences:
+    indicators = ChartIndicatorsPreferences()
+    indicators.ema.enabled = True
+    return indicators
+
+
+def _premium_indicator_map() -> dict[Literal["calls", "puts", "both"], ChartIndicatorsPreferences]:
+    return {
+        "calls": _premium_indicators(),
+        "puts": _premium_indicators(),
+        "both": _premium_indicators(),
+    }
+
+
+class CombinedPremiumWorkspacePreferences(PreferenceModel):
+    """Saved display-only controls for synthetic combined-premium charts."""
+
+    timeframe: Timeframe = "5"
+    sync_charts: bool = True
+    series_type: PremiumChartSeriesType = "candlestick"
+    indicators: dict[Literal["calls", "puts", "both"], ChartIndicatorsPreferences] = Field(
+        default_factory=_premium_indicator_map
+    )
 
 
 class ReplayPreferences(PreferenceModel):
@@ -238,6 +266,9 @@ class UserPreferences(PreferenceModel):
         default_factory=lambda: OptionChainPreferences.model_validate({})
     )
     greek_workspace: GreekWorkspacePreferences = Field(default_factory=GreekWorkspacePreferences)
+    combined_premium_workspace: CombinedPremiumWorkspacePreferences = Field(
+        default_factory=CombinedPremiumWorkspacePreferences
+    )
     replay: ReplayPreferences = Field(default_factory=ReplayPreferences)
     analytics: AnalyticsPreferences = Field(default_factory=AnalyticsPreferences)
     strategy: StrategyPreferences = Field(

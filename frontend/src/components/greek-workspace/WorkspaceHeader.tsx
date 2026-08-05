@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { EducationPopover } from "@/components/ui/EducationPopover";
 import { Select } from "@/components/ui/Select";
 import { CORE_GREEKS_REFERENCE } from "@/lib/greekEducation";
+import type { RollingSelectionMode } from "@/lib/analysisSelections";
 
 interface WorkspaceHeaderProps {
   symbol: string;
@@ -22,12 +23,18 @@ interface WorkspaceHeaderProps {
   onToggleSyncCharts?: () => void;
   alertsDisabled?: boolean;
   alertDisabledReason?: string;
+  rollingSelectionMode?: RollingSelectionMode;
+  rollingToggleDisabled?: boolean;
+  onToggleRollingMode?: () => void;
+  replayActive?: boolean;
+  replaySessionDate?: string;
 }
 
 export function WorkspaceHeader({
   symbol, expiry, selectedCount, loading, educationOpen, layoutMessage,
   onShowEducation, onSave, onRefresh, onCreateAlert,
   timeframe, onTimeframeChange, syncCharts = false, onToggleSyncCharts = () => undefined, alertsDisabled = false, alertDisabledReason,
+  rollingSelectionMode = "smooth", rollingToggleDisabled = false, onToggleRollingMode = () => undefined, replayActive = false, replaySessionDate,
 }: WorkspaceHeaderProps) {
   return (
     <header className="flex flex-col gap-3 border-b border-[var(--color-border-default)] pb-4 lg:flex-row lg:items-center lg:justify-between">
@@ -52,6 +59,7 @@ export function WorkspaceHeader({
           <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
             {symbol || "No instrument"}{expiry ? ` · ${expiry}` : ""} · {selectedCount} selected contracts
           </p>
+          {replayActive && <p className="mt-1 inline-flex w-fit items-center rounded-full border border-[var(--color-accent-blue)]/40 bg-[var(--color-accent-blue)]/10 px-2 py-0.5 text-xs font-semibold text-[var(--color-accent-blue)]">Replay feed{replaySessionDate ? ` · ${replaySessionDate}` : ""}</p>}
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">History focus: recent session · {timeframe}-minute candles</p>
           {layoutMessage && <p className="mt-1 text-xs text-[var(--color-profit)]" role="status">{layoutMessage}</p>}
         </div>
@@ -67,14 +75,17 @@ export function WorkspaceHeader({
             <option value="15">15 minutes</option>
           </Select>
         </label>
+        <Button variant={rollingSelectionMode === "smooth" ? "primary" : "outline"} size="sm" onClick={onToggleRollingMode} disabled={rollingToggleDisabled} aria-pressed={rollingSelectionMode === "smooth"} title={rollingToggleDisabled ? "Add a rolling ATM/OTM/ITM selection to change this mode." : "Smooth blends adjacent strikes by distance; Raw uses one exact rolled contract."}>
+          {rollingSelectionMode === "smooth" ? "Smooth rolling" : "Raw rolling"}
+        </Button>
         <Button variant="outline" size="sm" onClick={onCreateAlert} disabled={alertsDisabled} title={alertDisabledReason}><BellPlus className="h-4 w-4" /> Create alert</Button>
         <Button variant="outline" size="sm" onClick={onSave}><Save className="h-4 w-4" /> Save layout</Button>
         {!educationOpen && <Button variant="outline" size="sm" onClick={onShowEducation}><BookOpen className="h-4 w-4" /> Show education</Button>}
         <span className="flex items-center gap-1">
-          <Button variant={syncCharts ? "primary" : "outline"} size="sm" onClick={onToggleSyncCharts} aria-pressed={syncCharts} title="Synchronize the time axis and horizontal zoom across every Greek chart">
+          <Button variant={syncCharts ? "primary" : "outline"} size="sm" onClick={onToggleSyncCharts} aria-pressed={syncCharts} title="Synchronize the time axis, horizontal zoom, and crosshair across every Greek chart">
             <Link2 className="h-4 w-4" /> {syncCharts ? "Charts synced" : "Sync charts"}
           </Button>
-          <EducationPopover title="Sync chart timing and scale" description="When enabled, dragging or zooming any Greek chart applies the same time window and horizontal zoom to every chart in this workspace." tips={["Turn this on when comparing Greeks at the same moment.", "Turn it off when you want to inspect one chart independently.", "Each Greek keeps its own value axis because Greeks use different units and magnitudes."]} links={[{ label: "TradingView: compare charts", href: "https://www.tradingview.com/support/solutions/43000543033-how-to-synchronize-charts/" }]} />
+          <EducationPopover title="Sync chart timing, scale, and crosshair" description="When enabled, dragging or zooming any Greek chart applies the same time window to every chart. Hovering a chart also moves the vertical crosshair to the matching time on the other charts." tips={["Turn this on when comparing Greeks at the same moment.", "Turn it off when you want to inspect one chart independently.", "Each Greek keeps its own value axis because Greeks use different units and magnitudes."]} links={[{ label: "TradingView: compare charts", href: "https://www.tradingview.com/support/solutions/43000543033-how-to-synchronize-charts/" }]} />
         </span>
         <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}><RefreshCw className="h-4 w-4" /> Refresh {timeframe}m</Button>
       </div>

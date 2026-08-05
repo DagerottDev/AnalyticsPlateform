@@ -23,7 +23,9 @@ services:
     build:
       target: development
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8001
+      # start.sh supplies localhost:8080 when mitmweb tracing is enabled.
+      # Keep the direct backend route for normal local development.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
       WATCHPACK_POLLING: "true"
     volumes:
       - ../frontend:/app

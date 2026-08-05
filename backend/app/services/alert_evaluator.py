@@ -18,6 +18,7 @@ from app.schemas.market import Instrument
 from app.services.alert_delivery import DeliveryEvent, dispatch_alert_delivery
 from app.services.greeks import calculate_greeks, calculate_implied_volatility
 from app.services.lot_size_store import lot_size_store
+from app.services.option_math import time_to_expiry
 from app.services.session_manager import session_manager
 
 if TYPE_CHECKING:
@@ -40,8 +41,8 @@ def _time_to_expiry(expiry: object) -> float:
         return 0.0001
     for pattern in ("%d-%b-%Y", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S.%fZ"):
         try:
-            expires = datetime.strptime(expiry, pattern).replace(hour=15, minute=30, tzinfo=UTC)
-            return max((expires - datetime.now(UTC)).total_seconds() / (365 * 24 * 60 * 60), 0.0001)
+            expires = datetime.strptime(expiry, pattern).replace(tzinfo=UTC)
+            return time_to_expiry(expires)
         except ValueError:
             continue
     return 0.0001

@@ -12,6 +12,8 @@ import {
 } from "recharts";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ChartDataTable } from "@/components/charts/ChartDataTable";
+import { ChartZoomControls } from "@/components/charts/ChartZoomControls";
+import { useCategoryChartZoom } from "@/hooks/useCategoryChartZoom";
 
 interface TermStructureChartProps {
   data: {
@@ -29,6 +31,7 @@ export function TermStructureChart({ data }: TermStructureChartProps) {
         "ATM IV": Number((d.atmIV * 100).toFixed(2)),
       }));
   }, [data]);
+  const zoom = useCategoryChartZoom(chartData);
 
   if (!chartData || chartData.length === 0) {
     return (
@@ -40,10 +43,10 @@ export function TermStructureChart({ data }: TermStructureChartProps) {
 
   return (
     <div className="panel flex flex-col gap-2">
-      <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Volatility Term Structure</h3>
+      <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-bold text-[var(--color-text-bright)]">Volatility Term Structure</h3><ChartZoomControls label="volatility term structure" onZoomIn={zoom.zoomIn} onZoomOut={zoom.zoomOut} onReset={zoom.resetZoom} /></div>
       <div role="img" aria-label={`Volatility term structure line chart across ${chartData.length} expiries. Exact at-the-money implied volatility values are available in the following data table.`} className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 30 }}>
+          <LineChart data={zoom.visibleData} margin={{ top: 10, right: 10, left: 0, bottom: 30 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" vertical={false} />
             <XAxis
               dataKey="expiry"

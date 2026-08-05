@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getExpiries, searchSymbols } from "@/lib/market";
-import { latestExpiry } from "@/lib/expiry";
+import { nearestExpiry } from "@/lib/expiry";
 import { formatApiError } from "@/lib/apiError";
 import { ChevronDown, RefreshCw, Search, Star, StarOff } from "lucide-react";
 import { Select } from "@/components/ui/Select";
@@ -52,7 +52,7 @@ export function InstrumentSelector({
         if (isMounted) {
           setExpiriesError(null);
           setExpiries(data.expiries);
-          const defaultExpiry = latestExpiry(data.expiries);
+          const defaultExpiry = nearestExpiry(data.expiries);
           if (
             defaultExpiry &&
             !data.expiries.includes(selectedExpiryRef.current || "")

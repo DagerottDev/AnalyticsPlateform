@@ -24,8 +24,10 @@ import { ChartDataTable } from "@/components/charts/ChartDataTable";
 import { Tabs } from "@/components/ui/Tabs";
 import { SelectedStrikesCard } from "@/components/greek-workspace/SelectedStrikesCard";
 import { WorkspaceHeader } from "@/components/greek-workspace/WorkspaceHeader";
+import { GreekMetricSelector } from "@/components/greek-workspace/GreekMetricSelector";
 import { OpenInterestTotalsChart } from "@/components/open-interest/OpenInterestTotalsChart";
 import { OpenInterestTimeSeriesChart } from "@/components/open-interest/OpenInterestTimeSeriesChart";
+import { NumericParameterInput } from "@/components/charts/NumericParameterInput";
 
 describe("core UI components", () => {
   it("navigates and collapses the sidebar", () => {
@@ -33,6 +35,11 @@ describe("core UI components", () => {
     fireEvent.click(screen.getByRole("button", { name: "Charts" }));
     expect(push).toHaveBeenCalledWith("/charts");
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
+  });
+
+  it("can start the sidebar collapsed for chart workspaces", () => {
+    render(<Sidebar initialCollapsed />);
     expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
   });
 
@@ -52,12 +59,63 @@ describe("core UI components", () => {
     expect(screen.getByText("Add strategy legs to view payoff profile.")).toBeTruthy();
   });
 
+  it("allows a Supertrend multiplier to be cleared while editing and commits an integer", () => {
+    const onValueChange = vi.fn();
+    render(
+      <NumericParameterInput
+        ariaLabel="Supertrend multiplier"
+        value={3}
+        min={1}
+        max={10}
+        step={1}
+        integer
+        onValueChange={onValueChange}
+      />
+    );
+
+    const input = screen.getByRole("spinbutton", { name: "Supertrend multiplier" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input.value).toBe("");
+    fireEvent.change(input, { target: { value: "5" } });
+    expect(onValueChange).toHaveBeenLastCalledWith(5);
+    fireEvent.change(input, { target: { value: "2.5" } });
+    fireEvent.blur(input);
+    expect(onValueChange).toHaveBeenLastCalledWith(3);
+  });
+
+  it("zooms the payoff profile around spot and can reset the view", () => {
+    render(
+      <PayoffChart
+        currentSpot={22000}
+        data={[
+          { strike: 21000, profitAtExpiry: -100, profitT0: -80 },
+          { strike: 21500, profitAtExpiry: -50, profitT0: -40 },
+          { strike: 22000, profitAtExpiry: 0, profitT0: 0 },
+          { strike: 22500, profitAtExpiry: 50, profitT0: 40 },
+          { strike: 23000, profitAtExpiry: 100, profitT0: 80 },
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Full range")).toBeTruthy();
+    const zoomOut = screen.getByRole("button", { name: "Zoom out payoff profile" }) as HTMLButtonElement;
+    expect(zoomOut.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in payoff profile" }));
+    expect(screen.getByText("Zoom: 1.6×")).toBeTruthy();
+    expect(zoomOut.disabled).toBe(false);
+
+    fireEvent.contextMenu(screen.getByRole("img", { name: /strategy payoff profile/i }));
+    expect(screen.getByText("Full range")).toBeTruthy();
+    expect(zoomOut.disabled).toBe(true);
+  });
+
   it("renders the option-chain empty state after a successful fetch", async () => {
     render(<OptionChain symbol="NIFTY" expiry="2026-08-27" />);
     await waitFor(() => expect(screen.getByText("No contracts found for selected expiry.")).toBeTruthy());
   });
 
-  it("uses the broker previous close for a closed-market option snapshot", () => {
+  it("keeps the broker last price for a closed-market option snapshot", () => {
     const quote = toClosedMarketQuote({
       trading_symbol: "NSE:NIFTY26JUL23000CE",
       last_price: 999,
@@ -69,7 +127,7 @@ describe("core UI components", () => {
       change_percent: 1.4,
     });
 
-    expect(quote.last_price).toBe(125.5);
+    expect(quote.last_price).toBe(999);
     expect(quote.change).toBe(0);
     expect(quote.change_percent).toBe(0);
   });
@@ -142,6 +200,26 @@ describe("core UI components", () => {
 
     fireEvent.change(screen.getByRole("combobox", { name: "Greek workspace timeframe" }), { target: { value: "15" } });
     expect(onTimeframeChange).toHaveBeenCalledWith("15");
+  });
+
+  it("starts the Greek dashboard panel controls collapsed", () => {
+    render(
+      <GreekMetricSelector
+        activeTab="core"
+        onTabChange={vi.fn()}
+        visibleGreeks={["delta"]}
+        onToggle={vi.fn()}
+        liveCoverageLabel="1/1"
+      />
+    );
+
+    const toggle = screen.getByRole("button", { name: "Dashboard panels" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("tab", { name: "Core Greeks" })).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Core Greeks" })).toBeTruthy();
   });
 
   it("shows aggregate call and put OI with its broker-baseline session change", () => {

@@ -1,12 +1,10 @@
-"""Static reference list of NSE F&O-eligible stock symbols, used to power
-the "Or Stock Symbol" autocomplete in InstrumentSelector.tsx.
+"""Fallback reference list of NSE F&O stock symbols.
 
-Fyers' SDK exposes no symbol-search API (only an option chain per known
-symbol), so there's no live source to query against. The F&O eligible-stock
-list changes quarterly via NSE circulars — this snapshot will drift over
-time and should be refreshed periodically. It only gates suggestions, not
-what a user can enter: any symbol typed manually still submits on Enter/blur
-regardless of whether it appears here.
+The IV screener and Fyers-backed symbol search prefer the live public Fyers
+NSE_FO symbol master. This checked-in snapshot remains a safe fallback for
+startup/network failures and for brokers without a live symbol master.
+It only gates suggestions, not what a user can enter: any symbol typed
+manually still submits on Enter/blur regardless of whether it appears here.
 """
 
 NSE_FO_SYMBOLS: dict[str, str] = {
@@ -38,7 +36,8 @@ NSE_FO_SYMBOLS: dict[str, str] = {
     "NTPC": "NTPC",
     "POWERGRID": "Power Grid Corporation of India",
     "TATASTEEL": "Tata Steel",
-    "TATAMOTORS": "Tata Motors",
+    # Tata Motors' current F&O underlying is TMPV after the demerger.
+    "TMPV": "Tata Motors Passenger Vehicles",
     "JSWSTEEL": "JSW Steel",
     "ONGC": "Oil & Natural Gas Corporation",
     "COALINDIA": "Coal India",
@@ -59,7 +58,8 @@ NSE_FO_SYMBOLS: dict[str, str] = {
     "BPCL": "Bharat Petroleum",
     "HINDALCO": "Hindalco Industries",
     "SHRIRAMFIN": "Shriram Finance",
-    "LTIM": "LTIMindtree",
+    # LTIMindtree's current F&O underlying is LTM.
+    "LTM": "LTIMindtree",
     "ABB": "ABB India",
     "ABCAPITAL": "Aditya Birla Capital",
     "ABFRL": "Aditya Birla Fashion and Retail",
@@ -139,7 +139,10 @@ NSE_FO_SYMBOLS: dict[str, str] = {
     "M&MFIN": "Mahindra & Mahindra Financial Services",
     "MANAPPURAM": "Manappuram Finance",
     "MARICO": "Marico",
-    "MCDOWELL-N": "United Spirits",
+    # NSE renamed MCDOWELL-N to UNITDSPR on 07-Jun-2024. Fyers option-chain
+    # requests reject the retired alias, so the live backfill must use the
+    # current underlying symbol.
+    "UNITDSPR": "United Spirits",
     "METROPOLIS": "Metropolis Healthcare",
     "MFSL": "Max Financial Services",
     "MGL": "Mahanagar Gas",
@@ -189,6 +192,7 @@ NSE_FO_SYMBOLS: dict[str, str] = {
     "VOLTAS": "Voltas",
     "WHIRLPOOL": "Whirlpool of India",
     "ZEEL": "Zee Entertainment Enterprises",
-    "ZOMATO": "Eternal",
+    # Zomato's current listed symbol is ETERNAL.
+    "ETERNAL": "Eternal",
     "ZYDUSLIFE": "Zydus Lifesciences",
 }

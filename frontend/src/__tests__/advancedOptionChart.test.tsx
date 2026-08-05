@@ -59,7 +59,7 @@ describe("advanced option chart", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select test expiry" }));
 
     await waitFor(() => expect(screen.getByRole("option", { name: "22,500" })).toBeTruthy());
-    fireEvent.change(screen.getByLabelText("Strike price"), { target: { value: "22500" } });
+    await waitFor(() => expect((screen.getByLabelText("Strike price") as HTMLSelectElement).value).toBe("22500"));
 
     await waitFor(() => expect(market.getHistoricalCandles).toHaveBeenCalledWith(
       "NSE:NIFTY2682822500CE",

@@ -41,6 +41,7 @@ def _patch_session_maker(db_session: AsyncSession, monkeypatch):
     monkeypatch.setattr(
         basket_monitor, "async_session_maker", lambda: _FakeSessionContext(db_session)
     )
+    monkeypatch.setattr(basket_monitor, "is_regular_market_open", lambda **_: True)
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +63,25 @@ async def test_skips_entirely_without_an_active_broker_session(
 
     baskets = await load_open_baskets(db_session)
     assert baskets[0].legs[0]["status"] == "Open"  # untouched
+
+
+@pytest.mark.asyncio
+async def test_does_not_submit_fno_exits_after_market_close(
+    test_settings: Settings, db_session: AsyncSession, monkeypatch
+):
+    service = AsyncMock()
+    await session_manager.set_session("TEST_CLIENT_001", service)
+    await create_basket(
+        db_session, owner_id="TEST_CLIENT_001",
+        legs=[_leg("NFO:A", entry=100.0, target=1.0)],
+        combined_stop_loss=None, combined_take_profit=None,
+    )
+    monkeypatch.setattr(basket_monitor, "is_regular_market_open", lambda **_: False)
+
+    await basket_monitor.run_basket_monitor(test_settings)
+
+    service.get_quotes.assert_not_awaited()
+    service.place_order.assert_not_awaited()
 
 
 @pytest.mark.asyncio

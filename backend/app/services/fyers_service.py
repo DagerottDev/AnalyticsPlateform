@@ -33,6 +33,14 @@ _REVERSE_INDEX_SYMBOL_MAP = {
     "NSE:MIDCPNIFTY-INDEX": "MIDCPNIFTY",
     "BSE:SENSEX-INDEX": "SENSEX",
 }
+# NSE/Fyers renamed these cash and derivative underlyings. Keep accepting the
+# legacy UI aliases while sending the current exchange symbols to every broker
+# endpoint. The live Fyers NSE_FO master currently exposes TMPV and LTM.
+_CURRENT_UNDERLYING_ALIASES = {
+    "TATAMOTORS": "TMPV",
+    "LTIM": "LTM",
+    "ZOMATO": "ETERNAL",
+}
 
 
 def to_fyers_ws_symbol(symbol: str) -> str:
@@ -66,6 +74,11 @@ def from_fyers_ws_symbol(fyers_symbol: str) -> str:
 class FyersService(BrokerService):
     """Service for interacting with Fyers API."""
 
+    # Fyers' history endpoint accepts exchange-qualified option symbols, so it
+    # can provide the optional historical ATM-IV seed used by the screener.
+    supports_historical_options = True
+    supports_live_fno_symbol_master = True
+
     # Fyers' optionchain endpoint returns one expiry's chain per call (plus
     # the full expiry list every time) — these bound how many expiries/strikes
     # get_instruments fetches so it stays fast and doesn't hammer rate limits
@@ -89,6 +102,12 @@ class FyersService(BrokerService):
     # connectivity failure (common for symbols in a broad static universe).
     _NO_EXPIRY_CONTRACT_CODE = -470
     _NO_CONTRACT_CACHE_TTL_SECONDS = 10 * 60
+    # Fyers occasionally responds with -99/"Bad request" for an otherwise
+    # valid option-chain request during expiry rollover or a short request
+    # burst. Keep all option-chain calls for a broker session on one cadence
+    # and retry that transient response instead of surfacing a false 503.
+    _OPTION_CHAIN_REQUEST_MIN_INTERVAL_SECONDS = 0.1
+    _OPTION_CHAIN_RETRYABLE_CODES = _RETRYABLE_CODES | {-99}
     # A Greek workspace may request one underlying plus ten option histories
     # at once. FYERS rate-limits the history API independently and those
     # bursts can consume capacity needed by the live quote fallback. Serialize
@@ -108,6 +127,11 @@ class FyersService(BrokerService):
     _ORDER_TYPE_NAMES = {value: key for key, value in _ORDER_TYPE_CODES.items()}
     # Fyers' bulk-placement endpoint caps a single call at this many legs.
     _MAX_BASKET_ORDERS = 10
+    # Keep quote requests below the broker's practical batch limit. Option
+    # Chain subscribes to one underlying plus many contracts, so sending the
+    # whole chain as one quotes request can make Fyers reject the request and
+    # leave the UI stuck on its fallback spot price.
+    _QUOTE_BATCH_SIZE = 40
 
     def __init__(
         self,
@@ -133,6 +157,8 @@ class FyersService(BrokerService):
         # into a single fetch instead of each independently bursting
         # 1 + _MAX_EXPIRIES_FETCHED calls at Fyers at the same moment.
         self._instruments_locks: dict[str, asyncio.Lock] = {}
+        self._option_chain_request_lock = asyncio.Lock()
+        self._next_option_chain_request_at = 0.0
         self._history_request_lock = asyncio.Lock()
         self._next_history_request_at = 0.0
         self._market_stream: FyersMarketStreamManager | None = None
@@ -230,6 +256,17 @@ class FyersService(BrokerService):
         if not symbols:
             return []
 
+        # Fyers may reject a large option-chain quote request as a whole. Run
+        # bounded requests sequentially so one rejected batch cannot hide the
+        # underlying quote or the successful contracts in other batches.
+        if len(symbols) > self._QUOTE_BATCH_SIZE:
+            quotes: list[dict[str, Any]] = []
+            for start in range(0, len(symbols), self._QUOTE_BATCH_SIZE):
+                quotes.extend(
+                    await self.get_quotes(symbols[start : start + self._QUOTE_BATCH_SIZE])
+                )
+            return quotes
+
         # Callers pass either a bare underlying alias ("NIFTY") or an
         # already-exchange-qualified option/equity trading symbol
         # ("NSE:NIFTY26JUL23000PE") straight from the instrument list —
@@ -253,11 +290,21 @@ class FyersService(BrokerService):
                 if lp is None or not isinstance(lp, int | float):
                     continue
 
-                open_price = val.get("open_price") or cmd.get("o") or cmd.get("open_price") or 0.0
+                # Fyers has returned both descriptive keys (``open_price``,
+                # ``high_price`` …) and compact OHLC keys (``o``, ``h`` …)
+                # across quote API versions. Accept both layouts so the
+                # dashboard's snapshot fields are populated consistently.
+                open_price = (
+                    val.get("open_price")
+                    or val.get("o")
+                    or cmd.get("o")
+                    or cmd.get("open_price")
+                    or 0.0
+                )
                 prev_close = (
                     val.get("prev_close_price")
-                    or cmd.get("c")
                     or val.get("c")
+                    or cmd.get("c")
                     or cmd.get("prev_close_price")
                     or open_price
                 )
@@ -274,8 +321,20 @@ class FyersService(BrokerService):
                 elif chp is None:
                     chp = 0.0
 
-                high_price = val.get("high_price") or cmd.get("h") or cmd.get("high_price") or 0.0
-                low_price = val.get("low_price") or cmd.get("l") or cmd.get("low_price") or 0.0
+                high_price = (
+                    val.get("high_price")
+                    or val.get("h")
+                    or cmd.get("h")
+                    or cmd.get("high_price")
+                    or 0.0
+                )
+                low_price = (
+                    val.get("low_price")
+                    or val.get("l")
+                    or cmd.get("l")
+                    or cmd.get("low_price")
+                    or 0.0
+                )
                 ask = val.get("ask") or cmd.get("ask") or 0.0
                 bid = val.get("bid") or cmd.get("bid") or 0.0
                 atp = val.get("atp") or cmd.get("atp") or 0.0
@@ -286,7 +345,13 @@ class FyersService(BrokerService):
                         "symbol": ui_symbol,
                         "trading_symbol": ui_symbol,
                         "last_price": float(lp),
-                        "volume": int(cmd.get("v") or cmd.get("volume") or val.get("volume") or 0),
+                        "volume": int(
+                            cmd.get("v")
+                            or cmd.get("volume")
+                            or val.get("volume")
+                            or val.get("v")
+                            or 0
+                        ),
                         "open_interest": 0,
                         "change": float(ch),
                         "change_percent": float(chp),
@@ -312,7 +377,8 @@ class FyersService(BrokerService):
         underlying format — indices use their exchange INDEX symbol,
         everything else is treated as an NSE equity."""
         upper = symbol.upper()
-        return _INDEX_SYMBOL_MAP.get(upper, f"NSE:{upper}-EQ")
+        canonical = _CURRENT_UNDERLYING_ALIASES.get(upper, upper)
+        return _INDEX_SYMBOL_MAP.get(canonical, f"NSE:{canonical}-EQ")
 
     async def _fetch_option_chain(
         self, symbol: str, strikecount: int, expiry_timestamp: str = ""
@@ -332,7 +398,7 @@ class FyersService(BrokerService):
         }
         last_response: dict[str, Any] = {}
         for attempt in range(self._MAX_FETCH_RETRIES):
-            response = await asyncio.to_thread(self.client.optionchain, payload)
+            response = await self._fetch_option_chain_with_pacing(payload)
             if response and response.get("s") == "ok":
                 return cast(dict[str, Any], response.get("data", {}))
             last_response = response or {}
@@ -341,11 +407,28 @@ class FyersService(BrokerService):
             if last_response.get("code") == self._NO_EXPIRY_CONTRACT_CODE:
                 return None
             is_last_attempt = attempt == self._MAX_FETCH_RETRIES - 1
-            if last_response.get("code") not in self._RETRYABLE_CODES or is_last_attempt:
+            if (
+                last_response.get("code") not in self._OPTION_CHAIN_RETRYABLE_CODES
+                or is_last_attempt
+            ):
                 break
             delay = compute_backoff_delay(attempt, self._RETRY_BASE_DELAY_SECONDS)
             await asyncio.sleep(delay)
         raise BrokerConnectionError(f"Fyers option chain request failed: {last_response}")
+
+    async def _fetch_option_chain_with_pacing(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Start option-chain requests on one safe cadence per broker session."""
+        async with self._option_chain_request_lock:
+            now = time.monotonic()
+            delay = self._next_option_chain_request_at - now
+            self._next_option_chain_request_at = max(now, self._next_option_chain_request_at) + (
+                self._OPTION_CHAIN_REQUEST_MIN_INTERVAL_SECONDS
+            )
+        if delay > 0:
+            await asyncio.sleep(delay)
+        return await asyncio.to_thread(self.client.optionchain, payload)
 
     async def get_instruments(self, symbol: str) -> list[dict[str, Any]]:
         """Fetch option contracts for a symbol across its near-term expiries.

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from app.config import Settings
 from app.db.session import async_session_maker
 from app.services import gtt_store
+from app.services.market_session import is_regular_market_open
 from app.services.session_manager import session_manager
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ async def run_gtt_monitor(settings: Settings) -> None:
                 continue
             # Native Dhan owns its trigger decision. Fyers has no GTT endpoint.
             if order.broker_name.lower() != "fyers":
+                continue
+            if not is_regular_market_open(segment="fno"):
                 continue
             try:
                 quotes = await service.get_quotes([order.symbol])

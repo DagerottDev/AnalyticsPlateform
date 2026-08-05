@@ -8,6 +8,7 @@ import { useTickStore } from "@/stores/tickStore";
 import { useReplayStore } from "@/stores/replayStore";
 import { MarketTick } from "@/types/market";
 import { useNseMarketSession } from "@/hooks/useNseMarketSession";
+import { isFnoSymbol } from "@/lib/marketSession";
 
 /**
  * Dummy component (mounted once in the root layout, like AlertEngineMount)
@@ -30,16 +31,37 @@ export function TickerFeedMount() {
   const { user } = useAuth();
   const tickers = useTickerStore((state) => state.tickers);
   const replayIsActive = useReplayStore((state) => state.isActive);
-  const marketSession = useNseMarketSession();
+  const replayTicks = useReplayStore((state) => state.currentTicks);
+  const fnoSession = useNseMarketSession("fno");
+  const cashSession = useNseMarketSession("cash");
   const prevSymbols = useRef<string[]>([]);
+  const wasReplaying = useRef(false);
 
   const handleTick = useCallback((tick: MarketTick) => {
     useTickStore.getState().setTick(tick);
   }, []);
 
+  // The dashboard ticker and other long-lived consumers read the shared tick
+  // store rather than calling useMarketData directly. Mirror every replay
+  // step there as well, so replay is genuinely app-wide instead of limited to
+  // pages that happen to subscribe to the interception hook.
+  useEffect(() => {
+    if (replayIsActive) {
+      wasReplaying.current = true;
+      useTickStore.getState().setTicks(Object.values(replayTicks));
+      return;
+    }
+    if (wasReplaying.current) {
+      wasReplaying.current = false;
+      useTickStore.getState().clear();
+    }
+  }, [replayIsActive, replayTicks]);
+
   useEffect(() => {
     const ws = getWebSocket();
-    const requestedSymbols = user?.client_id && !replayIsActive && marketSession.state === "open" ? tickers : [];
+    const requestedSymbols = user?.client_id && !replayIsActive
+      ? tickers.filter((symbol) => isFnoSymbol(symbol) ? fnoSession.state === "open" : cashSession.state === "open")
+      : [];
 
     const removedSymbols = prevSymbols.current.filter((s) => !requestedSymbols.includes(s));
     if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
@@ -53,7 +75,7 @@ export function TickerFeedMount() {
     }
 
     prevSymbols.current = requestedSymbols;
-  }, [tickers, user?.client_id, replayIsActive, marketSession.state, handleTick]);
+  }, [tickers, user?.client_id, replayIsActive, fnoSession.state, cashSession.state, handleTick]);
 
   return null;
 }

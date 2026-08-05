@@ -1,5 +1,5 @@
 import type { MarketTick } from "@/types/market";
-import { getNseMarketSession } from "@/lib/marketSession";
+import { getNseMarketSession, type MarketSegment } from "@/lib/marketSession";
 
 export type FreshnessState = "waiting" | "live" | "delayed" | "stale" | "closed";
 
@@ -17,9 +17,10 @@ export interface DataFreshness {
  */
 export function describeDataFreshness(
   tick: Pick<MarketTick, "timestamp"> | null | undefined,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  segment: MarketSegment = "fno"
 ): DataFreshness {
-  const marketSession = getNseMarketSession(new Date(nowMs));
+  const marketSession = getNseMarketSession(new Date(nowMs), segment);
   if (marketSession.state !== "open") {
     return { state: "closed", label: marketSession.label, detail: marketSession.detail };
   }
@@ -32,7 +33,7 @@ export function describeDataFreshness(
   const ageLabel = ageSeconds < 60 ? `${ageSeconds}s ago` : `${Math.floor(ageSeconds / 60)}m ago`;
 
   if (ageSeconds <= 15) {
-    return { state: "live", label: `Live · ${ageLabel}`, detail: "Latest broker quote." };
+    return { state: "live", label: "Live", detail: `Latest broker quote (${ageLabel}).` };
   }
   if (ageSeconds <= 60) {
     return { state: "delayed", label: `Delayed · ${ageLabel}`, detail: "Showing the latest quote while the live feed catches up." };

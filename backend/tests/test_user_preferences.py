@@ -15,7 +15,7 @@ def test_settings_migration_is_the_single_alembic_head() -> None:
     config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["0014_create_user_preferences"]
+    assert script.get_heads() == ["0015_open_interest_snapshots"]
 
 
 @pytest.mark.asyncio
@@ -28,6 +28,10 @@ async def test_settings_returns_defaults_without_creating_a_profile(
     body = response.json()
     assert body["persisted"] is False
     assert body["general"]["defaultSymbol"] == "NIFTY"
+    assert body["optionChain"]["strikesEachSide"] == 10
+    assert body["optionChain"]["rollingSelectionMode"] == "smooth"
+    assert body["combinedPremiumWorkspace"]["seriesType"] == "candlestick"
+    assert body["combinedPremiumWorkspace"]["indicators"]["calls"]["ema"]["enabled"] is True
     assert body["charts"]["indicators"]["supertrend"]["parameters"] == {
         "period": 10,
         "multiplier": 3,
@@ -45,6 +49,11 @@ async def test_settings_put_round_trips_normalized_camel_case_payload(
     }
     payload["analytics"]["riskFreeRatePercent"]["NIFTY"] = 7.25
     payload["charts"]["indicators"]["ema"] = {"enabled": True, "parameters": {"period": 34}}
+    payload["optionChain"]["rollingSelectionMode"] = "raw"
+    payload["combinedPremiumWorkspace"]["seriesType"] = "line"
+    payload["combinedPremiumWorkspace"]["indicators"]["both"]["rsi"] = {
+        "enabled": True, "parameters": {"period": 21}
+    }
 
     saved = await client.put("/api/v1/settings", headers=auth_headers, json=payload)
     loaded = await client.get("/api/v1/settings", headers=auth_headers)
@@ -57,6 +66,11 @@ async def test_settings_put_round_trips_normalized_camel_case_payload(
     }
     assert loaded.json()["analytics"]["riskFreeRatePercent"]["NIFTY"] == 7.25
     assert loaded.json()["charts"]["indicators"]["ema"]["parameters"]["period"] == 34
+    assert loaded.json()["optionChain"]["rollingSelectionMode"] == "raw"
+    assert loaded.json()["combinedPremiumWorkspace"]["seriesType"] == "line"
+    combined = loaded.json()["combinedPremiumWorkspace"]
+    both_rsi_period = combined["indicators"]["both"]["rsi"]["parameters"]["period"]
+    assert both_rsi_period == 21
 
 
 @pytest.mark.asyncio

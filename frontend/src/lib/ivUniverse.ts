@@ -9,6 +9,8 @@ export interface IvUniverseSymbol {
   iv_rank: number | null;
   iv_percentile: number | null;
   snapshot_date: string | null;
+  updated_at: string | null;
+  status: "building" | "ready" | "stale";
 }
 
 export interface IvUniverseResponse {

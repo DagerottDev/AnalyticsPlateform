@@ -29,7 +29,10 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { EducationPopover } from "@/components/ui/EducationPopover";
 import { DataFreshness } from "@/components/market/DataFreshness";
+import { describeDataFreshness } from "@/lib/dataFreshness";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { toClosedMarketQuote } from "@/lib/marketTick";
+export { toClosedMarketQuote } from "@/lib/marketTick";
 import {
   dynamicSelection,
   dynamicSelectionLabel,
@@ -42,25 +45,6 @@ import {
 
 const MAX_ANALYSIS_CONTRACTS = MAX_ANALYSIS_SELECTIONS;
 type TicketSide = "Buy" | "Sell";
-
-/**
- * Outside regular hours, some broker quote responses expose an indicative or
- * stale `last_price` while `prev_close_price` is the official closing value.
- * The option chain is a closing snapshot in that state, so use the close for
- * LTP, ATM ordering, IV, and Greeks and avoid carrying an intraday change.
- */
-export function toClosedMarketQuote(quote: MarketTick): MarketTick {
-  const previousClose = quote.prev_close_price;
-  if (typeof previousClose !== "number" || !Number.isFinite(previousClose) || previousClose <= 0) {
-    return quote;
-  }
-  return {
-    ...quote,
-    last_price: previousClose,
-    change: 0,
-    change_percent: 0,
-  };
-}
 
 interface OptionChainProps {
   symbol: string;
@@ -79,10 +63,13 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   const [showGreeks, setShowGreeks] = useState(() => optionChainPreferences.showGreeks);
   const [showBuildup, setShowBuildup] = useState(() => optionChainPreferences.showBuildup);
   const [moneyness, setMoneyness] = useState<MoneynessFilter>(() => optionChainPreferences.moneyness);
-  // Start with every broker-provided strike. Traders can narrow this range
-  // explicitly, but the default must not hide most of an otherwise complete
-  // option chain.
-  const [strikesEachSide, setStrikesEachSide] = useState<number | null>(() => optionChainPreferences.strikesEachSide);
+  // Start with the nearest ten strikes on each side of ATM. Traders can
+  // widen this range explicitly, including to the complete broker universe.
+  const [strikesEachSide, setStrikesEachSide] = useState<number | null>(() => (
+    // Treat the previous `null` default as the legacy unconfigured state.
+    // Users can still select “All strikes” explicitly from the filter.
+    optionChainPreferences.strikesEachSide ?? 10
+  ));
   const [previousOiBySymbol, setPreviousOiBySymbol] = useState<Map<string, number>>(new Map());
   const [analysisSelections, setAnalysisSelections] = useState<AnalysisSelection[]>([]);
   const [dynamicOptionType, setDynamicOptionType] = useState<"CE" | "PE">("CE");
@@ -93,7 +80,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   const [basketRisk, setBasketRisk] = useState<BasketRiskDraft>({});
   const [basketOpen, setBasketOpen] = useState(false);
   const latestOiBySymbol = useRef<Map<string, number>>(new Map());
-  const [afterHoursTicks, setAfterHoursTicks] = useState<Record<string, MarketTick>>({});
+  const [snapshotTicks, setSnapshotTicks] = useState<Record<string, MarketTick>>({});
   const marketSession = useNseMarketSession();
   const replayIsActive = useReplayStore((state) => state.isActive);
 
@@ -158,22 +145,22 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   const allSymbolsKey = allSymbols.join(",");
   const { getTick: getLiveTick } = useMarketData(allSymbols);
 
-  // Outside the regular session the websocket is intentionally paused, but
-  // FYERS still serves the latest quote snapshot. Keep a small, chunked REST
-  // poll here so the chain still has closing prices for ATM ordering, LTP,
-  // IV, and Greeks without re-enabling a misleading "live" feed globally.
+  // Keep a small, chunked REST poll as a safety net. During regular hours the
+  // WebSocket remains preferred, but a stalled stream must not freeze the
+  // chain at its last tick. Outside hours this is the primary data source and
+  // uses the broker's latest traded quote snapshot below.
   useEffect(() => {
-    if (!symbol || replayIsActive || marketSession.state === "open" || !allSymbolsKey) {
-      if (marketSession.state === "open" || replayIsActive) setAfterHoursTicks({});
+    if (!symbol || replayIsActive || !allSymbolsKey) {
+      if (replayIsActive) setSnapshotTicks({});
       return;
     }
 
     let isMounted = true;
-    setAfterHoursTicks({});
+    setSnapshotTicks({});
     const snapshotSymbols = allSymbolsKey.split(",").filter(Boolean);
-    const snapshotInterval = 30_000;
+    const snapshotInterval = Math.max(refreshMilliseconds, 15_000);
 
-    async function fetchAfterHoursQuotes() {
+    async function fetchSnapshotQuotes() {
       const chunks: string[][] = [];
       for (let index = 0; index < snapshotSymbols.length; index += 40) {
         chunks.push(snapshotSymbols.slice(index, index + 40));
@@ -184,37 +171,42 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
       for (const chunk of chunks) {
         try {
           const response = await getMarketQuotes(chunk);
-          quotes.push(...response.quotes.map(toClosedMarketQuote));
+          quotes.push(...response.quotes.map((quote) => (
+            marketSession.state === "open" ? quote : toClosedMarketQuote(quote)
+          )));
         } catch {
           // Preserve successful chunks if one broker snapshot is unavailable.
         }
       }
       if (!isMounted) return;
       if (quotes.length === 0) return;
-      setAfterHoursTicks((current) => ({
+      setSnapshotTicks((current) => ({
         ...current,
         ...Object.fromEntries(quotes.map((quote) => [quote.trading_symbol, quote])),
       }));
     }
 
-    void fetchAfterHoursQuotes();
-    const interval = window.setInterval(() => void fetchAfterHoursQuotes(), snapshotInterval);
+    void fetchSnapshotQuotes();
+    const interval = window.setInterval(() => void fetchSnapshotQuotes(), snapshotInterval);
     return () => {
       isMounted = false;
       window.clearInterval(interval);
     };
-  }, [allSymbolsKey, marketSession.state, replayIsActive, symbol]);
+  }, [allSymbolsKey, marketSession.state, refreshMilliseconds, replayIsActive, symbol]);
 
   const getTick = useCallback(
     (tradingSymbol: string): MarketTick | null => {
-      const snapshot = afterHoursTicks[tradingSymbol];
+      const snapshot = snapshotTicks[tradingSymbol];
+      const live = getLiveTick(tradingSymbol);
+      if (!snapshot) return live ?? null;
       // useMarketData retains its last live tick when a session closes. Once
-      // a closed-market snapshot exists, prefer it so the chain reflects the
-      // broker's latest API value instead of the stale in-session tick.
-      if (!replayIsActive && marketSession.state !== "open" && snapshot) return snapshot;
-      return getLiveTick(tradingSymbol) ?? snapshot ?? null;
+      // a snapshot exists, prefer it outside hours; during the session use it
+      // only when the live tick is missing or no longer fresh.
+      if (!replayIsActive && marketSession.state !== "open") return snapshot;
+      if (!live || describeDataFreshness(live).state !== "live") return snapshot;
+      return live;
     },
-    [afterHoursTicks, getLiveTick, marketSession.state, replayIsActive]
+    [getLiveTick, marketSession.state, replayIsActive, snapshotTicks]
   );
   
   // Get underlying price

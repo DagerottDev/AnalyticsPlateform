@@ -9,14 +9,23 @@
 /**
  * Time-to-expiry (years) for an option, from `expiry` (a parseable date
  * string, e.g. "25-Jul-2024") to `atMs` (defaults to now). Pegs to NSE close
- * (15:30 local) and floors at a small positive value so downstream
+ * (15:30 IST before CAS timing, 15:40 IST from 03-Aug-2026) and floors at a
+ * small positive value so downstream
  * Black-Scholes math never divides by / multiplies a zero T.
  */
 export function timeToExpiry(expiry: string | null | undefined, atMs: number = Date.now()): number {
   if (!expiry) return 0.0001;
   const expDate = new Date(expiry);
-  expDate.setHours(15, 30, 0, 0);
-  const diffDays = (expDate.getTime() - atMs) / (1000 * 60 * 60 * 24);
+  if (!Number.isFinite(expDate.getTime())) return 0.0001;
+  const year = expDate.getUTCFullYear();
+  const month = expDate.getUTCMonth();
+  const day = expDate.getUTCDate();
+  const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const closeMinute = dateKey >= "2026-08-03" ? 40 : 30;
+  // 15:xx IST is UTC+05:30. Date.UTC keeps this deterministic regardless of
+  // the browser's own timezone and makes historical replay use old hours.
+  const expiryCloseMs = Date.UTC(year, month, day, 10, closeMinute, 0, 0);
+  const diffDays = (expiryCloseMs - atMs) / (1000 * 60 * 60 * 24);
   return Math.max(diffDays / 365, 0.0001);
 }
 

@@ -8,6 +8,7 @@ interface StatTileProps {
   label: string;
   value: ReactNode;
   icon?: ElementType;
+  education?: ReactNode;
   tone?: Tone;
   className?: string;
 }
@@ -18,13 +19,16 @@ const toneClasses: Record<Tone, string> = {
   loss: "text-[var(--color-loss)]",
 };
 
-export function StatTile({ label, value, icon: Icon, tone = "neutral", className }: StatTileProps) {
+export function StatTile({ label, value, icon: Icon, education, tone = "neutral", className }: StatTileProps) {
   return (
     <Card className={cn("flex items-center justify-between", className)}>
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-          {label}
-        </p>
+        <div className="flex items-center gap-1">
+          <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+            {label}
+          </p>
+          {education}
+        </div>
         <p className={cn("tnum mt-2 text-2xl font-black", toneClasses[tone])}>{value}</p>
       </div>
       {Icon && (

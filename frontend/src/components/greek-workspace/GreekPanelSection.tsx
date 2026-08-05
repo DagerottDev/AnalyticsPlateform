@@ -1,5 +1,5 @@
 import { GreekChartCard } from "@/components/charts/GreekChartCard";
-import { GREEK_LABEL, FEATURED_GREEKS } from "./greekLabels";
+import { GREEK_LABEL } from "./greekLabels";
 import type { GreekPanelLayout } from "@/lib/greekWorkspaceLayout";
 import type { CombinedGreekSeries, GreekMetric } from "@/lib/strikeGreekAnalysis";
 
@@ -17,8 +17,7 @@ interface GreekPanelSectionProps {
   alertDisabledReason?: string;
 }
 
-/** Renders one grid of Greek chart cards for whichever metric list the
- * caller passes in (the Featured row, the active Core/Higher-order tab). */
+/** Renders one grid of Greek chart cards for the active metric list. */
 export function GreekPanelSection({
   metrics, visibleGreeks, greekSeries, liveContracts, totalContracts, panelLayoutFor, onLayoutChange, onRequestAlert, syncIdPrefix, alertsDisabled, alertDisabledReason,
 }: GreekPanelSectionProps) {
@@ -41,7 +40,6 @@ export function GreekPanelSection({
           onRequestAlert={onRequestAlert}
           alertsDisabled={alertsDisabled}
           alertDisabledReason={alertDisabledReason}
-          featured={FEATURED_GREEKS.includes(metric)}
         />
       ))}
     </div>

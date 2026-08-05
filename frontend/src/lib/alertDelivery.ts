@@ -17,11 +17,14 @@ export interface AlertDeliverySettingsUpdate extends Omit<AlertDeliverySettings,
 }
 
 export async function getAlertDeliverySettings(): Promise<AlertDeliverySettings> {
-  const { data } = await apiClient.get<AlertDeliverySettings>("/alerts/delivery-settings");
+  // Settings should never leave the page in an indeterminate loading state if
+  // the API or database is unavailable. The caller turns this timeout into a
+  // visible error with a retry action.
+  const { data } = await apiClient.get<AlertDeliverySettings>("/alerts/delivery-settings", { timeout: 10_000 });
   return data;
 }
 
 export async function saveAlertDeliverySettings(settings: AlertDeliverySettingsUpdate): Promise<AlertDeliverySettings> {
-  const { data } = await apiClient.put<AlertDeliverySettings>("/alerts/delivery-settings", settings);
+  const { data } = await apiClient.put<AlertDeliverySettings>("/alerts/delivery-settings", settings, { timeout: 10_000 });
   return data;
 }

@@ -34,6 +34,8 @@ def test_market_hours_only_allow_nse_regular_weekdays() -> None:
     assert is_regular_market_open(datetime(2026, 8, 3, 4, 45, tzinfo=UTC))  # 10:15 IST Monday
     assert not is_regular_market_open(datetime(2026, 8, 2, 4, 45, tzinfo=UTC))  # Sunday
     assert not is_regular_market_open(datetime(2026, 8, 3, 3, 30, tzinfo=UTC))  # pre-open
+    assert is_regular_market_open(datetime(2026, 8, 3, 10, 5, tzinfo=UTC))  # 15:35 IST
+    assert not is_regular_market_open(datetime(2026, 8, 3, 10, 10, tzinfo=UTC))  # 15:40 IST
 
 
 @pytest.mark.asyncio

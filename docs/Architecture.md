@@ -16,7 +16,11 @@
 ## Analytics and storage
 
 - TypeScript handles interactive chart, strategy, replay, and Dealer Flow calculations; Python handles server-side Greeks, volatility, alert evaluation, and persistence jobs.
-- PostgreSQL with TimescaleDB stores historical OHLCV and daily volatility snapshots. Redis supports token revocation and is provisioned through Docker Compose.
+- PostgreSQL with TimescaleDB stores historical OHLCV, daily volatility snapshots, and the
+  F&O IV-universe snapshots consumed by the screener. A bounded background worker refreshes
+  current-day ATM-IV rows and, when the broker supports option candles (currently Fyers),
+  seeds prior true ATM-IV observations. Redis supports token revocation and is provisioned
+  through Docker Compose.
 
 ## Deployment
 

@@ -20,6 +20,13 @@ describe("timeToExpiry", () => {
     past.setDate(past.getDate() - 30);
     expect(timeToExpiry(past.toISOString())).toBe(0.0001);
   });
+
+  it("uses the CAS-era 15:40 IST close from 03-Aug-2026", () => {
+    const before = timeToExpiry("2026-08-02", Date.parse("2026-08-02T10:01:00Z"));
+    const after = timeToExpiry("2026-08-03", Date.parse("2026-08-03T10:01:00Z"));
+    expect(before).toBe(0.0001); // 15:31 IST: pre-change session had ended.
+    expect(after).toBeGreaterThan(0); // 15:31 IST: F&O still trades until 15:40.
+  });
 });
 
 describe("nearestStrikeTo", () => {

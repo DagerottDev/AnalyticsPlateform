@@ -88,13 +88,20 @@ class Settings(BaseSettings):
     alert_evaluation_interval_seconds: float = 15.0
 
     # Daily ATM-IV/IV-Rank/IV-Percentile persistence across every NSE F&O
-    # stock, powering the IV screener. Symbols already captured today are
-    # skipped, so a short interval mostly just retries prior failures rather
-    # than re-fetching the whole universe; the per-symbol delay keeps the
-    # sequential broker calls under Fyers' rate limit.
+    # stock, powering the IV screener. Current-day rows are refreshed only
+    # after this interval so the worker has a bounded broker-call cadence.
     iv_universe_backfill_enabled: bool = True
     iv_universe_backfill_interval_seconds: float = 1800.0
     iv_universe_backfill_symbol_delay_seconds: float = 0.35
+    iv_universe_snapshot_refresh_interval_seconds: float = 1800.0
+    # Fyers can provide daily candles for exchange-qualified option symbols.
+    # The optional seed fills prior ATM-IV observations so rank/percentile do
+    # not need to wait a full month after first deployment. It is capped per
+    # cycle to keep history calls below broker limits; brokers without option
+    # history safely skip this path.
+    iv_universe_historical_seed_enabled: bool = True
+    iv_universe_historical_seed_lookback_days: int = 60
+    iv_universe_historical_seed_symbols_per_cycle: int = 12
 
     # Watches open live basket orders for per-leg targets and combined
     # stop-loss/target (see app.services.basket_monitor). Unlike the

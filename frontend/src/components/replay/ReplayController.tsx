@@ -58,9 +58,9 @@ export function ReplayController() {
       {priceCoverage && priceCoverage.attempted > 0 && (
         <div
           className="text-center text-[10px] font-normal normal-case text-[var(--color-text-muted)]"
-          title="Selected contracts priced from real broker history; contracts without history are modeled with Black-Scholes."
+          title="Near-ATM contracts priced from real broker history; contracts without history are modeled with Black-Scholes."
         >
-          {priceCoverage.matched}/{priceCoverage.attempted} selected contracts using real broker prices
+          {priceCoverage.matched}/{priceCoverage.attempted} near-ATM contracts using real broker prices
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { latestExpiry, sortExpiries } from "../lib/expiry";
+import { latestExpiry, nearestExpiry, sortExpiries } from "../lib/expiry";
 
 describe("expiry defaults", () => {
   it("selects the furthest date regardless of broker ordering", () => {
@@ -8,6 +8,12 @@ describe("expiry defaults", () => {
 
   it("supports both broker labels and ISO dates", () => {
     expect(latestExpiry(["2026-08-27", "28-Aug-2026", "2026-08-20"])).toBe("28-Aug-2026");
+  });
+
+  it("selects the nearest expiry for default selectors", () => {
+    const now = Date.UTC(2026, 7, 4, 12);
+    expect(nearestExpiry(["07-Aug-2026", "31-Jul-2026", "14-Aug-2026"], now)).toBe("07-Aug-2026");
+    expect(nearestExpiry(["2026-08-27", "28-Aug-2026", "2026-08-20"], now)).toBe("2026-08-20");
   });
 
   it("sorts a de-duplicated copy and leaves invalid labels last", () => {

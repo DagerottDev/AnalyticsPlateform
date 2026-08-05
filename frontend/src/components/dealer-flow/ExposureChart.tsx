@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import type { ReactNode } from "react";
 import {
   BarChart,
   Bar,
@@ -15,14 +16,17 @@ import {
 import { StrikeExposure } from "@/lib/dealerFlow";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ChartDataTable } from "@/components/charts/ChartDataTable";
+import { ChartZoomControls } from "@/components/charts/ChartZoomControls";
+import { useCategoryChartZoom } from "@/hooks/useCategoryChartZoom";
 
 interface ExposureChartProps {
   title: string;
   data: StrikeExposure[];
   spotPrice: number;
+  education?: ReactNode;
 }
 
-export function ExposureChart({ title, data, spotPrice }: ExposureChartProps) {
+export function ExposureChart({ title, data, spotPrice, education }: ExposureChartProps) {
   const chartData = useMemo(() => {
     return data
       .filter(d => d.totalExposure !== 0)
@@ -32,6 +36,8 @@ export function ExposureChart({ title, data, spotPrice }: ExposureChartProps) {
         "Put (M)": Number((d.putExposure / 1000000).toFixed(3)),
       }));
   }, [data]);
+  const centreIndex = useMemo(() => chartData.reduce((best, row, index) => Math.abs(row.strike - spotPrice) < Math.abs(chartData[best].strike - spotPrice) ? index : best, 0), [chartData, spotPrice]);
+  const zoom = useCategoryChartZoom(chartData, centreIndex);
 
   if (!chartData || chartData.length === 0) {
     return (
@@ -43,10 +49,10 @@ export function ExposureChart({ title, data, spotPrice }: ExposureChartProps) {
 
   return (
     <div className="panel flex flex-col gap-2">
-      <h3 className="text-sm font-bold text-[var(--color-text-bright)]">{title}</h3>
+      <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-1 text-sm font-bold text-[var(--color-text-bright)]">{title}{education}</h3><ChartZoomControls label={title} onZoomIn={zoom.zoomIn} onZoomOut={zoom.zoomOut} onReset={zoom.resetZoom} /></div>
       <div role="img" aria-label={`${title} bar chart across ${chartData.length} strikes. Spot price is ${spotPrice.toFixed(2)}. Exact call and put exposure values are available in the following data table.`} className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} layout="vertical">
+          <BarChart data={zoom.visibleData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }} layout="vertical">
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" horizontal={true} vertical={false} />
             <XAxis
               type="number"

@@ -66,6 +66,18 @@ async def load_snapshotted_symbols_today(db: AsyncSession, today: date) -> set[s
     return set(result.scalars())
 
 
+async def load_snapshots_for_date(
+    db: AsyncSession, snapshot_date: date
+) -> list[FoIvUniverseSnapshot]:
+    """Load all universe snapshots captured on one date for stat repair."""
+    result = await db.execute(
+        select(FoIvUniverseSnapshot).where(
+            FoIvUniverseSnapshot.snapshot_date == snapshot_date
+        )
+    )
+    return list(result.scalars())
+
+
 async def load_latest_snapshot_per_symbol(db: AsyncSession) -> list[FoIvUniverseSnapshot]:
     """One row per symbol: its most recent snapshot, via a single indexed query."""
     latest_dates = (

@@ -37,7 +37,7 @@ async def get_or_create_daily_snapshot(
         snapshot_date=snapshot_date,
         atm_iv=atm_iv,
         realized_volatility=realized_volatility,
-        iv_rank=_iv_rank([*prior_ivs, atm_iv], atm_iv),
+        iv_rank=_iv_rank(prior_ivs, atm_iv),
         created_at=datetime.now(UTC),
     )
     db.add(row)

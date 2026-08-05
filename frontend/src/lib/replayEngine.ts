@@ -210,7 +210,10 @@ export function startPlayback(allTicks: Record<string, TickData>[], onComplete: 
 
   const store = useReplayStore.getState();
   store.setProgressPercentage(0);
-  store.setCurrentTicks(allTicks[0]);
+  // Keep the prepared timeline in the shared store. Consumers opened after
+  // playback starts (notably the Option Greek workspace) can then render the
+  // already-fed portion of the session instead of waiting for a new tick.
+  store.setReplayTimeline(allTicks);
 
   const tickRunner = () => {
     const activeStore = useReplayStore.getState();
@@ -224,14 +227,25 @@ export function startPlayback(allTicks: Record<string, TickData>[], onComplete: 
       return;
     }
 
-    activeStore.setCurrentTicks(allTicks[currentStep]);
+    activeStore.setCurrentStep(currentStep);
     activeStore.setProgressPercentage((currentStep / allTicks.length) * 100);
   };
 
   const runLoop = () => {
     const activeStore = useReplayStore.getState();
+    if (!activeStore.isActive) {
+      playbackInterval = null;
+      return;
+    }
     if (activeStore.isPlaying) {
       tickRunner();
+    }
+
+    // tickRunner can finish the session and reset the store. Do not leave a
+    // polling timeout behind after completion or a stop from another window.
+    if (!useReplayStore.getState().isActive) {
+      playbackInterval = null;
+      return;
     }
 
     const interval = Math.max(10, 1000 / activeStore.speedMultiplier);

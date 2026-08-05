@@ -1,6 +1,12 @@
 # API Contracts
 
+## Saved Combined Premium layout
+
+The authenticated settings profile includes `combinedPremiumWorkspace`. It stores the selected candle timeframe, chart synchronization state, `seriesType` (`candlestick` or close-price `line`), and the independent indicator settings for Calls, Puts, and Calls + Puts. When `syncCharts` is enabled, the workspace synchronizes the visible time window, horizontal zoom, and crosshair time across the three charts. These are display-only preferences; a close-price line remains derived from the same synthetic composite candles.
+
 Frontend/backend interface definitions.
+
+`optionChain.rollingSelectionMode` is a saved user preference. `smooth` (the default) distance-weights adjacent option strikes for rolling ATM/OTM/ITM premium and Greek analytics; `raw` retains exact broker-contract rollovers. Smooth values are analytic only and are never order symbols.
 
 ---
 
@@ -104,6 +110,11 @@ orders.
 ## Market Data
 
 Requires Bearer token and an active broker session (established via `/auth/login`).
+
+NSE equity derivatives (including index and stock options) use the CAS-era
+regular session of **09:15–15:40 IST** from 03-Aug-2026; historical dates
+before that retain the 15:30 IST close. Explicit cash-equity symbols such as
+`NSE:SBIN-EQ` remain on the 09:15–15:30 IST session.
 
 ### GET `/market/instruments/{symbol}`
 Active option instruments for an underlying symbol (e.g. `NIFTY`).
@@ -255,7 +266,9 @@ Retrieve stored historical OHLCV candles for a symbol from the database
 
 ## Volatility
 
-No authentication required (mock data generator, not yet backed by real broker/history data).
+All volatility endpoints require a Bearer token. Historical and current metrics use the
+authenticated broker session; the universe screener reads the persisted worker snapshots
+so a page request never fans out into one broker call per stock.
 
 ### GET `/volatility/{symbol}/historical?days=252`
 Timeseries of implied vs. realized volatility.
@@ -282,6 +295,39 @@ Current IV Rank (IVR) and IV Percentile (IVP), derived from the 1Y historical se
   "data_points": 252
 }
 ```
+
+### GET `/volatility/universe`
+Returns the latest persisted ATM-IV observation for every symbol in the configured NSE F&O
+universe. Rows are present even before the worker reaches a symbol, so the table can show
+coverage without changing shape. The worker refreshes current-day rows on a bounded cadence
+and optionally seeds prior ATM-IV observations from Fyers daily option candles. Brokers that
+do not expose compatible option history leave rank/percentile in `building` until enough real
+daily observations accumulate.
+
+**Response (200):**
+```json
+{
+  "symbols": [
+    {
+      "symbol": "RELIANCE",
+      "company_name": "Reliance Industries",
+      "spot": 2900.0,
+      "atm_iv": 0.18,
+      "iv_rank": 42.0,
+      "iv_percentile": 55.0,
+      "snapshot_date": "2026-08-04",
+      "updated_at": "2026-08-04T10:00:00+00:00",
+      "status": "ready"
+    }
+  ],
+  "generated_at": "2026-08-04T10:00:05+00:00"
+}
+```
+
+`status` is `ready` when both rank and percentile are available, `building` while history or
+the first snapshot is incomplete, and `stale` when the last worker update is older than the
+freshness window. `spot`, IV values, dates, and `updated_at` are nullable for symbols that
+have not been captured yet.
 
 ---
 

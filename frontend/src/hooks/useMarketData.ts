@@ -4,6 +4,8 @@ import { MarketTick } from "@/types/market";
 import { useAuth } from "@/hooks/useAuth";
 import { useReplayStore } from "@/stores/replayStore";
 import { useNseMarketSession } from "@/hooks/useNseMarketSession";
+import { isFnoSymbol } from "@/lib/marketSession";
+import { mergeMarketTick } from "@/lib/marketTick";
 
 export function useMarketData(symbols: string[]) {
   const { user } = useAuth();
@@ -12,7 +14,8 @@ export function useMarketData(symbols: string[]) {
   // Replay Interception
   const replayIsActive = useReplayStore(state => state.isActive);
   const replayTicks = useReplayStore(state => state.currentTicks);
-  const marketSession = useNseMarketSession();
+  const fnoSession = useNseMarketSession("fno");
+  const cashSession = useNseMarketSession("cash");
 
   // Tracks the symbols currently registered with the shared websocket. Keeping
   // this separate from the render input lets us update subscriptions by diff
@@ -26,7 +29,7 @@ export function useMarketData(symbols: string[]) {
   const handleTick = useCallback((tick: MarketTick) => {
     setTicks((prev) => ({
       ...prev,
-      [tick.trading_symbol]: tick,
+      [tick.trading_symbol]: mergeMarketTick(prev[tick.trading_symbol], tick),
     }));
   }, []);
 
@@ -38,8 +41,10 @@ export function useMarketData(symbols: string[]) {
 
   useEffect(() => {
     const ws = getWebSocket();
-    const requestedSymbols = user?.client_id && !replayIsActive && marketSession.state === "open"
-      ? (symbolsKey ? symbolsKey.split(",") : [])
+    const requestedSymbols = user?.client_id && !replayIsActive
+      ? (symbolsKey ? symbolsKey.split(",") : []).filter((symbol) => (
+        isFnoSymbol(symbol) ? fnoSession.state === "open" : cashSession.state === "open"
+      ))
       : [];
     const previousSymbols = subscribedSymbols.current;
     const addedSymbols = requestedSymbols.filter((symbol) => !previousSymbols.includes(symbol));
@@ -53,7 +58,7 @@ export function useMarketData(symbols: string[]) {
     // maintains one shared REST polling fallback per broker session. A
     // separate HTTP snapshot per mounted consumer duplicates that broker
     // traffic and can exhaust the API/broker rate limit during navigation.
-  }, [symbolsKey, user?.client_id, replayIsActive, marketSession.state, handleTick]);
+  }, [symbolsKey, user?.client_id, replayIsActive, fnoSession.state, cashSession.state, handleTick]);
 
   useEffect(() => {
     return () => {

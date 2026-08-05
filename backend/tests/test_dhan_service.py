@@ -29,6 +29,30 @@ async def test_dhan_profile_validates_through_funds() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dhan_quotes_support_bare_nifty_index_alias() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v2/marketfeed/ltp"
+        assert json.loads(request.content) == {"IDX_I": [13]}
+        return httpx.Response(
+            200,
+            json={"data": {"IDX_I": {"13": {"last_price": 22123.45}}}},
+        )
+
+    client = httpx.AsyncClient(
+        base_url="https://api.dhan.co/v2", transport=httpx.MockTransport(handler)
+    )
+    service = DhanService("1100000001", "dhan-token", http_client=client)
+
+    quotes = await service.get_quotes(["NIFTY"])
+
+    assert quotes[0]["symbol"] == "NIFTY"
+    assert quotes[0]["trading_symbol"] == "NIFTY"
+    assert quotes[0]["last_price"] == 22123.45
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_dhan_orders_are_normalized_and_placed_with_security_reference() -> None:
     requests: list[httpx.Request] = []
 

@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartDataTable } from "@/components/charts/ChartDataTable";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ChartZoomControls } from "@/components/charts/ChartZoomControls";
+import { useCategoryChartZoom } from "@/hooks/useCategoryChartZoom";
 import type { OpenInterestStrike } from "@/lib/openInterestAnalysis";
 
 interface OpenInterestChangeChartProps {
@@ -16,6 +18,7 @@ export function OpenInterestChangeChart({ data }: OpenInterestChangeChartProps) 
     "Call change": row.callChange,
     "Put change": row.putChange,
   })), [data]);
+  const zoom = useCategoryChartZoom(chartData);
 
   if (chartData.length === 0) {
     return <section className="panel"><EmptyState title="No session OI-change data is available for this expiry." /></section>;
@@ -23,11 +26,12 @@ export function OpenInterestChangeChart({ data }: OpenInterestChangeChartProps) 
 
   return (
     <section className="panel flex min-w-0 flex-col gap-3">
-      <div>
+      <div className="flex items-start justify-between gap-2">
+        <div>
         <h2 className="text-sm font-bold text-[var(--color-text-bright)]">Session OI Change</h2>
         <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
           Change since the broker&apos;s prior-close baseline for the current market session. Positive bars mean OI has increased.
-        </p>
+        </p></div><ChartZoomControls label="session OI change" onZoomIn={zoom.zoomIn} onZoomOut={zoom.zoomOut} onReset={zoom.resetZoom} />
       </div>
       <div
         role="img"
@@ -35,7 +39,7 @@ export function OpenInterestChangeChart({ data }: OpenInterestChangeChartProps) 
         className="h-[440px] w-full"
       >
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 12, right: 20, left: 4, bottom: 8 }}>
+          <BarChart data={zoom.visibleData} margin={{ top: 12, right: 20, left: 4, bottom: 8 }}>
             <CartesianGrid stroke="var(--color-chart-grid)" strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="strike" stroke="var(--color-chart-axis-text)" fontSize={10} tickFormatter={(value) => Number(value).toLocaleString("en-IN")} />
             <YAxis stroke="var(--color-chart-axis-text)" fontSize={10} tickFormatter={(value) => Number(value).toLocaleString("en-IN")} />

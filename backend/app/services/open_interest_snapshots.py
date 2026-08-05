@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.db.session import async_session_maker
 from app.models.open_interest_snapshot import OpenInterestSnapshot
+from app.services.market_session import is_regular_market_open as is_fno_market_open
 from app.services.session_manager import session_manager
 
 logger = logging.getLogger(__name__)
@@ -25,9 +26,8 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def is_regular_market_open(now: datetime | None = None) -> bool:
-    local = (now or datetime.now(UTC)).astimezone(IST)
-    minutes = local.hour * 60 + local.minute
-    return local.weekday() < 5 and (9 * 60 + 15) <= minutes < (15 * 60 + 30)
+    """Compatibility wrapper for the F&O OI collector's session predicate."""
+    return is_fno_market_open(now, "fno")
 
 
 def bucket_timestamp(now: datetime, interval_seconds: float) -> datetime:

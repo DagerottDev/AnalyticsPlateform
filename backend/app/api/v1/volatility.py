@@ -12,7 +12,9 @@ from app.core.security import get_current_user
 from app.data.nse_fo_symbols import NSE_FO_SYMBOLS
 from app.db.session import get_db
 from app.models.volatility_snapshot import DailyVolatilitySnapshot
+from app.schemas.volatility import IvUniverseResponse, IvUniverseStatus, IvUniverseSymbol
 from app.services.atm_iv import compute_atm_iv
+from app.services.fno_symbol_store import fno_symbol_store
 from app.services.fo_iv_universe_store import load_latest_snapshot_per_symbol
 from app.services.fyers_service import to_fyers_ws_symbol
 from app.services.greeks import calculate_greeks, calculate_implied_volatility
@@ -37,6 +39,7 @@ IV_RISK_PREMIUM = 0.12
 IV_SMOOTHING_ALPHA = 0.15
 DEFAULT_RELATIVE_VALUE_SYMBOLS = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX")
 MAX_RELATIVE_VALUE_SYMBOLS = 6
+IV_UNIVERSE_STALE_AFTER = timedelta(hours=2)
 
 # Daily candles do not change meaningfully more than once per trading day.
 # Keeping a short server-side cache avoids each Volatility page load issuing
@@ -45,6 +48,14 @@ _DAILY_CLOSES_CACHE_TTL_SECONDS = 15 * 60
 _daily_closes_cache: dict[tuple[int, str, int], tuple[float, list[tuple[datetime, float]]]] = {}
 _daily_closes_locks: dict[tuple[int, str, int], asyncio.Lock] = {}
 _daily_snapshot_locks: dict[tuple[str, date], asyncio.Lock] = {}
+
+
+async def _iv_universe_symbols(current_user: dict[str, Any]) -> dict[str, str]:
+    """Use the live Fyers option universe when that broker is active."""
+    service = session_manager.get_session(current_user["sub"])
+    if getattr(service, "supports_live_fno_symbol_master", False) is True:
+        return await fno_symbol_store.get(NSE_FO_SYMBOLS)
+    return NSE_FO_SYMBOLS
 
 
 async def _compute_live_atm_iv(symbol: str, current_user: dict[str, Any]) -> float | None:
@@ -163,7 +174,7 @@ async def _relative_value_summary(
     snapshots = await load_daily_snapshots(db, symbol=symbol, from_date=date.min)
     iv_observations = [snapshot.atm_iv for snapshot in snapshots]
     computed_iv_rank = (
-        iv_rank([*iv_observations, atm_iv], atm_iv) if len(iv_observations) >= 2 else None
+        iv_rank(iv_observations, atm_iv) if len(iv_observations) >= 2 else None
     )
 
     return {
@@ -213,33 +224,50 @@ async def compare_relative_value(
     return {"comparisons": comparisons, "generated_at": datetime.now(UTC).isoformat()}
 
 
-@router.get("/universe")
+@router.get("/universe", response_model=IvUniverseResponse)
 async def get_iv_universe(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
+) -> IvUniverseResponse:
     """ATM IV / IV Rank / IV Percentile for every NSE F&O stock.
 
-    Reads only the scheduled backfill's snapshot table — no broker calls are
-    made on this path, so it stays fast regardless of universe size.
+    Reads only the scheduled backfill's snapshot table; the current Fyers
+    symbol master is cached separately, so no option-chain calls are made on
+    this path.
     """
     snapshots = await load_latest_snapshot_per_symbol(db)
     by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
-    symbols: list[dict[str, Any]] = []
-    for symbol, company_name in NSE_FO_SYMBOLS.items():
+    symbols: list[IvUniverseSymbol] = []
+    generated_at = datetime.now(UTC)
+    fno_symbols = await _iv_universe_symbols(current_user)
+    for symbol, company_name in fno_symbols.items():
         snapshot = by_symbol.get(symbol)
+        updated_at = snapshot.updated_at if snapshot is not None else None
+        if updated_at is not None and updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=UTC)
+        status: IvUniverseStatus
+        if snapshot is None:
+            status = "building"
+        elif updated_at is not None and generated_at - updated_at > IV_UNIVERSE_STALE_AFTER:
+            status = "stale"
+        elif snapshot.iv_rank is not None and snapshot.iv_percentile is not None:
+            status = "ready"
+        else:
+            status = "building"
         symbols.append(
-            {
-                "symbol": symbol,
-                "company_name": company_name,
-                "spot": snapshot.spot if snapshot else None,
-                "atm_iv": snapshot.atm_iv if snapshot else None,
-                "iv_rank": snapshot.iv_rank if snapshot else None,
-                "iv_percentile": snapshot.iv_percentile if snapshot else None,
-                "snapshot_date": snapshot.snapshot_date.isoformat() if snapshot else None,
-            }
+            IvUniverseSymbol(
+                symbol=symbol,
+                company_name=company_name,
+                spot=snapshot.spot if snapshot else None,
+                atm_iv=snapshot.atm_iv if snapshot else None,
+                iv_rank=snapshot.iv_rank if snapshot else None,
+                iv_percentile=snapshot.iv_percentile if snapshot else None,
+                snapshot_date=snapshot.snapshot_date if snapshot else None,
+                updated_at=updated_at,
+                status=status,
+            )
         )
-    return {"symbols": symbols, "generated_at": datetime.now(UTC).isoformat()}
+    return IvUniverseResponse(symbols=symbols, generated_at=generated_at)
 
 
 async def _capture_daily_atm_iv(
@@ -407,21 +435,20 @@ async def get_volatility_metrics(
 
     await _capture_daily_atm_iv(db, symbol, current_user, data)
     snapshots = await load_daily_snapshots(db, symbol=symbol, from_date=date.min)
-    ivs = (
-        [snapshot.atm_iv for snapshot in snapshots]
-        if len(snapshots) >= 2
-        else [d["iv"] for d in data]
-    )
-    current_iv = ivs[-1]
-    min_iv = min(ivs)
-    max_iv = max(ivs)
+    if len(snapshots) >= 2:
+        historical_ivs = [snapshot.atm_iv for snapshot in snapshots[:-1]]
+        current_iv = snapshots[-1].atm_iv
+    else:
+        historical_ivs = [point["iv"] for point in data[:-1]]
+        current_iv = data[-1]["iv"]
+    all_ivs = [*historical_ivs, current_iv]
 
     return {
         "symbol": symbol,
         "current_iv": current_iv,
-        "iv_rank": iv_rank(ivs, current_iv),
-        "iv_percentile": iv_percentile(ivs, current_iv),
-        "min_iv": min_iv,
-        "max_iv": max_iv,
-        "data_points": len(ivs),
+        "iv_rank": iv_rank(historical_ivs, current_iv),
+        "iv_percentile": iv_percentile(historical_ivs, current_iv),
+        "min_iv": min(all_ivs),
+        "max_iv": max(all_ivs),
+        "data_points": len(all_ivs),
     }

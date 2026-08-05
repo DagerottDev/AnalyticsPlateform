@@ -26,6 +26,7 @@ from app.schemas.market import (
     SymbolSuggestion,
 )
 from app.services.dhan_service import DhanService
+from app.services.fno_symbol_store import fno_symbol_store
 from app.services.fyers_service import FyersService, from_fyers_ws_symbol, to_fyers_ws_symbol
 from app.services.lot_size_store import lot_size_store
 from app.services.open_interest_snapshots import (
@@ -46,14 +47,22 @@ _MAX_SYMBOL_SUGGESTIONS = 8
 _INDEX_SYMBOLS = {"SENSEX": "S&P BSE SENSEX"}
 
 
+async def _searchable_fno_symbols(current_user: dict[str, Any]) -> dict[str, str]:
+    """Prefer the live option master for Fyers symbol suggestions."""
+    service = session_manager.get_session(current_user["sub"])
+    if getattr(service, "supports_live_fno_symbol_master", False) is True:
+        return await fno_symbol_store.get(NSE_FO_SYMBOLS)
+    return NSE_FO_SYMBOLS
+
+
 @router.get("/symbols/search", response_model=SymbolSearchResponse)
 async def search_symbols(
     q: str = Query(..., min_length=1, description="Symbol or company name prefix/substring"),
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> SymbolSearchResponse:
-    """Autocomplete for the "Or Stock Symbol" field, matched against a static
-    NSE F&O-eligible symbol list plus the supported BSE index underlyings — Fyers has no
-    live symbol-search API. Ranks symbol-prefix matches first, then
+    """Autocomplete for the "Or Stock Symbol" field, matched against the live
+    Fyers NSE F&O master (with a checked-in fallback) plus the supported BSE
+    index underlyings. Ranks symbol-prefix matches first, then
     symbol-substring, then company-name-substring matches.
     """
     query = q.strip().upper()
@@ -61,7 +70,8 @@ async def search_symbols(
     substring_matches: list[SymbolSuggestion] = []
     name_matches: list[SymbolSuggestion] = []
 
-    for symbol, name in {**_INDEX_SYMBOLS, **NSE_FO_SYMBOLS}.items():
+    fno_symbols = await _searchable_fno_symbols(current_user)
+    for symbol, name in {**_INDEX_SYMBOLS, **fno_symbols}.items():
         suggestion = SymbolSuggestion(symbol=symbol, name=name)
         if symbol.startswith(query):
             prefix_matches.append(suggestion)

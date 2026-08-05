@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import { MARKET_CHART_LOCALIZATION, formatMarketTick } from "@/lib/chartTime";
 import { VolatilityHistoricalData } from "@/lib/volatility";
 import { ChartLegend } from "@/components/charts/ChartLegend";
 import { ChartDataTable } from "@/components/charts/ChartDataTable";
+import { ChartZoomControls } from "@/components/charts/ChartZoomControls";
+import { zoomLightweightChart } from "@/lib/lightweightChartZoom";
 
 // lightweight-charts renders to <canvas>, which cannot resolve CSS var() —
 // these hex literals mirror the design tokens in globals.css. Fixed
@@ -25,6 +27,11 @@ export function HistoricalVolChart({ data }: HistoricalVolChartProps) {
   const chartRef = useRef<IChartApi | null>(null);
   const ivSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const rvSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+
+  const resetChartView = useCallback(() => {
+    chartRef.current?.timeScale().fitContent();
+  }, []);
+  const zoomChart = useCallback((direction: "in" | "out") => zoomLightweightChart(chartRef.current, direction), []);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -105,7 +112,7 @@ export function HistoricalVolChart({ data }: HistoricalVolChartProps) {
 
   return (
     <div className="panel flex w-full flex-col gap-2">
-      <h3 className="text-sm font-bold text-[var(--color-text-bright)]">Historical IV vs RV (1 Year)</h3>
+      <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-bold text-[var(--color-text-bright)]">Historical IV vs RV (1 Year)</h3><ChartZoomControls label="historical volatility chart" onZoomIn={() => zoomChart("in")} onZoomOut={() => zoomChart("out")} onReset={resetChartView} /></div>
       <ChartLegend
         items={[
           { label: "Implied Volatility", color: COLOR_CAT_1 },
@@ -116,6 +123,8 @@ export function HistoricalVolChart({ data }: HistoricalVolChartProps) {
         ref={chartContainerRef}
         role="img"
         aria-label={`Historical implied versus realized volatility line chart with ${data.length} daily observations. Exact values are available in the following data table.`}
+        title="Right-click to reset chart view"
+        onContextMenu={(event) => { event.preventDefault(); resetChartView(); }}
         className="h-[300px] w-full"
       />
       <ChartDataTable

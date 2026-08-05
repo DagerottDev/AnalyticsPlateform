@@ -1,6 +1,7 @@
 """Tests for FyersService's real (non-stub) broker API integrations."""
 
 import asyncio
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -76,12 +77,20 @@ async def test_history_request_starts_are_paced_per_broker_session() -> None:
     service = _make_service()
     service.client.history = MagicMock(return_value={"s": "no_data"})
 
+    # Start just inside the pacing window so the first request must wait.  Do
+    # not patch the module-level ``time.monotonic`` function: the ``time``
+    # module is shared with asyncio and pytest internals.
+    service._next_history_request_at = (
+        time.monotonic() + FyersService._HISTORY_REQUEST_MIN_INTERVAL_SECONDS
+    )
     with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()) as sleep:
         await service.get_historical_data("NSE:NIFTY50-INDEX", "2023-11-15", "2023-11-15", "1")
         await service.get_historical_data("NSE:NIFTY26JUL23000PE", "2023-11-15", "2023-11-15", "1")
 
-    sleep.assert_awaited_once()
-    assert sleep.await_args.args[0] >= FyersService._HISTORY_REQUEST_MIN_INTERVAL_SECONDS - 0.01
+    assert sleep.await_count >= 1
+    assert max(float(call.args[0]) for call in sleep.await_args_list) >= (
+        FyersService._HISTORY_REQUEST_MIN_INTERVAL_SECONDS - 0.01
+    )
 
 
 @pytest.mark.asyncio
@@ -244,6 +253,25 @@ async def test_get_instruments_maps_equity_symbols_to_nse_eq() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_instruments_uses_current_united_spirits_symbol() -> None:
+    """The retired MCDOWELL-N alias is rejected by the Fyers option chain."""
+    service = _make_service()
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            _expiry_discovery_response(("31-Jul-2025", "1753905000")),
+            _chain_response(
+                {"symbol": "NSE:UNITDSPR2507301400CE", "option_type": "CE", "strike_price": 1400}
+            ),
+        ]
+    )
+
+    await service.get_instruments("UNITDSPR")
+
+    discovery_call = service.client.optionchain.call_args_list[0].args[0]
+    assert discovery_call["symbol"] == "NSE:UNITDSPR-EQ"
+
+
+@pytest.mark.asyncio
 async def test_get_instruments_maps_sensex_to_bse_and_preserves_bfo_exchange() -> None:
     """SENSEX is a BSE index derivative, not an NSE equity fallback."""
     service = _make_service()
@@ -382,6 +410,50 @@ async def test_get_instruments_retries_on_rate_limit_then_succeeds() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_instruments_retries_transient_bad_request_then_succeeds() -> None:
+    """Fyers' intermittent -99 response must not turn a valid chain into a 503."""
+    service = _make_service()
+    near_row = {"symbol": "NSE:NIFTY25071017500CE", "option_type": "CE", "strike_price": 17500}
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            {"s": "error", "code": -99, "message": "Bad request"},
+            _expiry_discovery_response(("10-Jul-2025", "1752105000")),
+            _chain_response(near_row),
+        ]
+    )
+
+    with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()):
+        instruments = await service.get_instruments("NIFTY")
+
+    assert len(instruments) == 1
+    assert service.client.optionchain.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_option_chain_request_starts_are_paced_per_broker_session() -> None:
+    """Concurrent screens must share one option-chain request cadence."""
+    service = _make_service()
+    service.client.optionchain = MagicMock(
+        return_value={
+            "s": "error",
+            "code": -470,
+            "message": "There are no expiry contracts.",
+        }
+    )
+
+    with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()) as sleep:
+        await service._fetch_option_chain("NIFTY", strikecount=1)
+        await service._fetch_option_chain("BANKNIFTY", strikecount=1)
+
+    assert service.client.optionchain.call_count == 2
+    assert sleep.await_count == 1
+    assert (
+        sleep.await_args.args[0]
+        >= FyersService._OPTION_CHAIN_REQUEST_MIN_INTERVAL_SECONDS - 0.01
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_instruments_gives_up_after_max_retries_on_persistent_rate_limit() -> None:
     """A persistent 429 (not just a one-off blip) still surfaces as an
     error after exhausting retries, rather than retrying forever."""
@@ -425,6 +497,33 @@ async def test_get_quotes_does_not_double_prefix_already_qualified_symbols() -> 
     )
 
 
+@pytest.mark.asyncio
+async def test_get_quotes_batches_large_option_chain_requests() -> None:
+    """A large chain must not fail as one oversized Fyers quote request."""
+    service = _make_service()
+    symbols = [
+        f"NSE:NIFTY26JUL{22000 + index}CE"
+        for index in range(FyersService._QUOTE_BATCH_SIZE + 1)
+    ]
+
+    def quote_response(payload: dict[str, str]) -> dict[str, Any]:
+        requested = payload["symbols"].split(",")
+        return {
+            "s": "ok",
+            "d": [{"n": symbol, "v": {"lp": 100.0}} for symbol in requested],
+        }
+
+    service.client.quotes = MagicMock(side_effect=quote_response)
+
+    quotes = await service.get_quotes(symbols)
+
+    assert service.client.quotes.call_count == 2
+    assert [
+        len(call.args[0]["symbols"].split(",")) for call in service.client.quotes.call_args_list
+    ] == [FyersService._QUOTE_BATCH_SIZE, 1]
+    assert len(quotes) == len(symbols)
+
+
 def test_to_fyers_ws_symbol_maps_bare_index_alias() -> None:
     """A bare underlying alias (what the UI subscribes for the underlying's
     own price) must be exchange-qualified before reaching Fyers — a bare
@@ -441,6 +540,12 @@ def test_to_fyers_ws_symbol_maps_sensex_to_bse_index() -> None:
 
 def test_to_fyers_ws_symbol_maps_bare_equity_alias() -> None:
     assert to_fyers_ws_symbol("RELIANCE") == "NSE:RELIANCE-EQ"
+
+
+def test_to_fyers_ws_symbol_maps_renamed_equity_aliases() -> None:
+    assert to_fyers_ws_symbol("TATAMOTORS") == "NSE:TMPV-EQ"
+    assert to_fyers_ws_symbol("LTIM") == "NSE:LTM-EQ"
+    assert to_fyers_ws_symbol("ZOMATO") == "NSE:ETERNAL-EQ"
 
 
 def test_to_fyers_ws_symbol_passes_through_already_qualified_trading_symbols() -> None:

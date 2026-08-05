@@ -78,8 +78,12 @@ const navigation: NavGroup[] = [
   },
 ];
 
-export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+interface SidebarProps {
+  initialCollapsed?: boolean;
+}
+
+export function Sidebar({ initialCollapsed = false }: SidebarProps) {
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const router = useRouter();
   const pathname = usePathname();
 

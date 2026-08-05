@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ComposedChart,
   Line,
@@ -15,8 +15,12 @@ import {
 } from "recharts";
 import { PayoffPoint } from "@/lib/strategy";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { LineChart as LineChartIcon } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { LineChart as LineChartIcon, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { ChartDataTable } from "@/components/charts/ChartDataTable";
+
+const MAX_ZOOM_LEVEL = 5;
+const ZOOM_FACTOR = 1.6;
 
 interface PayoffChartProps {
   data: PayoffPoint[];
@@ -31,6 +35,39 @@ export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
       "T+Today": Number(d.profitT0.toFixed(2)),
     }));
   }, [data]);
+  const [zoomLevel, setZoomLevel] = useState(0);
+
+  useEffect(() => {
+    setZoomLevel(0);
+  }, [data]);
+
+  const xDomain = useMemo<[number, number]>(() => {
+    if (chartData.length < 2) {
+      const spot = chartData[0]?.spot ?? currentSpot;
+      return [spot - 1, spot + 1];
+    }
+
+    const fullMin = Math.min(...chartData.map((point) => point.spot));
+    const fullMax = Math.max(...chartData.map((point) => point.spot));
+    const fullRange = fullMax - fullMin;
+    if (!Number.isFinite(fullRange) || fullRange <= 0) return [fullMin - 1, fullMax + 1];
+
+    const center = Math.min(fullMax, Math.max(fullMin, currentSpot));
+    const targetRange = fullRange / ZOOM_FACTOR ** zoomLevel;
+    let start = center - targetRange / 2;
+    let end = center + targetRange / 2;
+
+    if (start < fullMin) {
+      start = fullMin;
+      end = Math.min(fullMax, start + targetRange);
+    }
+    if (end > fullMax) {
+      end = fullMax;
+      start = Math.max(fullMin, end - targetRange);
+    }
+
+    return [start, end];
+  }, [chartData, currentSpot, zoomLevel]);
 
   if (!chartData || chartData.length === 0) {
     return (
@@ -59,10 +96,44 @@ export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
 
   return (
     <div className="panel flex flex-col gap-2">
-      <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
-        <LineChartIcon className="h-4 w-4 text-[var(--color-accent-blue)]" /> Payoff Profile
-      </h3>
-      <div role="img" aria-label={`Strategy payoff profile across ${chartData.length} price points. Current spot is ${currentSpot.toFixed(2)}. Exact expiry and current-theoretical profit and loss values are available in the following data table.`} className="h-[400px] w-full">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text-bright)]">
+          <LineChartIcon className="h-4 w-4 text-[var(--color-accent-blue)]" /> Payoff Profile
+        </h3>
+        <div className="flex items-center gap-1" aria-label="Payoff chart zoom controls">
+          <span className="mr-1 text-[11px] text-[var(--color-text-muted)]">
+            {zoomLevel === 0 ? "Full range" : `Zoom: ${(ZOOM_FACTOR ** zoomLevel).toFixed(1)}×`}
+          </span>
+          <Button
+            variant="icon"
+            onClick={() => setZoomLevel((level) => Math.max(0, level - 1))}
+            disabled={zoomLevel === 0}
+            aria-label="Zoom out payoff profile"
+            title="Zoom out"
+          >
+            <ZoomOut className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="icon"
+            onClick={() => setZoomLevel((level) => Math.min(MAX_ZOOM_LEVEL, level + 1))}
+            disabled={zoomLevel === MAX_ZOOM_LEVEL}
+            aria-label="Zoom in payoff profile"
+            title="Zoom in around current spot"
+          >
+            <ZoomIn className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="icon"
+            onClick={() => setZoomLevel(0)}
+            disabled={zoomLevel === 0}
+            aria-label="Reset payoff zoom"
+            title="Reset zoom"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+      <div role="img" aria-label={`Strategy payoff profile across ${chartData.length} price points. Current spot is ${currentSpot.toFixed(2)}. Exact expiry and current-theoretical profit and loss values are available in the following data table.`} title="Right-click to reset payoff zoom" onContextMenu={(event) => { event.preventDefault(); setZoomLevel(0); }} className="h-[400px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <defs>
@@ -75,7 +146,8 @@ export function PayoffChart({ data, currentSpot }: PayoffChartProps) {
             <XAxis
               dataKey="spot"
               type="number"
-              domain={['dataMin', 'dataMax']}
+              domain={xDomain}
+              allowDataOverflow
               stroke="var(--color-chart-axis-text)"
               fontSize={11}
             />

@@ -15,7 +15,3 @@ export const METRIC_TO_ALERT: Record<GreekMetric, AlertMetric> = {
   vanna: "Vanna", vomma: "Vomma", charm: "Charm", speed: "Speed", color: "Color",
   zomma: "Zomma", ultima: "Ultima",
 };
-
-/** The three Greeks most commonly watched for directional/time/vol risk —
- * always shown first, regardless of the visible-Greeks toggle set. */
-export const FEATURED_GREEKS: GreekMetric[] = ["delta", "theta", "vega"];

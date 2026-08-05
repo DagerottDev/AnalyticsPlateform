@@ -11,9 +11,16 @@ describe("user settings defaults", () => {
       showGreeks: true,
       showBuildup: true,
       moneyness: "all",
-      strikesEachSide: null,
+      strikesEachSide: 10,
       defaultGttValidityDays: 30,
+      rollingSelectionMode: "smooth",
     });
+    expect(preferences.combinedPremiumWorkspace).toMatchObject({
+      timeframe: "5",
+      syncCharts: true,
+      seriesType: "candlestick",
+    });
+    expect(preferences.combinedPremiumWorkspace.indicators.calls.ema.enabled).toBe(true);
     expect(preferences.replay.fallbackIvPercent).toMatchObject({ NIFTY: 14, BANKNIFTY: 18, DEFAULT: 15 });
     expect(preferences.analytics.riskFreeRatePercent).toMatchObject({ NIFTY: 10, SENSEX: 10, DEFAULT: 10 });
   });

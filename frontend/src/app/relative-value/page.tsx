@@ -1,14 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BarChart3, Loader2, RefreshCw, X } from "lucide-react";
+import { BarChart3, BookOpen, Loader2, RefreshCw, X } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { EducationPopover } from "@/components/ui/EducationPopover";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { RelativeValueEducationAside } from "@/components/volatility/RelativeValueEducationAside";
 import { getRelativeValueComparison, type RelativeValueInstrument } from "@/lib/relativeValue";
 import { useWatchlistStore } from "@/stores/tickerStore";
 
@@ -40,6 +42,7 @@ export default function RelativeValuePage() {
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [educationOpen, setEducationOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     if (symbols.length === 0) return;
@@ -66,66 +69,86 @@ export default function RelativeValuePage() {
     <DashboardLayout>
       <PageContainer>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <SectionHeader
-            title="Relative Value"
-            description="Compare nearest-expiry implied volatility, 2% OTM skew, and gamma exposure across your global watchlist."
-          />
-          <Button variant="secondary" onClick={() => void refresh()} disabled={loading || symbols.length === 0}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Refresh snapshot
-          </Button>
+          <div className="flex items-start gap-2">
+            <SectionHeader
+              title="Relative Value"
+              description="Compare nearest-expiry implied volatility, 2% OTM skew, and gamma exposure across your global watchlist."
+            />
+            <EducationPopover
+              title="Relative Value analytics"
+              description="This workspace compares the same volatility and gamma concepts across a small basket. It highlights relative differences; it does not decide whether an instrument is cheap or expensive in isolation."
+              tips={["Check each instrument's expiry because nearest active expiries can differ.", "Skew and GEX are model outputs that need spot, liquidity, and event context."]}
+              links={[{ label: "OIC: Volatility and the Greeks", href: "https://www.optionseducation.org/advancedconcepts/volatility-the-greeks" }]}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            {!educationOpen && (
+              <Button variant="outline" size="sm" onClick={() => setEducationOpen(true)}>
+                <BookOpen className="h-4 w-4" /> Show education
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => void refresh()} disabled={loading || symbols.length === 0}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Refresh snapshot
+            </Button>
+          </div>
         </div>
 
-        <Card className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Comparison basket</span>
-            {symbols.map((symbol) => (
-              <Badge key={symbol} tone="blue" className="gap-1.5 py-1 text-xs">
-                {symbol}
-                {symbols.length > 1 && <button aria-label={`Remove ${symbol}`} onClick={() => removeTicker(symbol)} className="rounded hover:text-white"><X className="h-3 w-3" /></button>}
-              </Badge>
-            ))}
-            {availableQuickSymbols.map((symbol) => (
-              <Button key={symbol} size="sm" variant="outline" disabled={symbols.length >= MAX_SYMBOLS} onClick={() => addTicker(symbol)}>+ {symbol}</Button>
-            ))}
+        <div className={educationOpen ? "grid items-start gap-4 xl:grid-cols-[280px_minmax(0,1fr)]" : ""}>
+          {educationOpen && <RelativeValueEducationAside onClose={() => setEducationOpen(false)} />}
+          <div className="flex min-w-0 flex-col gap-4">
+            <Card className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Comparison basket</span>
+                {symbols.map((symbol) => (
+                  <Badge key={symbol} tone="blue" className="gap-1.5 py-1 text-xs">
+                    {symbol}
+                    {symbols.length > 1 && <button aria-label={`Remove ${symbol}`} onClick={() => removeTicker(symbol)} className="rounded hover:text-white"><X className="h-3 w-3" /></button>}
+                  </Badge>
+                ))}
+                {availableQuickSymbols.map((symbol) => (
+                  <Button key={symbol} size="sm" variant="outline" disabled={symbols.length >= MAX_SYMBOLS} onClick={() => addTicker(symbol)}>+ {symbol}</Button>
+                ))}
+              </div>
+              <p className="text-xs text-[var(--color-text-secondary)]">This basket is shared with Dashboard, Charts, Option Chain, Volatility, and Dealer Flow. Maximum {MAX_SYMBOLS} instruments per comparison to protect broker limits.</p>
+            </Card>
+
+            {error !== null && <ApiErrorDisplay error={error} />}
+
+            <Card className="overflow-hidden p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[920px] text-left text-sm">
+                  <thead className="border-b border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                    <tr>
+                      <th className="px-4 py-3">Instrument</th>
+                      <th className="px-4 py-3 text-right">Spot</th>
+                      <th className="px-4 py-3 text-right">ATM IV</th>
+                      <th className="px-4 py-3 text-right">OTM put IV</th>
+                      <th className="px-4 py-3 text-right">OTM call IV</th>
+                      <th className="px-4 py-3 text-right">Put − call skew</th>
+                      <th className="px-4 py-3 text-right">Net GEX</th>
+                      <th className="px-4 py-3 text-right">IV Rank</th>
+                      <th className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => <ComparisonRow key={row.symbol} row={row} loading={loading} />)}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <RankingCard title="Richest ATM IV" rows={rows} value={(row) => row.atm_iv} formatter={(value) => percent(value)} />
+              <RankingCard title="Most put-heavy skew" rows={rows} value={(row) => row.skew} formatter={(value) => percent(value)} />
+              <RankingCard title="Largest positive GEX" rows={rows} value={(row) => row.net_gex} formatter={(value) => compactGex(value)} />
+            </div>
+
+            <p className="text-xs text-[var(--color-text-muted)]">
+              {generatedAt ? `Last snapshot: ${new Date(generatedAt).toLocaleString()}. ` : ""}
+              Skew compares 2% OTM put and call IV. GEX is a normalized nearest-expiry OI model using observed ATM IV; it is a comparison signal, not a dealer-position estimate. IV Rank appears after at least two daily IV snapshots have accumulated.
+            </p>
           </div>
-          <p className="text-xs text-[var(--color-text-secondary)]">This basket is shared with Dashboard, Charts, Option Chain, Volatility, and Dealer Flow. Maximum {MAX_SYMBOLS} instruments per comparison to protect broker limits.</p>
-        </Card>
-
-        {error !== null && <ApiErrorDisplay error={error} />}
-
-        <Card className="overflow-hidden p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[920px] text-left text-sm">
-              <thead className="border-b border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-                <tr>
-                  <th className="px-4 py-3">Instrument</th>
-                  <th className="px-4 py-3 text-right">Spot</th>
-                  <th className="px-4 py-3 text-right">ATM IV</th>
-                  <th className="px-4 py-3 text-right">OTM put IV</th>
-                  <th className="px-4 py-3 text-right">OTM call IV</th>
-                  <th className="px-4 py-3 text-right">Put − call skew</th>
-                  <th className="px-4 py-3 text-right">Net GEX</th>
-                  <th className="px-4 py-3 text-right">IV Rank</th>
-                  <th className="px-4 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => <ComparisonRow key={row.symbol} row={row} loading={loading} />)}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <RankingCard title="Richest ATM IV" rows={rows} value={(row) => row.atm_iv} formatter={(value) => percent(value)} />
-          <RankingCard title="Most put-heavy skew" rows={rows} value={(row) => row.skew} formatter={(value) => percent(value)} />
-          <RankingCard title="Largest positive GEX" rows={rows} value={(row) => row.net_gex} formatter={(value) => compactGex(value)} />
         </div>
-
-        <p className="text-xs text-[var(--color-text-muted)]">
-          {generatedAt ? `Last snapshot: ${new Date(generatedAt).toLocaleString()}. ` : ""}
-          Skew compares 2% OTM put and call IV. GEX is a normalized nearest-expiry OI model using observed ATM IV; it is a comparison signal, not a dealer-position estimate. IV Rank appears after at least two daily IV snapshots have accumulated.
-        </p>
       </PageContainer>
     </DashboardLayout>
   );

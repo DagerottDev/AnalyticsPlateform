@@ -53,3 +53,27 @@ but never credentials, delivery secrets, orders, or broker tokens.
 | `schema_version` | `int` | Settings document version |
 | `settings` | `json` | Validated normalized preferences |
 | `updated_at` | `timestamptz` | Last full-profile save |
+
+## `fo_iv_universe_snapshots`
+
+One persisted ATM implied-volatility observation per F&O symbol and trading day. The
+scheduled IV-universe worker refreshes the current-day row after its configured freshness
+interval and computes rank/percentile from prior observations. Optional historical seeding
+uses true daily option candles when the connected broker supports them; it never substitutes
+realized volatility while labeling a row as ATM IV.
+
+| Column | Type | Notes |
+|---|---|---|
+| `symbol` | `varchar(50)` | Part of composite primary key; normalized uppercase underlying |
+| `snapshot_date` | `date` | Part of composite primary key |
+| `atm_iv` | `float` | Decimal IV, e.g. `0.18` means 18% |
+| `spot` | `float` | Underlying close/spot used for the observation; nullable |
+| `iv_rank` | `float` | 0–100 rank against prior observations; nullable while building |
+| `iv_percentile` | `float` | 0–100 percentile against prior observations; nullable while building |
+| `updated_at` | `timestamptz` | Last current-day refresh or seed write |
+
+Migration: `0011_create_fo_iv_universe_snapshots.py`.
+
+**Indexes:**
+- composite primary key `(symbol, snapshot_date)`
+- `ix_fo_iv_universe_snapshot_symbol_date` for symbol history and latest-row lookup

@@ -25,6 +25,12 @@ class TestTimeToExpiry:
         far = time_to_expiry(datetime(2024, 6, 1, tzinfo=UTC), at)
         assert far > near
 
+    def test_uses_extended_fno_close_from_cas_effective_date(self):
+        pre_cas_at = datetime(2026, 7, 31, 10, 1, tzinfo=UTC)  # 15:31 IST
+        post_cas_at = datetime(2026, 8, 3, 10, 1, tzinfo=UTC)  # 15:31 IST
+        assert time_to_expiry(datetime(2026, 7, 31, tzinfo=UTC), pre_cas_at) == 0.0001
+        assert time_to_expiry(datetime(2026, 8, 3, tzinfo=UTC), post_cas_at) > 0
+
 
 class TestNearestStrikeTo:
     def test_empty_returns_target(self):

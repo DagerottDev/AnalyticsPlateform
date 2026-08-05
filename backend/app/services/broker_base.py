@@ -12,6 +12,12 @@ from app.models.user import TradingMode, UserProfile
 class BrokerService(ABC):
     """Abstract base class for broker integrations."""
 
+    # Historical option candles are needed to seed the IV universe's daily
+    # observations. Brokers that only expose current option quotes should keep
+    # this disabled so the background job never mistakes an equity/index
+    # history response for option history.
+    supports_historical_options: bool = False
+
     def __init__(
         self,
         trading_mode: TradingMode = TradingMode.PAPER,

@@ -15,7 +15,8 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { History, PlayCircle, Settings2, AlertTriangle } from "lucide-react";
 import type { Instrument } from "@/types/market";
 import { defaultSpotFallback, nearestStrikeTo } from "@/lib/optionMath";
-import { latestExpiry, sortExpiries } from "@/lib/expiry";
+import { quoteLastPrice } from "@/lib/marketTick";
+import { nearestExpiry, sortExpiries } from "@/lib/expiry";
 import { formatStrikeWithPosition } from "@/lib/strikePositions";
 
 function yesterday(): string {
@@ -53,6 +54,7 @@ export default function ReplayPage() {
     setExpiry: setStoreExpiry,
     setStrike: setStoreStrike,
     setOptionSide: setStoreOptionSide,
+    setReplayInstruments,
     setSpeedMultiplier,
     priceCoverage,
     setPriceCoverage,
@@ -93,7 +95,7 @@ export default function ReplayPage() {
       .then((response) => {
         if (!mounted) return;
         setAvailableInstruments(response.instruments);
-        const defaultExpiry = latestExpiry(
+        const defaultExpiry = nearestExpiry(
           response.instruments
             .map((instrument) => instrument.expiry)
             .filter((expiry): expiry is string => Boolean(expiry))
@@ -125,12 +127,8 @@ export default function ReplayPage() {
       try {
         const { quotes } = await getMarketQuotes([targetSymbol]);
         const quote = quotes.find((item) => item.trading_symbol === targetSymbol) ?? quotes[0];
-        // Outside the regular session the broker can expose an indicative
-        // last price; previous close is the stable reference for choosing an
-        // ATM replay strike. During the session the live feed will supersede
-        // this picker seed when it is available.
-        const latest = quote?.prev_close_price ?? quote?.last_price;
-        if (mounted && typeof latest === "number" && Number.isFinite(latest) && latest > 0) {
+        const latest = quoteLastPrice(quote);
+        if (mounted && latest !== null) {
           setMarketSpot(latest);
         }
       } catch {
@@ -217,8 +215,9 @@ export default function ReplayPage() {
     setIsGenerating(true);
     setLoadingLabel("Loading Historical Data...");
     try {
-      // 1. Refresh the instruments list and restrict the replay to the
-      // explicitly selected expiry, strike, and option side.
+      // 1. Refresh the instruments list and validate the explicitly selected
+      // expiry, strike, and option side. The complete selected expiry is
+      // replayed below so every downstream workspace sees the same ladder.
       const instrumentData = await getInstruments(targetSymbol);
 
       if (!instrumentData || instrumentData.instruments.length === 0) {
@@ -226,15 +225,20 @@ export default function ReplayPage() {
         return;
       }
 
-      const replayInstruments = instrumentData.instruments.filter((instrument) =>
+      const selectedContracts = instrumentData.instruments.filter((instrument) =>
         instrument.expiry === selectedExpiry &&
         String(instrument.strike) === selectedStrike &&
         (optionSide === "BOTH" || instrument.option_type === optionSide)
       );
-      if (replayInstruments.length === 0) {
+      if (selectedContracts.length === 0) {
         setError("Select a valid expiry, strike, and option side before starting replay.");
         return;
       }
+      // The selected strike remains the replay's focus/metadata, but feed the
+      // complete selected-expiry ladder. Option Chain, Dealer Flow, Strategy,
+      // and the Greek workspace can then all consume the same historical
+      // session even when a user chooses another strike after playback starts.
+      const replayInstruments = instrumentData.instruments.filter((instrument) => instrument.expiry === selectedExpiry);
 
       const candles = await getHistoricalCandles(targetSymbol, sessionDate, sessionDate, resolution);
       if (!candles || candles.length === 0) {
@@ -266,6 +270,7 @@ export default function ReplayPage() {
       setPriceCoverage(coverage);
 
       // 4. Setup Store and Start
+      setReplayInstruments(replayInstruments);
       setSymbol(targetSymbol);
       setStoreSessionDate(sessionDate);
       setStoreExpiry(selectedExpiry);
@@ -318,7 +323,7 @@ export default function ReplayPage() {
               </p>
               {priceCoverage && priceCoverage.attempted > 0 && (
                 <p className="mx-auto mt-2 max-w-md text-xs text-[var(--color-text-muted)]">
-                  {priceCoverage.matched} of {priceCoverage.attempted} selected contracts are using{" "}
+                  {priceCoverage.matched} of {priceCoverage.attempted} near-ATM expiry contracts are using{" "}
                   <b className="text-[var(--color-text-secondary)]">real broker prices</b>; the rest (and everything
                   further from the money) are modeled with Black-Scholes.
                 </p>
@@ -399,7 +404,7 @@ export default function ReplayPage() {
                   ATM: {atmStrike === null ? "—" : atmStrike.toLocaleString("en-IN")} · spot {strikeSpot.toLocaleString("en-IN")}
                 </span>
                 <span className="text-[11px] text-[var(--color-text-muted)]">
-                  {selectedInstruments.length} contract{selectedInstruments.length === 1 ? "" : "s"} will be replayed.
+                  {selectedInstruments.length} focused contract{selectedInstruments.length === 1 ? "" : "s"}; the full {expiryInstruments.length}-contract expiry ladder feeds every workspace.
                 </span>
               </div>
 

@@ -1,7 +1,14 @@
 import { calculateGreeks, calculateImpliedVolatility, type Greeks } from "@/lib/greeks";
 import type { HistoricalCandle } from "@/lib/market";
 import type { Instrument, MarketTick } from "@/types/market";
-import type { ResolvedSelectionPaths } from "@/lib/analysisSelections";
+import { timeToExpiry } from "@/lib/optionMath";
+import {
+  resolveSelection,
+  type AnalysisSelection,
+  type ResolvedOptionSelection,
+  type ResolvedSelectionPaths,
+  type RollingSelectionMode,
+} from "@/lib/analysisSelections";
 
 export type GreekMetric = Exclude<keyof Greeks, "price">;
 export interface GreekPoint { time: string; value: number; }
@@ -89,6 +96,10 @@ export function buildResolvedGreekSeries(
   candlesBySymbol: Record<string, HistoricalCandle[]>,
   underlyingCandles: HistoricalCandle[],
   riskFreeRate: number = 0.1,
+  selections: AnalysisSelection[] = [],
+  fixedInstruments: Record<string, Instrument> = {},
+  expiryInstruments: Instrument[] = [],
+  mode: RollingSelectionMode = "raw",
 ): GreekSeries {
   const result = EMPTY_SERIES();
   const optionBySymbolAndTime = new Map<string, Map<string, HistoricalCandle>>();
@@ -98,18 +109,155 @@ export function buildResolvedGreekSeries(
   for (const [selectionId, path] of Object.entries(paths)) {
     for (const metric of Object.keys(result) as GreekMetric[]) result[metric][selectionId] = [];
     for (const underlying of underlyingCandles) {
-      const instrument = path[underlying.timestamp];
-      if (!instrument?.strike || !instrument.option_type) continue;
-      const option = optionBySymbolAndTime.get(instrument.trading_symbol)?.get(underlying.timestamp);
-      const expiry = expiryTime(instrument.expiry);
+      const selection = selections.find((item) => item.id === selectionId);
+      const resolution = mode === "smooth" && selection
+        ? resolveSelection(selection, fixedInstruments, expiryInstruments, underlying.close, mode)
+        : path[underlying.timestamp];
+      if (!resolution?.effectiveStrike || !resolution.optionType) continue;
+      const expiry = expiryTime(resolution.components[0]?.instrument.expiry ?? null);
       const timestamp = new Date(underlying.timestamp).getTime();
-      if (!option || !expiry || !Number.isFinite(timestamp)) continue;
+      if (!expiry || !Number.isFinite(timestamp)) continue;
+      let price = 0;
+      let complete = true;
+      for (const { instrument, weight } of resolution.components) {
+        const option = optionBySymbolAndTime.get(instrument.trading_symbol)?.get(underlying.timestamp);
+        if (!option || !Number.isFinite(option.close) || option.close <= 0) { complete = false; break; }
+        price += option.close * weight;
+      }
+      if (!complete) continue;
       const years = Math.max((expiry - timestamp) / (365 * 24 * 60 * 60 * 1000), 0.0001);
-      const iv = calculateImpliedVolatility(instrument.option_type, underlying.close, instrument.strike, years, riskFreeRate, option.close);
+      const iv = calculateImpliedVolatility(resolution.optionType, underlying.close, resolution.effectiveStrike, years, riskFreeRate, price);
       if (iv <= 0) continue;
-      const greeks = calculateGreeks(instrument.option_type, underlying.close, instrument.strike, years, riskFreeRate, iv);
+      const greeks = calculateGreeks(resolution.optionType, underlying.close, resolution.effectiveStrike, years, riskFreeRate, iv);
       for (const metric of Object.keys(result) as GreekMetric[]) {
         result[metric][selectionId].push({ time: underlying.timestamp, value: greeks[metric] });
+      }
+    }
+  }
+  return result;
+}
+
+/** Live Greek aggregate for exact or distance-weighted rolling selections. */
+export function calculateLiveResolvedGreeks(
+  resolutions: Array<ResolvedOptionSelection | null>,
+  underlyingSymbol: string,
+  ticks: Record<string, MarketTick>,
+  riskFreeRate: number = 0.1,
+): LiveGreekCalculation | null {
+  const spot = ticks[underlyingSymbol]?.last_price;
+  if (!spot || !Number.isFinite(spot) || resolutions.length === 0) return null;
+  const values = EMPTY_GREEK_VALUES();
+  const timestamps = [ticks[underlyingSymbol].timestamp];
+  let liveContracts = 0;
+  for (const resolution of resolutions) {
+    if (!resolution?.optionType || !resolution.effectiveStrike) continue;
+    const expiry = expiryTime(resolution.components[0]?.instrument.expiry ?? null);
+    if (!expiry) continue;
+    let premium = 0;
+    let complete = true;
+    for (const { instrument, weight } of resolution.components) {
+      const tick = ticks[instrument.trading_symbol];
+      if (!tick || !tick.last_price || !Number.isFinite(tick.last_price)) { complete = false; break; }
+      premium += tick.last_price * weight;
+      timestamps.push(tick.timestamp);
+    }
+    if (!complete) continue;
+    const valuationTime = timestamps.reduce((latest, timestamp) => (
+      Number.isFinite(timestamp) && timestamp > latest ? timestamp : latest
+    ), 0);
+    const years = Math.max(timeToExpiry(resolution.components[0]?.instrument.expiry ?? null, valuationTime || Date.now()), 0.0001);
+    const iv = calculateImpliedVolatility(resolution.optionType, spot, resolution.effectiveStrike, years, riskFreeRate, premium);
+    if (!Number.isFinite(iv) || iv <= 0) continue;
+    const greeks = calculateGreeks(resolution.optionType, spot, resolution.effectiveStrike, years, riskFreeRate, iv);
+    for (const metric of Object.keys(values) as GreekMetric[]) values[metric] += greeks[metric];
+    liveContracts += 1;
+  }
+  if (liveContracts === 0) return null;
+  const latestTimestamp = timestamps.reduce((latest, timestamp) => (
+    Number.isFinite(timestamp) && timestamp > latest ? timestamp : latest
+  ), 0) || Date.now();
+  return { values, timestamp: new Date(latestTimestamp).toISOString(), liveContracts, totalContracts: resolutions.length };
+}
+
+function tickTimestampMs(timestamp: number): number | null {
+  if (!Number.isFinite(timestamp)) return null;
+  // Broker/replay ticks use milliseconds, but accepting seconds here keeps
+  // this pure helper safe for fixtures and older persisted replay sessions.
+  const milliseconds = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
+  return Number.isFinite(milliseconds) ? milliseconds : null;
+}
+
+/**
+ * Build the portion of the Greek workspace series that has already been fed
+ * by Replay Mode. Replay prices are either real broker candles or the replay
+ * engine's Black-Scholes fallback; both go through the same IV/Greek math as
+ * live quotes. Calculating against each tick's timestamp is important: using
+ * Date.now() makes a historical session look expired (or puts every point at
+ * the current wall-clock time).
+ */
+export function buildReplayResolvedGreekSeries(
+  selections: AnalysisSelection[],
+  fixedInstruments: Record<string, Instrument>,
+  expiryInstruments: Instrument[],
+  timeline: Array<Record<string, MarketTick>>,
+  currentStep: number,
+  underlyingSymbol: string,
+  riskFreeRate: number = 0.1,
+  mode: RollingSelectionMode = "raw",
+): GreekSeries {
+  const result = EMPTY_SERIES();
+  for (const selection of selections) {
+    for (const metric of Object.keys(result) as GreekMetric[]) result[metric][selection.id] = [];
+  }
+  const lastStep = Math.min(Math.trunc(currentStep), timeline.length - 1);
+  if (lastStep < 0) return result;
+
+  for (let step = 0; step <= lastStep; step += 1) {
+    const ticks = timeline[step];
+    const underlying = ticks?.[underlyingSymbol];
+    const timestamp = tickTimestampMs(underlying?.timestamp ?? Number.NaN);
+    const spot = underlying?.last_price;
+    if (timestamp === null || !spot || !Number.isFinite(spot)) continue;
+
+    for (const selection of selections) {
+      const resolution = resolveSelection(selection, fixedInstruments, expiryInstruments, spot, mode);
+      if (!resolution?.optionType || !resolution.effectiveStrike) continue;
+      const expiry = resolution.components[0]?.instrument.expiry;
+      if (!expiry) continue;
+
+      let premium = 0;
+      let complete = true;
+      for (const { instrument, weight } of resolution.components) {
+        const tick = ticks[instrument.trading_symbol];
+        if (!tick || !Number.isFinite(tick.last_price) || tick.last_price <= 0) {
+          complete = false;
+          break;
+        }
+        premium += tick.last_price * weight;
+      }
+      if (!complete || !Number.isFinite(premium) || premium <= 0) continue;
+
+      const years = Math.max(timeToExpiry(expiry, timestamp), 0.0001);
+      const iv = calculateImpliedVolatility(
+        resolution.optionType,
+        spot,
+        resolution.effectiveStrike,
+        years,
+        riskFreeRate,
+        premium,
+      );
+      if (!Number.isFinite(iv) || iv <= 0) continue;
+      const greeks = calculateGreeks(
+        resolution.optionType,
+        spot,
+        resolution.effectiveStrike,
+        years,
+        riskFreeRate,
+        iv,
+      );
+      const pointTime = new Date(timestamp).toISOString();
+      for (const metric of Object.keys(result) as GreekMetric[]) {
+        result[metric][selection.id].push({ time: pointTime, value: greeks[metric] });
       }
     }
   }
@@ -156,7 +304,6 @@ export function calculateLiveCombinedGreeks(
 
   const values = EMPTY_GREEK_VALUES();
   const timestamps = [underlyingTick.timestamp];
-  const now = Date.now();
   let liveContracts = 0;
 
   for (const instrument of instruments) {
@@ -165,7 +312,11 @@ export function calculateLiveCombinedGreeks(
     const optionTick = ticks[instrument.trading_symbol];
     if (!expiry || !optionTick || !optionTick.last_price || !Number.isFinite(optionTick.last_price)) continue;
 
-    const years = Math.max((expiry - now) / (365 * 24 * 60 * 60 * 1000), 0.0001);
+    timestamps.push(optionTick.timestamp);
+    const valuationTime = timestamps.reduce((latest, timestamp) => (
+      Number.isFinite(timestamp) && timestamp > latest ? timestamp : latest
+    ), 0) || Date.now();
+    const years = Math.max(timeToExpiry(instrument.expiry, valuationTime), 0.0001);
     const iv = calculateImpliedVolatility(
       instrument.option_type,
       spot,
@@ -178,15 +329,18 @@ export function calculateLiveCombinedGreeks(
 
     const greeks = calculateGreeks(instrument.option_type, spot, instrument.strike, years, riskFreeRate, iv);
     for (const metric of Object.keys(values) as GreekMetric[]) values[metric] += greeks[metric];
-    timestamps.push(optionTick.timestamp);
     liveContracts += 1;
   }
 
   if (liveContracts === 0) return null;
 
+  const latestTimestamp = timestamps.reduce((latest, timestamp) => (
+    Number.isFinite(timestamp) && timestamp > latest ? timestamp : latest
+  ), 0) || Date.now();
+
   return {
     values,
-    timestamp: new Date(Math.max(...timestamps, now)).toISOString(),
+    timestamp: new Date(latestTimestamp).toISOString(),
     liveContracts,
     totalContracts: instruments.length,
   };

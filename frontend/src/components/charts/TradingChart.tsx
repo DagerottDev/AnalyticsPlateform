@@ -1,20 +1,22 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { createChart, IChartApi, ISeriesApi, Time } from "lightweight-charts";
+import { useCallback, useEffect, useRef } from "react";
+import { createChart, IChartApi, ISeriesApi, Time, type MouseEventParams } from "lightweight-charts";
 import { OHLCVData, calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateSupertrend } from "@/lib/indicators";
 import { ChartIndicators, indicatorParameter } from "@/lib/chartIndicators";
 import { normalizeOHLCVData, sortAndDeduplicateChartData } from "@/lib/chartData";
-import { formatMarketDateTime, MARKET_CHART_LOCALIZATION, formatMarketTick } from "@/lib/chartTime";
+import { supertrendColor, SUPERTREND_DOWN_COLOR, SUPERTREND_UP_COLOR } from "@/lib/supertrendColors";
+import { formatMarketDateTime, MARKET_CHART_LOCALIZATION, formatMarketTick, timeToUnixSeconds } from "@/lib/chartTime";
 import { ChartLegend } from "./ChartLegend";
 import { ChartDataTable } from "./ChartDataTable";
+import { ChartZoomControls } from "./ChartZoomControls";
 import { useGreekChartSync } from "@/components/greek-workspace/GreekChartSyncProvider";
+import { zoomLightweightChart } from "@/lib/lightweightChartZoom";
 
 // lightweight-charts renders to <canvas>, which cannot resolve CSS var() —
 // these hex literals mirror the design tokens in globals.css (documented in
-// docs/DESIGN_SYSTEM.md). Indicator lines are assigned in one fixed
-// categorical order (1st SMA, 2nd EMA, 3rd Bollinger, 4th Supertrend), never
-// picked ad hoc per chart.
+// docs/DESIGN_SYSTEM.md). Indicator lines use a fixed categorical order;
+// Supertrend is the exception because its color encodes bullish/bearish state.
 const COLOR_GRID = "#1e222d"; // --color-border-subtle
 const COLOR_BORDER = "#2a2e3e"; // --color-border-default
 const COLOR_AXIS_TEXT = "#787b86"; // --color-text-secondary
@@ -23,7 +25,24 @@ const COLOR_LOSS = "#ef5350"; // --color-loss
 const COLOR_CAT_1 = "#2962ff"; // --color-cat-1 (blue)
 const COLOR_CAT_2 = "#ff9800"; // --color-cat-2 (orange)
 const COLOR_CAT_3 = "#ab47bc"; // --color-cat-3 (purple)
-const COLOR_CAT_4 = "#00bcd4"; // --color-cat-4 (cyan)
+
+function nearestValue(values: Map<number, number>, time: Time): number | null {
+  const target = timeToUnixSeconds(time);
+  if (target === null || values.size === 0) return null;
+  const exact = values.get(target);
+  if (exact !== undefined) return exact;
+
+  let nearest: number | null = null;
+  let distance = Number.POSITIVE_INFINITY;
+  for (const [candidateTime, value] of values) {
+    const candidateDistance = Math.abs(candidateTime - target);
+    if (candidateDistance < distance) {
+      distance = candidateDistance;
+      nearest = value;
+    }
+  }
+  return nearest;
+}
 
 interface TradingChartProps {
   data: OHLCVData[];
@@ -31,14 +50,19 @@ interface TradingChartProps {
   indicators?: ChartIndicators;
   symbol?: string;
   timeframeLabel?: string;
-  /** Registers the chart with a workspace-level time/zoom synchronizer. */
+  /** Registers the chart with a workspace-level time/zoom/crosshair synchronizer. */
   syncId?: string;
+  /** Reports the hovered candle time in Unix seconds, including null on exit. */
+  onCrosshairTimeChange?: (time: number | null) => void;
+  /** Candles show the full broker OHLC range; line uses only each close. */
+  seriesType?: "candlestick" | "line";
 }
 
-export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabel = "1m", syncId }: TradingChartProps) {
+export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabel = "1m", syncId, onCrosshairTimeChange, seriesType = "candlestick" }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const closeSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const latestDataRef = useRef(data);
   
@@ -53,7 +77,30 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
   const rsiContainerRef = useRef<HTMLDivElement>(null);
   const rsiChartRef = useRef<IChartApi | null>(null);
   const rsiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const { registerChart, notifyTimeRange } = useGreekChartSync();
+  const crosshairValuesRef = useRef(new Map<number, number>());
+  const onCrosshairTimeChangeRef = useRef(onCrosshairTimeChange);
+  onCrosshairTimeChangeRef.current = onCrosshairTimeChange;
+  const { registerChart, notifyTimeRange, notifyCrosshair } = useGreekChartSync();
+
+  const applyCrosshair = useCallback((time: Time | null) => {
+    const chart = chartRef.current;
+    if (!chart || time === null) {
+      chart?.clearCrosshairPosition();
+      return;
+    }
+    const value = nearestValue(crosshairValuesRef.current, time);
+    if (value === null) {
+      chart.clearCrosshairPosition();
+      return;
+    }
+    if (seriesType === "candlestick" && candleSeriesRef.current) {
+      chart.setCrosshairPosition(value, time, candleSeriesRef.current);
+    } else if (seriesType === "line" && closeSeriesRef.current) {
+      chart.setCrosshairPosition(value, time, closeSeriesRef.current);
+    } else {
+      chart.clearCrosshairPosition();
+    }
+  }, [seriesType]);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -84,14 +131,18 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       autoSize: true,
     });
 
-    // Candlestick Series
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = seriesType === "candlestick" ? chart.addCandlestickSeries({
       upColor: COLOR_PROFIT,
       downColor: COLOR_LOSS,
       borderVisible: false,
       wickUpColor: COLOR_PROFIT,
       wickDownColor: COLOR_LOSS,
-    });
+    }) : null;
+    const closeSeries = seriesType === "line" ? chart.addLineSeries({
+      color: COLOR_CAT_1,
+      lineWidth: 2,
+      crosshairMarkerVisible: true,
+    }) : null;
 
     // Volume Series
     const volumeSeries = chart.addHistogramSeries({
@@ -105,16 +156,24 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+    closeSeriesRef.current = closeSeries;
     volumeSeriesRef.current = volumeSeries;
 
     const onVisibleTimeRangeChange = (range: Parameters<typeof notifyTimeRange>[1]) => {
       if (syncId) notifyTimeRange(syncId, range);
     };
+    const onCrosshairMove = (param: MouseEventParams<Time>) => {
+      const time = param.time ?? null;
+      if (syncId) notifyCrosshair(syncId, time);
+      onCrosshairTimeChangeRef.current?.(time === null ? null : timeToUnixSeconds(time));
+    };
     if (syncId) chart.timeScale().subscribeVisibleTimeRangeChange(onVisibleTimeRangeChange);
-    const unregisterChart = syncId ? registerChart(syncId, chart) : () => undefined;
+    chart.subscribeCrosshairMove(onCrosshairMove);
+    const unregisterChart = syncId ? registerChart(syncId, chart, applyCrosshair) : () => undefined;
 
     return () => {
       if (syncId) chart.timeScale().unsubscribeVisibleTimeRangeChange(onVisibleTimeRangeChange);
+      chart.unsubscribeCrosshairMove(onCrosshairMove);
       unregisterChart();
       chart.remove();
       // React Strict Mode and fast refresh can dispose a chart and then run a
@@ -123,20 +182,22 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       if (chartRef.current === chart) {
         chartRef.current = null;
         candleSeriesRef.current = null;
+        closeSeriesRef.current = null;
         volumeSeriesRef.current = null;
         smaSeriesRef.current = null;
         emaSeriesRef.current = null;
         bbUpperRef.current = null;
         bbLowerRef.current = null;
         supertrendSeriesRef.current = null;
+        crosshairValuesRef.current.clear();
       }
     };
-  }, [notifyTimeRange, registerChart, syncId]);
+  }, [applyCrosshair, notifyCrosshair, notifyTimeRange, registerChart, seriesType, syncId]);
 
   // Update Data and Indicators
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart || !candleSeriesRef.current || !volumeSeriesRef.current || !data || data.length === 0) return;
+    if (!chart || (!candleSeriesRef.current && !closeSeriesRef.current) || !volumeSeriesRef.current || !data || data.length === 0) return;
 
     // removeSeries throws "Value is undefined" when a series belongs to a
     // chart that has already been disposed (most commonly during Strict Mode
@@ -156,6 +217,11 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
     };
 
     const normalizedData = normalizeOHLCVData(data);
+    crosshairValuesRef.current = new Map(
+      normalizedData
+        .map((point) => [timeToUnixSeconds(point.time as Time), point.close] as const)
+        .filter((entry): entry is readonly [number, number] => entry[0] !== null),
+    );
     const formattedData = normalizedData.map(d => ({
       time: d.time as Time,
       open: d.open,
@@ -164,7 +230,11 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       close: d.close,
     }));
 
-    candleSeriesRef.current.setData(formattedData);
+    if (seriesType === "candlestick") {
+      candleSeriesRef.current?.setData(formattedData);
+    } else {
+      closeSeriesRef.current?.setData(normalizedData.map((point) => ({ time: point.time as Time, value: point.close })));
+    }
 
     const volumeData = normalizedData.map(d => ({
       time: d.time as Time,
@@ -229,9 +299,8 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
     if (indicators?.supertrend.enabled) {
       if (!supertrendSeriesRef.current) {
         supertrendSeriesRef.current = chart.addLineSeries({
-          color: COLOR_CAT_4,
+          color: SUPERTREND_UP_COLOR,
           lineWidth: 2,
-          lineStyle: 2,
         });
       }
       const supertrendData = calculateSupertrend(
@@ -242,6 +311,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       const stData = sortAndDeduplicateChartData(supertrendData).map(d => ({
         time: d.time as Time,
         value: d.value,
+        color: supertrendColor(d.trend),
       }));
       supertrendSeriesRef.current?.setData(stData);
     } else if (supertrendSeriesRef.current) {
@@ -258,7 +328,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       });
     }
 
-  }, [data, indicators, notifyTimeRange, syncId]);
+  }, [data, indicators, notifyTimeRange, seriesType, syncId]);
 
   // RSI Pane Setup
   useEffect(() => {
@@ -310,10 +380,23 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
     latestDataRef.current = normalizeOHLCVData(data);
   }, [data]);
 
+  const resetChartView = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.timeScale().fitContent();
+    rsiChartRef.current?.timeScale().fitContent();
+    if (syncId) notifyTimeRange(syncId, chart.timeScale().getVisibleRange());
+  }, [notifyTimeRange, syncId]);
+  const zoomChart = useCallback((direction: "in" | "out") => {
+    zoomLightweightChart(chartRef.current, direction);
+    const range = chartRef.current?.timeScale().getVisibleRange();
+    if (syncId && range) notifyTimeRange(syncId, range);
+  }, [notifyTimeRange, syncId]);
+
   // Live ticks must retain the newest candle without rebuilding the chart.
   useEffect(() => {
     const latestData = latestDataRef.current;
-    if (liveTick && candleSeriesRef.current && latestData.length > 0) {
+    if (liveTick && latestData.length > 0) {
       // Very basic live update: we just update the last candle's close and high/low
       // In a real app, we need to handle new minute candles forming.
       const lastCandle = latestData[latestData.length - 1];
@@ -322,21 +405,26 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       const newHigh = Math.max(lastCandle.high, liveTick.price);
       const newLow = Math.min(lastCandle.low, liveTick.price);
       
-      candleSeriesRef.current.update({
-        time,
-        open: lastCandle.open,
-        high: newHigh,
-        low: newLow,
-        close: liveTick.price,
-      });
+      if (seriesType === "candlestick") {
+        candleSeriesRef.current?.update({
+          time,
+          open: lastCandle.open,
+          high: newHigh,
+          low: newLow,
+          close: liveTick.price,
+        });
+      } else {
+        closeSeriesRef.current?.update({ time, value: liveTick.price });
+      }
     }
-  }, [liveTick]);
+  }, [liveTick, seriesType]);
 
   const legendItems = [
     indicators?.sma.enabled && { label: `SMA (${indicatorParameter(indicators, "sma", "period")})`, color: COLOR_CAT_1 },
     indicators?.ema.enabled && { label: `EMA (${indicatorParameter(indicators, "ema", "period")})`, color: COLOR_CAT_2 },
     indicators?.bbands.enabled && { label: `Bollinger (${indicatorParameter(indicators, "bbands", "period")}, ${indicatorParameter(indicators, "bbands", "multiplier")})`, color: COLOR_CAT_3 },
-    indicators?.supertrend.enabled && { label: `Supertrend (${indicatorParameter(indicators, "supertrend", "period")}, ${indicatorParameter(indicators, "supertrend", "multiplier")})`, color: COLOR_CAT_4 },
+    indicators?.supertrend.enabled && { label: "Supertrend bullish", color: SUPERTREND_UP_COLOR },
+    indicators?.supertrend.enabled && { label: "Supertrend bearish", color: SUPERTREND_DOWN_COLOR },
   ].filter((item): item is { label: string; color: string } => Boolean(item));
 
   const formatTime = (time: OHLCVData["time"]) => {
@@ -354,12 +442,14 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
 
   return (
     <div className="panel flex w-full flex-col gap-1 p-2">
-      {symbol && <div className="px-2 pt-2 text-sm font-bold text-[var(--color-text-bright)]">{symbol} <span className="font-normal text-[var(--color-text-muted)] text-xs ml-2">{timeframeLabel} Timeframe</span></div>}
+      <div className="flex items-center justify-between gap-2 px-2 pt-2">{symbol && <div className="text-sm font-bold text-[var(--color-text-bright)]">{symbol} <span className="ml-2 text-xs font-normal text-[var(--color-text-muted)]">{timeframeLabel} Timeframe</span></div>}<ChartZoomControls label={symbol ?? "chart"} onZoomIn={() => zoomChart("in")} onZoomOut={() => zoomChart("out")} onReset={resetChartView} /></div>
       <ChartLegend items={legendItems} />
       <div
         ref={chartContainerRef}
         role="img"
-        aria-label={`${symbol ?? "Instrument"} ${timeframeLabel} candlestick chart with ${data.length} candles. Use the following data table for exact OHLC and volume values.`}
+        aria-label={`${symbol ?? "Instrument"} ${timeframeLabel} ${seriesType === "line" ? "close-price line" : "candlestick"} chart with ${data.length} candles. Use the following data table for exact OHLC and volume values.`}
+        title="Right-click to reset chart view"
+        onContextMenu={(event) => { event.preventDefault(); resetChartView(); }}
         className="h-[400px] w-full"
       />
       <ChartDataTable
@@ -379,6 +469,8 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
             ref={rsiContainerRef}
             role="img"
             aria-label={`RSI chart using a ${indicatorParameter(indicators, "rsi", "period")}-period calculation. Exact values are available in the following data table.`}
+            title="Right-click to reset chart view"
+            onContextMenu={(event) => { event.preventDefault(); resetChartView(); }}
             className="h-[150px] w-full"
           />
           <ChartDataTable

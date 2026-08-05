@@ -15,6 +15,9 @@ export type DefaultAlertMetric = "Price" | "IV" | "Delta" | "Gamma" | "Theta" | 
 export type DefaultAlertOperator = ">" | "<" | ">=" | "<=";
 export type ChartTimeframe = "1" | "3" | "5" | "10" | "15";
 export type ReplayResolution = "1" | "5" | "15";
+export type RollingSelectionMode = "smooth" | "raw";
+export type PremiumChartSeriesType = "candlestick" | "line";
+export type CombinedPremiumGroup = "calls" | "puts" | "both";
 
 export const INDEX_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"] as const;
 export const DEFAULT_RATE_SYMBOL = "DEFAULT";
@@ -25,8 +28,9 @@ export interface UserPreferences {
   general: { defaultSymbol: string; watchlist: string[] };
   notifications: { toast: boolean; desktop: boolean };
   charts: { timeframe: ChartTimeframe; historyDays: number; refreshSeconds: 15 | 30 | 60; indicators: ChartIndicators };
-  optionChain: { showGreeks: boolean; showBuildup: boolean; moneyness: MoneynessFilter; strikesEachSide: 5 | 10 | 20 | null; defaultGttValidityDays: number };
+  optionChain: { showGreeks: boolean; showBuildup: boolean; moneyness: MoneynessFilter; strikesEachSide: 5 | 10 | 20 | null; defaultGttValidityDays: number; rollingSelectionMode: RollingSelectionMode };
   greekWorkspace: { timeframe: ChartTimeframe; visibleGreeks: GreekMetric[]; panels: Partial<Record<GreekMetric, GreekPanelLayout>>; educationOpen: boolean; syncCharts: boolean };
+  combinedPremiumWorkspace: { timeframe: ChartTimeframe; syncCharts: boolean; seriesType: PremiumChartSeriesType; indicators: Record<CombinedPremiumGroup, ChartIndicators> };
   replay: { resolution: ReplayResolution; speedMultiplier: ReplaySpeed; optionSide: ReplayOptionSide; fallbackIvPercent: Record<string, number> };
   analytics: { riskFreeRatePercent: Record<string, number> };
   strategy: { defaultPreset: StrategyPresetName; backtestHoldingDays: number; backtestDaysToExpiry: number };
@@ -40,19 +44,31 @@ export interface ServerUserPreferences extends UserPreferences {
 
 const cloneIndicators = (): ChartIndicators => createDefaultChartIndicators();
 
+function premiumIndicators(): ChartIndicators {
+  const indicators = cloneIndicators();
+  indicators.ema.enabled = true;
+  return indicators;
+}
+
 export const createDefaultUserPreferences = (): UserPreferences => ({
   schemaVersion: 1,
   appearance: { theme: "dark" },
   general: { defaultSymbol: "NIFTY", watchlist: ["NIFTY", "BANKNIFTY"] },
   notifications: { toast: true, desktop: false },
   charts: { timeframe: "1", historyDays: 7, refreshSeconds: 30, indicators: cloneIndicators() },
-  optionChain: { showGreeks: true, showBuildup: true, moneyness: "all", strikesEachSide: null, defaultGttValidityDays: 30 },
+  optionChain: { showGreeks: true, showBuildup: true, moneyness: "all", strikesEachSide: 10, defaultGttValidityDays: 30, rollingSelectionMode: "smooth" },
   greekWorkspace: {
     timeframe: "5",
     visibleGreeks: ["delta", "gamma", "theta", "vega", "vanna", "vomma"],
     panels: {},
     educationOpen: false,
     syncCharts: false,
+  },
+  combinedPremiumWorkspace: {
+    timeframe: "5",
+    syncCharts: true,
+    seriesType: "candlestick",
+    indicators: { calls: premiumIndicators(), puts: premiumIndicators(), both: premiumIndicators() },
   },
   replay: {
     resolution: "1",
@@ -74,6 +90,7 @@ function preferencesFromState(state: SettingsState): UserPreferences {
     charts: state.charts,
     optionChain: state.optionChain,
     greekWorkspace: state.greekWorkspace,
+    combinedPremiumWorkspace: state.combinedPremiumWorkspace,
     replay: state.replay,
     analytics: state.analytics,
     strategy: state.strategy,
@@ -131,6 +148,14 @@ function migrateLegacy(persistedState: unknown): Partial<SettingsState> {
   if (legacy.appearance && legacy.general && legacy.notifications) return {
     ...legacy,
     optionChain: { ...defaults.optionChain, ...legacy.optionChain },
+    combinedPremiumWorkspace: {
+      ...defaults.combinedPremiumWorkspace,
+      ...legacy.combinedPremiumWorkspace,
+      indicators: {
+        ...defaults.combinedPremiumWorkspace.indicators,
+        ...legacy.combinedPremiumWorkspace?.indicators,
+      },
+    },
   };
   const preferences: UserPreferences = {
     ...defaults,

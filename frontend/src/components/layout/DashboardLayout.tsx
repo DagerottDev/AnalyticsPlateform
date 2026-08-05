@@ -15,9 +15,10 @@ import { ApiErrorLogPanel } from "./ApiErrorLogPanel";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
+  sidebarCollapsed?: boolean;
 }
 
-export function DashboardLayout({ children }: DashboardLayoutProps) {
+export function DashboardLayout({ children, sidebarCollapsed = false }: DashboardLayoutProps) {
   // Keep the shell deterministic during SSR and the first client render.
   // Auth persistence hydrates in effects; gating this layout on that
   // client-only state produces a shell-vs-spinner hydration mismatch on
@@ -32,7 +33,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       </a>
       <Header />
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
+        <Sidebar initialCollapsed={sidebarCollapsed} />
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-3 pb-24 sm:p-4 sm:pb-24 md:pb-4">
           {children}
         </main>

@@ -3,10 +3,9 @@
 import type { ChangeEvent } from "react";
 import { BellPlus } from "lucide-react";
 import { GreekLineChart } from "@/components/charts/GreekLineChart";
+import { NumericParameterInput } from "@/components/charts/NumericParameterInput";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
-import { Badge } from "@/components/ui/Badge";
 import { EducationPopover } from "@/components/ui/EducationPopover";
 import { CORE_GREEKS_REFERENCE, GREEK_EDUCATION, GREEKS_GLOSSARY_REFERENCE } from "@/lib/greekEducation";
 import type { GreekPanelLayout } from "@/lib/greekWorkspaceLayout";
@@ -22,13 +21,11 @@ interface GreekChartCardProps {
   onLayoutChange: (layout: GreekPanelLayout) => void;
   onRequestAlert: (metric: GreekMetric) => void;
   syncId: string;
-  /** Tags this card as one of the always-visible Featured Greeks. */
-  featured?: boolean;
   alertsDisabled?: boolean;
   alertDisabledReason?: string;
 }
 
-export function GreekChartCard({ title, metric, points, liveContracts, totalContracts, layout, onLayoutChange, onRequestAlert, syncId, featured, alertsDisabled = false, alertDisabledReason }: GreekChartCardProps) {
+export function GreekChartCard({ title, metric, points, liveContracts, totalContracts, layout, onLayoutChange, onRequestAlert, syncId, alertsDisabled = false, alertDisabledReason }: GreekChartCardProps) {
   const handleOverlayChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const overlay = event.target.value as GreekPanelLayout["overlay"];
     onLayoutChange({
@@ -46,7 +43,6 @@ export function GreekChartCard({ title, metric, points, liveContracts, totalCont
         <div>
           <div className="flex items-center gap-1">
             <h2 className="text-base font-semibold text-[var(--color-text-bright)]">{title}</h2>
-            {featured && <Badge tone="blue">Popular</Badge>}
             <EducationPopover title={GREEK_EDUCATION[metric].label} description={GREEK_EDUCATION[metric].description} tips={["Values are model estimates, not a guarantee of a future price move.", "This panel aggregates one contract at each selected strike."]} links={[{ label: "OIC: Understanding option Greeks", href: CORE_GREEKS_REFERENCE }, { label: "OIC options glossary", href: GREEKS_GLOSSARY_REFERENCE }]} />
           </div>
           <p className="text-xs text-[var(--color-text-muted)]">Sum of one contract at each selected strike.{liveContracts === totalContracts ? " Live quotes are included." : liveContracts > 0 ? ` Live quote coverage ${liveContracts}/${totalContracts}; waiting contracts are excluded.` : " Waiting for live option quotes."}</p>
@@ -57,15 +53,15 @@ export function GreekChartCard({ title, metric, points, liveContracts, totalCont
               <option value="none">None</option><option value="sma">SMA</option><option value="ema">EMA</option><option value="bbands">Bollinger</option><option value="supertrend">Supertrend</option>
             </Select>
           </span>
-          {layout.overlay !== "none" && <label className="text-[var(--color-text-secondary)]">{layout.overlay === "supertrend" ? "ATR length" : "Length"} <Input aria-label={`${title} indicator length`} type="number" min="2" max="500" value={layout.period} onChange={(event) => onLayoutChange({ ...layout, period: Math.max(2, Math.min(500, event.target.valueAsNumber || 2)) })} className="ml-1 inline h-8 w-16 px-2 text-xs" /></label>}
-          {(layout.overlay === "bbands" || layout.overlay === "supertrend") && <label className="text-[var(--color-text-secondary)]">{layout.overlay === "supertrend" ? "Multiplier" : "σ"} <Input aria-label={`${title} ${layout.overlay === "supertrend" ? "Supertrend multiplier" : "Bollinger multiplier"}`} type="number" min="0.1" max="10" step="0.1" value={layout.multiplier} onChange={(event) => onLayoutChange({ ...layout, multiplier: Math.max(0.1, Math.min(10, event.target.valueAsNumber || 2)) })} className="ml-1 inline h-8 w-16 px-2 text-xs" /></label>}
+          {layout.overlay !== "none" && <label className="text-[var(--color-text-secondary)]">{layout.overlay === "supertrend" ? "ATR length" : "Length"} <NumericParameterInput ariaLabel={`${title} indicator length`} value={layout.period} min={2} max={500} step={1} integer onValueChange={(period) => onLayoutChange({ ...layout, period })} className="ml-1 inline h-8 w-16 px-2 text-xs" /></label>}
+          {(layout.overlay === "bbands" || layout.overlay === "supertrend") && <label className="text-[var(--color-text-secondary)]">{layout.overlay === "supertrend" ? "Multiplier" : "σ"} <NumericParameterInput ariaLabel={`${title} ${layout.overlay === "supertrend" ? "Supertrend multiplier" : "Bollinger multiplier"}`} value={layout.multiplier} min={layout.overlay === "supertrend" ? 1 : 0.1} max={10} step={layout.overlay === "supertrend" ? 1 : 0.1} integer={layout.overlay === "supertrend"} onValueChange={(multiplier) => onLayoutChange({ ...layout, multiplier })} className="ml-1 inline h-8 w-16 px-2 text-xs" /></label>}
           <Button size="sm" variant="outline" onClick={() => onRequestAlert(metric)} disabled={alertsDisabled} title={alertDisabledReason ?? `Create a ${title} alert`}>
             <BellPlus className="h-3.5 w-3.5" /> Alert
           </Button>
         </div>
       </div>
 
-      {points.length > 0 ? <GreekLineChart points={points} overlay={layout.overlay} overlayPeriod={layout.period} bollingerMultiplier={layout.multiplier} syncId={syncId} /> : <div className="flex min-h-[290px] items-center justify-center text-sm text-[var(--color-text-muted)]">No valid Greek values for this selection yet.</div>}
+      {points.length > 0 ? <GreekLineChart metric={metric} points={points} overlay={layout.overlay} overlayPeriod={layout.period} bollingerMultiplier={layout.multiplier} syncId={syncId} /> : <div className="flex min-h-[290px] items-center justify-center text-sm text-[var(--color-text-muted)]">No valid Greek values for this selection yet.</div>}
     </section>
   );
 }

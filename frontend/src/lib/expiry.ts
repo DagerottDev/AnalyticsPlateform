@@ -44,3 +44,21 @@ export function latestExpiry(expiries: readonly string[]): string | null {
     ? sorted[sorted.length - 1]
     : null;
 }
+
+/**
+ * Return the nearest upcoming expiry for default selectors. Expiry feeds can
+ * occasionally retain a recently expired contract, so those are skipped when
+ * a future contract exists. If the feed contains only historical expiries,
+ * fall back to the most recent valid one so the selector is never blank.
+ */
+export function nearestExpiry(expiries: readonly string[], atMs: number = Date.now()): string | null {
+  const sorted = sortExpiries(expiries);
+  const valid = sorted.filter((expiry) => expiryTimestamp(expiry) !== null);
+  const upcoming = valid.find((expiry) => {
+    const timestamp = expiryTimestamp(expiry)!;
+    // Treat the whole expiry calendar day as available. This avoids dropping
+    // today's contract at midnight while still skipping prior expiries.
+    return timestamp + 24 * 60 * 60 * 1000 - 1 >= atMs;
+  });
+  return upcoming ?? valid.at(-1) ?? null;
+}

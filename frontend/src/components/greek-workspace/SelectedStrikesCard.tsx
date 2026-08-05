@@ -1,11 +1,12 @@
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import type { Instrument } from "@/types/market";
+import { resolvedSelectionLabel, type ResolvedOptionSelection } from "@/lib/analysisSelections";
 
 interface SelectedStrikesCardProps {
   instruments: Instrument[];
   expiry: string;
-  rollingSelections?: Array<{ label: string; instrument: Instrument | null }>;
+  rollingSelections?: Array<{ label: string; resolution: ResolvedOptionSelection | null }>;
 }
 
 function formatStrike(strike: number | null): string {
@@ -50,10 +51,10 @@ export function SelectedStrikesCard({ instruments, expiry, rollingSelections = [
             </div>
           </div>
         ))}
-        {rollingSelections.map(({ label, instrument }) => (
+        {rollingSelections.map(({ label, resolution }) => (
           <div key={label} role="listitem" aria-label={`${label} rolling selection`} className="flex min-w-0 items-center gap-2 rounded-lg border border-[var(--color-accent-blue)]/40 bg-[var(--color-accent-blue)]/5 px-3 py-2">
-            <Badge tone={instrument?.option_type === "PE" ? "loss" : "profit"}>ROLL</Badge>
-            <div className="min-w-0"><p className="text-sm font-bold text-[var(--color-text-primary)]">{label}</p><p className="truncate text-[10px] text-[var(--color-text-muted)]" title={instrument?.trading_symbol}>{instrument ? `Now ${formatStrike(instrument.strike)} · ${instrument.trading_symbol}` : "Unavailable at current spot"}</p></div>
+            <Badge tone={resolution?.optionType === "PE" ? "loss" : "profit"}>ROLL</Badge>
+            <div className="min-w-0"><p className="text-sm font-bold text-[var(--color-text-primary)]">{label}</p><p className="truncate text-[10px] text-[var(--color-text-muted)]" title={resolvedSelectionLabel(resolution)}>{resolution ? `Now ${resolvedSelectionLabel(resolution)}` : "Unavailable at current spot"}</p></div>
           </div>
         ))}
       </div>

@@ -8,7 +8,7 @@ import { useMarketData } from "@/hooks/useMarketData";
 import { getInstruments, getMarketQuotes, getMarginRequirement, MarginResult } from "@/lib/market";
 import { calculateImpliedVolatility } from "@/lib/greeks";
 import { timeToExpiry, defaultSpotFallback } from "@/lib/optionMath";
-import { latestExpiry } from "@/lib/expiry";
+import { nearestExpiry } from "@/lib/expiry";
 import {
   StrategyLeg,
   calculatePayoffProfile,
@@ -39,6 +39,7 @@ import { StrategyMetrics } from "@/components/strategy-builder/StrategyMetrics";
 import { MonteCarloPanel } from "@/components/strategy-builder/MonteCarloPanel";
 import { StrategyBacktestPanel } from "@/components/strategy-builder/StrategyBacktestPanel";
 import { parseStrategyBasket } from "@/lib/basket";
+import { toClosedMarketQuote } from "@/lib/marketTick";
 
 function StrategyBuilderContent() {
   const searchParams = useSearchParams();
@@ -91,21 +92,9 @@ function StrategyBuilderContent() {
     void getMarketQuotes(symbols)
       .then(({ quotes }) => {
         if (!isMounted) return;
-        const normalizedQuotes = quotes.map((quote) => {
-          // Fyers can expose an indicative/stale `last_price` outside market
-          // hours. The previous close is the official last traded value for
-          // the strategy's closing snapshot in that state.
-          const previousClose = quote.prev_close_price;
-          if (
-            marketSession.state !== "open"
-            && typeof previousClose === "number"
-            && Number.isFinite(previousClose)
-            && previousClose > 0
-          ) {
-            return { ...quote, last_price: previousClose, change: 0, change_percent: 0 };
-          }
-          return quote;
-        });
+        const normalizedQuotes = marketSession.state !== "open"
+          ? quotes.map(toClosedMarketQuote)
+          : quotes;
         setSnapshotTicks(Object.fromEntries(normalizedQuotes.map((quote) => [quote.trading_symbol, quote])));
       })
       .catch(() => {
@@ -127,7 +116,7 @@ function StrategyBuilderContent() {
         const data = await getInstruments(symbol);
         if (isMounted) {
           setInstruments(data.instruments);
-          const defaultExpiry = latestExpiry(
+          const defaultExpiry = nearestExpiry(
             data.instruments.map((instrument) => instrument.expiry).filter((value): value is string => !!value)
           );
           if (defaultExpiry) setExpiry(defaultExpiry);

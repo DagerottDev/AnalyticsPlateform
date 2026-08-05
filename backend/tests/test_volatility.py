@@ -301,9 +301,37 @@ class TestVolatilityRouter:
         assert rows["RELIANCE"]["atm_iv"] == 0.18
         assert rows["RELIANCE"]["iv_rank"] == 42.0
         assert rows["RELIANCE"]["company_name"] == "Reliance Industries"
+        assert rows["RELIANCE"]["status"] == "ready"
+        assert rows["RELIANCE"]["updated_at"] is not None
         # A symbol the backfill job hasn't reached yet still appears, with nulls.
         assert rows["TCS"]["atm_iv"] is None
         assert rows["TCS"]["snapshot_date"] is None
+        assert rows["TCS"]["status"] == "building"
+
+    @pytest.mark.asyncio
+    async def test_universe_marks_old_snapshots_stale(
+        self, app: FastAPI, client: AsyncClient, access_token: str, db_session: AsyncSession
+    ):
+        snapshot = await upsert_snapshot(
+            db_session,
+            symbol="INFY",
+            snapshot_date=date(2026, 7, 31),
+            atm_iv=0.2,
+            spot=1700.0,
+            iv_rank=50.0,
+            iv_percentile=50.0,
+        )
+        snapshot.updated_at = datetime.now(UTC) - timedelta(hours=3)
+        await db_session.commit()
+
+        response = await client.get(
+            "/api/v1/volatility/universe",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == 200
+        rows = {row["symbol"]: row for row in response.json()["symbols"]}
+        assert rows["INFY"]["status"] == "stale"
 
     @pytest.mark.asyncio
     async def test_metrics_404_when_not_enough_history(

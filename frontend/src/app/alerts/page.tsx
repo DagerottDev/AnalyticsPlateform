@@ -6,7 +6,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { InstrumentSelector } from "@/components/market/InstrumentSelector";
 import { getInstruments, getMarketQuotes } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
-import { latestExpiry } from "@/lib/expiry";
+import { nearestExpiry } from "@/lib/expiry";
 import { Instrument } from "@/types/market";
 import { useAlertStore, AlertMetric, AlertOperator } from "@/stores/alertStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -22,6 +22,7 @@ import { PageContainer } from "@/components/ui/PageContainer";
 import { Bell, Trash2, CheckCircle2, Clock, Plus, Sparkles, Moon } from "lucide-react";
 import { defaultSpotFallback, nearestStrikeTo } from "@/lib/optionMath";
 import { formatStrikeWithPosition } from "@/lib/strikePositions";
+import { quoteLastPrice } from "@/lib/marketTick";
 
 const UNDERLYING_SCOPED_METRICS: AlertMetric[] = ["Net GEX", "VWAP Breakout"];
 
@@ -85,7 +86,7 @@ export default function AlertsPage() {
         const data = await getInstruments(symbol);
         if (isMounted) {
           setInstruments(data.instruments);
-          const defaultExpiry = latestExpiry(
+          const defaultExpiry = nearestExpiry(
             data.instruments.map((instrument) => instrument.expiry).filter((value): value is string => !!value)
           );
           if (defaultExpiry) setExpiry(defaultExpiry);
@@ -102,8 +103,8 @@ export default function AlertsPage() {
   }, [symbol]);
 
   // Keep the strike labels useful after hours too. The live tick wins during
-  // the session; outside it, previous close is a safer ATM reference than a
-  // hardcoded index fallback.
+  // the session; outside it, use the broker's latest traded quote instead of
+  // a hardcoded index fallback.
   useEffect(() => {
     let isMounted = true;
     setSnapshotSpot(null);
@@ -112,10 +113,8 @@ export default function AlertsPage() {
       try {
         const { quotes } = await getMarketQuotes([symbol]);
         const quote = quotes.find((item) => item.trading_symbol === symbol) ?? quotes[0];
-        const candidate = [quote?.prev_close_price, quote?.last_price].find((value): value is number => (
-          typeof value === "number" && Number.isFinite(value) && value > 0
-        ));
-        if (isMounted && candidate !== undefined) setSnapshotSpot(candidate);
+        const candidate = quoteLastPrice(quote);
+        if (isMounted && candidate !== null) setSnapshotSpot(candidate);
       } catch {
         // Alerts remain usable with the symbol-specific fallback.
       }

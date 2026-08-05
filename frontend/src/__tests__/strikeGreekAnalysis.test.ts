@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { appendLiveGreekValues, buildGreekRatios, buildStrikeGreekSeries, calculateLiveCombinedGreeks, combineGreekSeries } from "@/lib/strikeGreekAnalysis";
+import { appendLiveGreekValues, buildGreekRatios, buildReplayResolvedGreekSeries, buildStrikeGreekSeries, calculateLiveCombinedGreeks, calculateLiveResolvedGreeks, combineGreekSeries } from "@/lib/strikeGreekAnalysis";
+import { fixedSelection } from "@/lib/analysisSelections";
 import type { Instrument, MarketTick } from "@/types/market";
 
 const instruments: Instrument[] = [
@@ -9,12 +10,12 @@ const instruments: Instrument[] = [
 
 const candle = (close: number) => ({ timestamp: "2026-07-01T09:15:00Z", open: close, high: close, low: close, close, volume: 0, open_interest: 0 });
 
-const tick = (trading_symbol: string, last_price: number): MarketTick => ({
+const tick = (trading_symbol: string, last_price: number, timestamp = Date.now()): MarketTick => ({
   trading_symbol,
   last_price,
   volume: 0,
   open_interest: 0,
-  timestamp: Date.now(),
+  timestamp,
   change: 0,
   change_percent: 0,
 });
@@ -55,5 +56,40 @@ describe("selected strike Greek analysis", () => {
     }, live);
     expect(appended.delta).toHaveLength(2);
     expect(appended.delta[1].time).toMatch(/\.000Z$/);
+  });
+
+  it("calculates live Greeks from a complete distance-weighted rolling selection", () => {
+    const resolution = {
+      components: [{ instrument: instruments[0], weight: 0.5 }, { instrument: { ...instruments[0], trading_symbol: "CE2", strike: 22100 }, weight: 0.5 }],
+      effectiveStrike: 22050,
+      optionType: "CE" as const,
+      mode: "smooth" as const,
+    };
+    const live = calculateLiveResolvedGreeks([resolution], "NIFTY", {
+      NIFTY: tick("NIFTY", 22050), CE: tick("CE", 400), CE2: tick("CE2", 350),
+    });
+    expect(live?.liveContracts).toBe(1);
+    expect(live?.totalContracts).toBe(1);
+    expect(live?.values.delta).toBeTypeOf("number");
+  });
+
+  it("builds replay Greeks from the fed candle time, not the browser clock", () => {
+    const firstTime = new Date("2026-07-21T03:45:00Z").getTime();
+    const secondTime = new Date("2026-07-21T03:46:00Z").getTime();
+    const replaySeries = buildReplayResolvedGreekSeries(
+      [fixedSelection("CE")],
+      { CE: instruments[0] },
+      instruments,
+      [
+        { NIFTY: tick("NIFTY", 22000, firstTime), CE: tick("CE", 400, firstTime) },
+        { NIFTY: tick("NIFTY", 22100, secondTime), CE: tick("CE", 350, secondTime) },
+      ],
+      1,
+      "NIFTY",
+    );
+
+    expect(replaySeries.delta["fixed:CE"]).toHaveLength(2);
+    expect(replaySeries.delta["fixed:CE"][0].time).toBe("2026-07-21T03:45:00.000Z");
+    expect(replaySeries.delta["fixed:CE"][1].time).toBe("2026-07-21T03:46:00.000Z");
   });
 });

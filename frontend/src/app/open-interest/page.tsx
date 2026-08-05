@@ -21,10 +21,11 @@ import { StatTile } from "@/components/ui/StatTile";
 import { useMarketData } from "@/hooks/useMarketData";
 import { analyzeOpenInterest, type OpenInterestLevel } from "@/lib/openInterestAnalysis";
 import { defaultSpotFallback } from "@/lib/optionMath";
-import { getInstruments, getOpenInterestHistory, type OpenInterestHistoryResponse, type OpenInterestSnapshot } from "@/lib/market";
+import { getInstruments, getMarketQuotes, getOpenInterestHistory, type OpenInterestHistoryResponse, type OpenInterestSnapshot } from "@/lib/market";
 import { mergeOpenInterestSnapshots } from "@/lib/openInterestHistory";
 import { isNseRegularMarketOpen } from "@/lib/marketSession";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { quoteLastPrice } from "@/lib/marketTick";
 import type { Instrument } from "@/types/market";
 
 function formatLevel(level: OpenInterestLevel | null): string {
@@ -46,6 +47,7 @@ function OpenInterestWorkspace() {
   const [error, setError] = useState<unknown>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [oiHistory, setOiHistory] = useState<OpenInterestHistoryResponse | null>(null);
+  const [snapshotSpot, setSnapshotSpot] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!symbol || !expiry) {
@@ -62,21 +64,40 @@ function OpenInterestWorkspace() {
       const refreshedAt = new Date();
       setInstruments(filtered);
       setLastUpdated(refreshedAt);
+      const totals = analyzeOpenInterest(filtered, 0);
+      // The history collector tracks the nearest expiry in the background,
+      // while the UI also allows older/farther expiries. Keep the selected
+      // expiry chart useful in that case by retaining its current broker
+      // snapshot as a seed point (and by using it after hours when the
+      // websocket/collector is intentionally paused).
+      const currentSnapshot: OpenInterestSnapshot | null = (
+        totals.totalCallOi > 0 || totals.totalPutOi > 0
+      ) ? {
+        timestamp: refreshedAt.toISOString(),
+        total_call_oi: totals.totalCallOi,
+        total_put_oi: totals.totalPutOi,
+        total_call_change: totals.totalCallChange,
+        total_put_change: totals.totalPutChange,
+      } : null;
       try {
         const history = await getOpenInterestHistory(symbol, expiry);
-        const totals = analyzeOpenInterest(filtered, 0);
-        const livePoint: OpenInterestSnapshot | null = isNseRegularMarketOpen(refreshedAt) ? {
-          timestamp: refreshedAt.toISOString(),
-          total_call_oi: totals.totalCallOi,
-          total_put_oi: totals.totalPutOi,
-          total_call_change: totals.totalCallChange,
-          total_put_change: totals.totalPutChange,
-        } : null;
-        setOiHistory({ ...history, points: mergeOpenInterestSnapshots(history.points, livePoint) });
+        const shouldSeed = isNseRegularMarketOpen(refreshedAt) || history.points.length === 0;
+        setOiHistory({
+          ...history,
+          points: mergeOpenInterestSnapshots(history.points, shouldSeed ? currentSnapshot : null),
+        });
       } catch {
         // The existing profile remains useful if persisted-history retrieval
-        // is temporarily unavailable; the next refresh retries it.
-        setOiHistory(null);
+        // is temporarily unavailable; render the current chain snapshot so
+        // the live OI chart is not blank while the next refresh retries it.
+        setOiHistory({
+          symbol: symbol.toUpperCase(),
+          expiry,
+          session_date: null,
+          points: currentSnapshot ? [currentSnapshot] : [],
+          baseline: "broker prior-close OI",
+          scheduled_tracking: false,
+        });
       }
     } catch (loadError) {
       setError(loadError);
@@ -92,10 +113,40 @@ function OpenInterestWorkspace() {
     return () => window.clearInterval(intervalId);
   }, [load, refreshMilliseconds]);
 
+  // The live websocket is paused outside the exchange session. Fetch the
+  // broker's latest traded quote as a fallback so the spot card remains
+  // broker-accurate after hours instead of using the hardcoded placeholder.
+  useEffect(() => {
+    let isMounted = true;
+    setSnapshotSpot(null);
+
+    async function fetchSnapshotSpot() {
+      try {
+        const { quotes } = await getMarketQuotes([symbol]);
+        const quote = quotes.find((item) => item.trading_symbol === symbol) ?? quotes[0];
+        const candidate = quoteLastPrice(quote);
+        if (isMounted && candidate !== null) setSnapshotSpot(candidate);
+      } catch {
+        // Keep the existing symbol fallback if the optional quote snapshot is
+        // unavailable; option-chain loading remains independent.
+      }
+    }
+
+    if (symbol) void fetchSnapshotSpot();
+    return () => {
+      isMounted = false;
+    };
+  }, [symbol]);
+
   const marketSymbols = useMemo(() => [symbol], [symbol]);
   const { getTick } = useMarketData(marketSymbols);
   const underlyingTick = getTick(symbol);
-  const spot = underlyingTick?.last_price ?? defaultSpotFallback(symbol);
+  const liveSpot = underlyingTick?.last_price && underlyingTick.last_price > 0
+    ? underlyingTick.last_price
+    : snapshotSpot;
+  // Keep calculations numerically stable while a quote is loading, but never
+  // present the synthetic fallback as if it were the market price.
+  const spot = liveSpot ?? defaultSpotFallback(symbol);
   const analysis = useMemo(() => analyzeOpenInterest(instruments, spot), [instruments, spot]);
 
   const handleSymbolChange = (nextSymbol: string) => {
@@ -145,7 +196,7 @@ function OpenInterestWorkspace() {
         ) : (
           <>
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-              <StatTile label="Underlying spot" value={spot.toLocaleString("en-IN", { maximumFractionDigits: 2 })} icon={Target} />
+              <StatTile label="Underlying spot" value={liveSpot === null ? "—" : liveSpot.toLocaleString("en-IN", { maximumFractionDigits: 2 })} icon={Target} />
               <StatTile label="Put OI support" value={formatLevel(analysis.support)} tone="profit" icon={TrendingUp} />
               <StatTile label="Call OI resistance" value={formatLevel(analysis.resistance)} tone="loss" icon={TrendingDown} />
               <StatTile label="Put / call ratio" value={analysis.putCallRatio?.toFixed(2) ?? "—"} icon={BarChart3} />

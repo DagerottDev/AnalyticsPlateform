@@ -6,6 +6,28 @@ Current Milestone:
 - Targeted quality refactor (2026-07-29) — ✅ COMPLETE (see below)
 - Resilience & confidence quality pass (2026-07-30) — ✅ COMPLETE (see below)
 
+## IV Screener data-quality pass (2026-08-04)
+
+- **✅ COMPLETE in code:** `/volatility/screener` now consumes a typed
+  `GET /api/v1/volatility/universe` response with per-row `building`, `ready`, or `stale`
+  status and last-update timestamps instead of treating every null rank as the same state.
+- Current-day ATM-IV rows are refreshed after a bounded interval rather than being skipped for
+  the rest of the trading day. The screener remains broker-call-free at request time.
+- Fyers sessions can seed prior true ATM-IV observations from daily underlying and paired
+  option candles. The seed is capped per worker cycle and never substitutes realized-volatility
+  proxy values for an implied-volatility observation. Dhan safely skips this path because its
+  current adapter does not expose compatible option history.
+- Sortable table headers are keyboard controls with `aria-sort`, the search field has an
+  accessible label, and initial loading is explicit. Regression coverage covers status,
+  stale snapshots, refresh behavior, historical seeding, search, and keyboard sorting.
+- **Operational note:** the first Fyers seed still depends on valid broker access and broker
+  history availability. If no compatible historical option candles exist, rank/percentile
+  remain `building` until 20 prior daily observations accumulate naturally.
+- Verification for this pass: `npx tsc --noEmit`, `npx eslint src --max-warnings=0`,
+  `npm test -- --run` (46 files / 204 tests), `npm run build`,
+  `poetry run ruff check app tests`, `poetry run mypy app --ignore-missing-imports`, and
+  `poetry run pytest` (236 tests) all pass locally.
+
 ## Server-backed user settings (2026-08-01)
 
 - Settings now provide an authenticated, versioned preference profile with a
@@ -40,6 +62,7 @@ Current Milestone:
 - Rolling descriptors resolve against the active expiry's actual strike ladder at every underlying candle and live underlying update. Out-of-ladder selections remain unavailable instead of silently changing to a different strike.
 - Greek and Combined Premium workspaces pass fixed symbols in `contracts` and validated descriptors in `dynamic`. Dynamic workspaces fetch the current market session only, resolve the source set before loading option history, limit that set to 40 contracts, and subscribe to the currently resolved contracts.
 - The Greek inventory displays each rolling label and its current strike. Durable Greek alerts are disabled for rolling selections because server alerts are tied to a fixed broker contract.
+- Rolling analysis now defaults to Smooth distance-weighted adjacent strikes for continuous premium and Greek charts; Raw exact-contract rollovers remain available as a saved global preference.
 
 ## Selected Option Greek Analysis (2026-07-30)
 
@@ -115,6 +138,8 @@ Completed:
   - Built the dedicated `/charts` dashboard.
   - Added durable, 30-second nearest-expiry Call/Put aggregate OI snapshots
     and live intraday OI time-series charts in `/open-interest`.
+  - Updated market-session handling for the 03-Aug-2026 CAS-era F&O extension
+    to 15:40 IST while preserving a 15:30 IST cash-equity close.
 
 - M6: Volatility Analytics
   - Added `recharts` for complex 2D data plotting.
