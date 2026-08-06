@@ -128,7 +128,17 @@ def request_market_data_backfill() -> None:
 async def market_data_backfill_loop(settings: Settings, stop_event: asyncio.Event) -> None:
     """Run immediately, then repeat at the configured interval until shutdown."""
     while not stop_event.is_set():
-        await run_market_data_backfill(settings)
+        try:
+            await run_market_data_backfill(settings)
+        except Exception:
+            # run_market_data_backfill only guards its per-symbol body — a
+            # failure in the setup around it (session_manager,
+            # async_session_maker, or the DB connection itself) would
+            # otherwise propagate out of this while loop and permanently
+            # end market-data backfill for the rest of the process's life.
+            # Log and retry next cycle instead (same fix already applied to
+            # the GTT/basket monitor loops).
+            logger.exception("Market-data backfill cycle failed; will retry next cycle")
         stop_wait = asyncio.create_task(stop_event.wait())
         requested_wait = asyncio.create_task(_backfill_requested.wait())
         done, pending = await asyncio.wait(

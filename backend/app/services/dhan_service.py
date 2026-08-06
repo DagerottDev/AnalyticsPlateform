@@ -15,6 +15,12 @@ import httpx
 from app.core.exceptions import BrokerAuthError, BrokerConnectionError
 from app.models.user import TradingMode, UserProfile
 from app.services.broker_base import BrokerService
+from app.services.dhan_order_parsing import (
+    normalise_dhan_order,
+    parse_dhan_quote_row,
+    require_dhan_order_id,
+)
+from app.services.dhan_symbols import parse_dhan_security_ref
 
 
 class DhanPollingMarketStream:
@@ -134,13 +140,7 @@ class DhanService(BrokerService):
 
     @staticmethod
     def _security_ref(value: str) -> tuple[str, str]:
-        """Split Dhan's explicit ``EXCHANGE_SEGMENT:SECURITY_ID`` reference."""
-        segment, separator, security_id = value.partition(":")
-        if not separator or not segment or not security_id:
-            raise BrokerConnectionError(
-                "Dhan symbols must use EXCHANGE_SEGMENT:SECURITY_ID, " "for example NSE_EQ:11536."
-            )
-        return segment.upper(), security_id
+        return parse_dhan_security_ref(value)
 
     async def get_profile(self) -> UserProfile:
         # Dhan's v2 trading APIs authenticate with client ID + token but do
@@ -262,31 +262,7 @@ class DhanService(BrokerService):
             for security_id, value in values.items():
                 if not isinstance(value, dict):
                     continue
-                ref = names.get((segment, str(security_id)), f"{segment}:{security_id}")
-                ltp = value.get("last_price", value.get("lastTradedPrice", value.get("ltp", 0)))
-                rows.append(
-                    {
-                        "symbol": ref,
-                        # Keep the exact symbol requested by the UI. Dhan may
-                        # return a display-only tradingSymbol for an option,
-                        # but the websocket handler is keyed by this request
-                        # symbol (for example NIFTY or NSE_FNO:26009).
-                        "trading_symbol": ref,
-                        "last_price": float(ltp or 0),
-                        "volume": int(value.get("volume", 0) or 0),
-                        "open_interest": int(value.get("oi", 0) or 0),
-                        "change": float(value.get("change", 0) or 0),
-                        "change_percent": float(value.get("changePercent", 0) or 0),
-                        "open_price": float(value.get("open", 0) or 0),
-                        "high_price": float(value.get("high", 0) or 0),
-                        "low_price": float(value.get("low", 0) or 0),
-                        "prev_close_price": float(value.get("close", 0) or 0),
-                        "ask": float(value.get("ask", 0) or 0),
-                        "bid": float(value.get("bid", 0) or 0),
-                        "atp": float(value.get("avgPrice", 0) or 0),
-                        "timestamp": int(value.get("timestamp", 0) or 0),
-                    }
-                )
+                rows.append(parse_dhan_quote_row(segment, str(security_id), value, names))
         return rows
 
     async def get_historical_data(
@@ -405,30 +381,16 @@ class DhanService(BrokerService):
         return {"fund_limit": raw if isinstance(raw, list) else [raw]}
 
     def _normalise_order(self, row: dict[str, Any]) -> dict[str, Any]:
-        quantity = int(row.get("quantity", 0) or 0)
-        filled = int(row.get("filledQty", row.get("filledQuantity", 0)) or 0)
-        order_type = str(row.get("orderType", "MARKET")).upper()
-        return {
-            "id": str(row.get("orderId", "")),
-            "trading_symbol": str(row.get("tradingSymbol", row.get("securityId", ""))),
-            "side": "Buy" if str(row.get("transactionType", "BUY")).upper() == "BUY" else "Sell",
-            "order_type": "STOP" if order_type == "STOP_LOSS" else order_type,
-            "product_type": str(row.get("productType", "")),
-            "quantity": quantity,
-            "filled_quantity": filled,
-            "remaining_quantity": int(row.get("remainingQuantity", max(quantity - filled, 0)) or 0),
-            "average_price": float(row.get("averageTradedPrice", row.get("averagePrice", 0)) or 0),
-            "limit_price": float(row.get("price", 0) or 0),
-            "stop_price": float(row.get("triggerPrice", 0) or 0),
-            "status": str(row.get("orderStatus", "Unknown")),
-            "status_message": row.get("remarks"),
-            "order_time": row.get("createTime"),
-        }
+        return normalise_dhan_order(row)
 
     async def get_orders(self) -> list[dict[str, Any]]:
         data = await self._request("GET", "/orders")
         rows = data if isinstance(data, list) else data.get("data", data.get("orders", []))
         return [order for row in rows if (order := self._normalise_order(row))["id"]]
+
+    @staticmethod
+    def _require_order_id(data: dict[str, Any], action: str) -> str:
+        return require_dhan_order_id(data, action)
 
     async def place_order(self, order: dict[str, Any]) -> dict[str, Any]:
         segment, security_id = self._security_ref(order["symbol"])
@@ -447,21 +409,27 @@ class DhanService(BrokerService):
             "boProfitValue": order["take_profit"],
             "boStopLossValue": order["stop_loss"],
         }
+        if order.get("order_tag"):
+            # Max 30 chars per Dhan's API; echoed back as "order_tag" in
+            # get_orders() for reconciliation (see order_reconciliation.py).
+            payload["correlationId"] = str(order["order_tag"])[:30]
         data = await self._request("POST", "/orders", json=payload)
-        return {
-            "id": str(data.get("orderId", "")) or None,
-            "message": str(data.get("remarks", "Order submitted")),
-        }
+        order_id = self._require_order_id(data, "order")
+        return {"id": order_id, "message": str(data.get("remarks", "Order submitted"))}
 
     async def place_gtt_order(self, order: dict[str, Any]) -> dict[str, Any]:
         """Create Dhan's native SINGLE Forever Order (their GTT primitive)."""
         segment, security_id = self._security_ref(order["symbol"])
+        # Prefer a caller-supplied tag (e.g. the GTT record's own id) over
+        # the security-id-only fallback: two GTTs on the same instrument
+        # would otherwise collide on the same correlationId.
+        correlation_id = str(order.get("order_tag") or f"gtt-{security_id}")[:30]
         data = await self._request(
             "POST",
             "/forever/orders",
             json={
                 "dhanClientId": self.client_id,
-                "correlationId": f"gtt-{security_id}"[:30],
+                "correlationId": correlation_id,
                 "orderFlag": "SINGLE",
                 "transactionType": "BUY" if order["side"] == "Buy" else "SELL",
                 "exchangeSegment": segment,
@@ -475,10 +443,8 @@ class DhanService(BrokerService):
                 "triggerPrice": order["trigger_price"],
             },
         )
-        return {
-            "id": str(data.get("orderId", "")) or None,
-            "message": str(data.get("remarks", "GTT submitted")),
-        }
+        order_id = self._require_order_id(data, "GTT order")
+        return {"id": order_id, "message": str(data.get("remarks", "GTT submitted"))}
 
     async def cancel_gtt_order(self, order_id: str) -> dict[str, Any]:
         data = await self._request("DELETE", f"/forever/orders/{order_id}")

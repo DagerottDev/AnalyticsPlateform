@@ -110,7 +110,33 @@ class TestHigherOrderGreeksFiniteDifference:
         down = calculate_greeks("CE", self.S, self.K, self.T - self.eps, self.r, self.sigma).gamma
         fd = -((up - down) / (2 * self.eps)) / 365
         color = calculate_greeks("CE", self.S, self.K, self.T, self.r, self.sigma).color
-        assert color == pytest.approx(fd, abs=1e-4)
+        # color itself is O(1e-5) at these inputs, so the abs=1e-4 tolerance
+        # used by the other higher-order Greeks above is far too loose here —
+        # it would silently pass even with a multi-percent formula error (as
+        # happened previously: a spurious 2*r*T term made this off by ~2-5%
+        # depending on r/T, undetected because the absolute gap was still
+        # under 1e-4). Use a relative tolerance sized to the actual quantity.
+        assert color == pytest.approx(fd, rel=1e-3)
+
+    def test_color_matches_finite_difference_across_varied_market_conditions(self):
+        """Regression test for the specific bug: the old formula's error
+        scaled with r*T, so it only showed up clearly away from the single
+        fixed S/K/T/r/sigma the test class otherwise uses throughout."""
+        cases = [
+            (22000, 22100, 30 / 365, 0.10, 0.15),
+            (100, 100, 0.5, 0.05, 0.20),
+            (50000, 49000, 7 / 365, 0.10, 0.35),
+            (18000, 17500, 45 / 365, 0.07, 0.25),
+        ]
+        eps = 1e-6
+        for case_s, case_k, case_t, case_r, case_sigma in cases:
+            up = calculate_greeks("CE", case_s, case_k, case_t + eps, case_r, case_sigma).gamma
+            down = calculate_greeks("CE", case_s, case_k, case_t - eps, case_r, case_sigma).gamma
+            fd = -((up - down) / (2 * eps)) / 365
+            color = calculate_greeks("CE", case_s, case_k, case_t, case_r, case_sigma).color
+            assert color == pytest.approx(fd, rel=1e-3), (
+                f"failed for S={case_s} K={case_k} T={case_t} r={case_r} sigma={case_sigma}"
+            )
 
     def test_ultima_matches_finite_difference_of_vomma(self):
         up = calculate_greeks("CE", self.S, self.K, self.T, self.r, self.sigma + self.eps).vomma

@@ -22,6 +22,7 @@ from app.schemas.orders import (
     PlaceOrderRequest,
 )
 from app.services import gtt_store, live_basket_store
+from app.services.order_reconciliation import gtt_order_tag
 from app.services.session_manager import session_manager
 
 logger = logging.getLogger(__name__)
@@ -134,11 +135,24 @@ async def create_gtt_order(
     )
     if broker_name.lower() == "dhan" and hasattr(service, "place_gtt_order"):
         try:
-            native = await service.place_gtt_order(request.model_dump())
+            native = await service.place_gtt_order(
+                {**request.model_dump(), "order_tag": gtt_order_tag(record.id)}
+            )
             record.native_order_id = native.get("id")
             await db.commit()
         except Exception as exc:
-            await gtt_store.finish(db, record, "Failed", error=str(exc)[:500])
+            # The broker call was reached but its outcome is ambiguous (it
+            # may have raised after the broker already accepted the order,
+            # e.g. a response timeout) — marking "Failed" here could hide a
+            # live, untracked Dhan Forever Order. "Unknown" defers that call
+            # to the GTT monitor's _reconcile_unknown_gtt_orders, which
+            # searches the broker's order book for the `record.id` tag just
+            # submitted above rather than assuming the worst.
+            reconciled = await gtt_store.try_finish(
+                db, record.id, from_status="Pending", status="Unknown", error=str(exc)[:500]
+            )
+            if reconciled is not None:
+                record = reconciled
     return _gtt_response(record)
 
 
@@ -161,8 +175,19 @@ async def cancel_gtt_order(
         and hasattr(service, "cancel_gtt_order")
     ):
         await service.cancel_gtt_order(record.native_order_id)
-    await gtt_store.finish(db, record, "Cancelled")
-    return _gtt_response(record)
+    # Claim the Pending -> Cancelled transition atomically rather than a
+    # blind write: the status check above is only a snapshot, and the GTT
+    # monitor (running concurrently, in its own session) can trigger this
+    # exact record between that check and this write. A plain write here
+    # would silently clobber the monitor's "Triggered" status back to
+    # "Cancelled" even though a live order was already placed at the broker.
+    updated = await gtt_store.try_finish(db, gtt_id, from_status="Pending", status="Cancelled")
+    if updated is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This GTT order was triggered or otherwise changed just now; refresh and retry",
+        )
+    return _gtt_response(updated)
 
 
 @router.post("", response_model=OrderActionResponse, status_code=status.HTTP_201_CREATED)

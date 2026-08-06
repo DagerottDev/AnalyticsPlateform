@@ -805,6 +805,39 @@ def _order(symbol: str, side: str = "Buy") -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+async def test_get_orders_surfaces_the_order_tag_for_reconciliation() -> None:
+    """order_reconciliation.find_order_by_tag searches this field — a
+    caller that tagged an ambiguous placement needs it echoed back here to
+    find out what actually happened at the broker."""
+    service = _make_service()
+    service.client.orderbook = MagicMock(
+        return_value={
+            "s": "ok",
+            "orderBook": [
+                {"id": "1", "symbol": "NFO:A", "orderTag": "gtt-abc123"},
+                {"id": "2", "symbol": "NFO:B"},  # no tag on this one
+            ],
+        }
+    )
+
+    orders = await service.get_orders()
+
+    assert orders[0]["order_tag"] == "gtt-abc123"
+    assert orders[1]["order_tag"] is None
+
+
+@pytest.mark.asyncio
+async def test_place_order_forwards_order_tag_to_the_broker() -> None:
+    service = _make_service()
+    service.client.place_order = MagicMock(return_value={"s": "ok", "id": "1", "message": "ok"})
+
+    await service.place_order({**_order("NFO:A"), "order_tag": "gtt-abc123"})
+
+    submitted = service.client.place_order.call_args.args[0]
+    assert submitted["orderTag"] == "gtt-abc123"
+
+
+@pytest.mark.asyncio
 async def test_place_basket_orders_maps_each_leg_result_in_order() -> None:
     service = _make_service()
     service.client.place_basket_orders = MagicMock(
@@ -858,3 +891,381 @@ async def test_place_basket_orders_empty_input_is_a_noop() -> None:
 
     assert await service.place_basket_orders([]) == []
     service.client.place_basket_orders.assert_not_called()
+
+
+# ── get_profile ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_profile_prefers_the_display_name_over_the_account_name() -> None:
+    service = _make_service()
+    service.client.get_profile = MagicMock(
+        return_value={"s": "ok", "data": {"fy_id": "YR02352", "name": "Vijay Sharma"}}
+    )
+
+    profile = await service.get_profile()
+
+    assert profile.client_id == "YR02352"
+    assert profile.account_name == "Vijay Sharma"
+    assert profile.broker_name == "Fyers"
+
+
+@pytest.mark.asyncio
+async def test_get_profile_falls_back_to_the_account_name_when_no_broker_name_is_returned() -> None:
+    """Fallback order is name -> display_name -> fy_id -> account_name; only
+    an empty response for all three of the broker's own fields reaches the
+    last resort."""
+    service = _make_service()
+    service.client.get_profile = MagicMock(return_value={"s": "ok", "data": {}})
+    service.account_name = "My Fyers"
+
+    profile = await service.get_profile()
+
+    assert profile.client_id == "unknown"
+    assert profile.account_name == "My Fyers"
+
+
+@pytest.mark.asyncio
+async def test_get_profile_raises_on_a_non_ok_non_auth_response() -> None:
+    service = _make_service()
+    service.client.get_profile = MagicMock(return_value={"s": "error", "message": "server error"})
+
+    with pytest.raises(BrokerConnectionError):
+        await service.get_profile()
+
+
+@pytest.mark.asyncio
+async def test_get_profile_wraps_a_transport_exception() -> None:
+    service = _make_service()
+    service.client.get_profile = MagicMock(side_effect=RuntimeError("connection reset"))
+
+    with pytest.raises(BrokerConnectionError, match="connection reset"):
+        await service.get_profile()
+
+
+# ── get_market_stream ────────────────────────────────────────────────────
+
+
+def test_get_market_stream_returns_the_same_instance_on_repeat_calls() -> None:
+    service = _make_service()
+
+    first = service.get_market_stream()
+    second = service.get_market_stream()
+
+    assert first is second
+    assert first._app_id == service.app_id
+
+
+# ── get_quotes edge cases ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_quotes_returns_empty_list_for_no_symbols() -> None:
+    service = _make_service()
+    service.client.quotes = MagicMock()
+
+    assert await service.get_quotes([]) == []
+    service.client.quotes.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_quotes_gives_up_after_a_non_retryable_error() -> None:
+    service = _make_service()
+    service.client.quotes = MagicMock(return_value={"s": "error", "code": 500})
+
+    quotes = await service.get_quotes(["NIFTY"])
+
+    assert quotes == []
+    service.client.quotes.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_quotes_gives_up_after_exhausting_429_retries() -> None:
+    service = _make_service()
+    service.client.quotes = MagicMock(return_value={"s": "error", "code": 429})
+
+    with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()):
+        quotes = await service.get_quotes(["NIFTY"])
+
+    assert quotes == []
+    assert service.client.quotes.call_count == FyersService._MAX_QUOTE_FETCH_RETRIES
+
+
+@pytest.mark.asyncio
+async def test_get_quotes_skips_a_row_whose_value_is_not_a_mapping() -> None:
+    service = _make_service()
+    service.client.quotes = MagicMock(
+        return_value={
+            "s": "ok",
+            "d": [
+                {"n": "NSE:BROKEN-EQ", "v": "not-a-dict"},
+                {"n": "NSE:RELIANCE-EQ", "v": {"lp": 1300.0}},
+            ],
+        }
+    )
+
+    quotes = await service.get_quotes(["RELIANCE"])
+
+    assert len(quotes) == 1
+    assert quotes[0]["trading_symbol"] == "RELIANCE"
+
+
+@pytest.mark.asyncio
+async def test_get_quotes_skips_a_row_with_no_usable_last_price() -> None:
+    service = _make_service()
+    service.client.quotes = MagicMock(
+        return_value={
+            "s": "ok",
+            "d": [
+                {"n": "NSE:NOPRICE-EQ", "v": {"lp": None}},
+                {"n": "NSE:RELIANCE-EQ", "v": {"lp": 1300.0}},
+            ],
+        }
+    )
+
+    quotes = await service.get_quotes(["RELIANCE"])
+
+    assert len(quotes) == 1
+    assert quotes[0]["trading_symbol"] == "RELIANCE"
+
+
+@pytest.mark.asyncio
+async def test_get_quotes_derives_change_and_change_percent_when_the_broker_omits_them() -> None:
+    """Some Fyers quote responses omit ch/chp outright; derive them from
+    last_price vs prev_close rather than silently reporting 0 change."""
+    service = _make_service()
+    service.client.quotes = MagicMock(
+        return_value={
+            "s": "ok",
+            "d": [{"n": "NSE:RELIANCE-EQ", "v": {"lp": 1300.0, "prev_close_price": 1250.0}}],
+        }
+    )
+
+    quotes = await service.get_quotes(["RELIANCE"])
+
+    assert quotes[0]["change"] == 50.0
+    assert quotes[0]["change_percent"] == pytest.approx(4.0)
+
+
+# ── get_historical_data range chunking ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_historical_data_splits_a_multi_year_range_into_366_day_chunks() -> None:
+    """Fyers rejects a single daily-candle request spanning >366 days —
+    a 2-year range must be split and the results merged back together."""
+    service = _make_service()
+    requested_ranges: list[tuple[str, str]] = []
+
+    def history_response(payload: dict[str, Any]) -> dict[str, Any]:
+        requested_ranges.append((payload["range_from"], payload["range_to"]))
+        return {"s": "ok", "candles": [[1700000000, 1, 2, 0, 1, 10]]}
+
+    service.client.history = MagicMock(side_effect=history_response)
+
+    candles = await service.get_historical_data(
+        "NSE:NIFTY50-INDEX", "2023-01-01", "2025-01-01", "D"
+    )
+
+    assert len(requested_ranges) == 2  # 731-day span split into two <=366-day chunks
+    assert len(candles) == 2  # one candle merged back from each chunk
+    # Chunks must be contiguous, not overlapping or gapped.
+    assert requested_ranges[0][1] < requested_ranges[1][0]
+
+
+@pytest.mark.asyncio
+async def test_get_historical_data_does_not_chunk_a_short_range() -> None:
+    service = _make_service()
+    service.client.history = MagicMock(
+        return_value={"s": "ok", "candles": [[1700000000, 1, 2, 0, 1, 10]]}
+    )
+
+    await service.get_historical_data("NSE:NIFTY50-INDEX", "2023-01-01", "2023-01-31", "D")
+
+    service.client.history.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_historical_data_returns_empty_for_a_no_data_response() -> None:
+    """'no_data' (e.g. a market holiday) is a legitimate empty result, not
+    an error worth retrying or raising."""
+    service = _make_service()
+    service.client.history = MagicMock(return_value={"s": "no_data"})
+
+    candles = await service.get_historical_data(
+        "NSE:NIFTY50-INDEX", "2023-11-15", "2023-11-15", "D"
+    )
+
+    assert candles == []
+
+
+@pytest.mark.asyncio
+async def test_get_historical_data_wraps_a_transport_exception() -> None:
+    service = _make_service()
+    service.client.history = MagicMock(side_effect=RuntimeError("timed out"))
+
+    with pytest.raises(BrokerConnectionError, match="timed out"):
+        await service.get_historical_data("NSE:NIFTY50-INDEX", "2023-11-15", "2023-11-15", "D")
+
+
+# ── get_margin ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_margin_returns_empty_dict_for_no_orders() -> None:
+    service = _make_service()
+    service.client.service = MagicMock()
+
+    assert await service.get_margin([]) == {}
+    service.client.service.post_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_margin_wraps_a_transport_exception() -> None:
+    service = _make_service()
+    service.client.service = MagicMock()
+    service.client.service.post_call = MagicMock(side_effect=RuntimeError("network error"))
+
+    with pytest.raises(BrokerConnectionError, match="network error"):
+        await service.get_margin([_order("NFO:A")])
+
+
+@pytest.mark.asyncio
+async def test_get_margin_raises_on_a_non_ok_response() -> None:
+    service = _make_service()
+    service.client.service = MagicMock()
+    service.client.service.post_call = MagicMock(return_value={"s": "error"})
+
+    with pytest.raises(BrokerConnectionError):
+        await service.get_margin([_order("NFO:A")])
+
+
+# ── get_positions / get_holdings / get_funds transport failures ─────────
+
+
+@pytest.mark.asyncio
+async def test_get_positions_wraps_a_transport_exception() -> None:
+    service = _make_service()
+    service.client.positions = MagicMock(side_effect=RuntimeError("network error"))
+
+    with pytest.raises(BrokerConnectionError, match="network error"):
+        await service.get_positions()
+
+
+@pytest.mark.asyncio
+async def test_get_holdings_wraps_a_transport_exception() -> None:
+    service = _make_service()
+    service.client.holdings = MagicMock(side_effect=RuntimeError("network error"))
+
+    with pytest.raises(BrokerConnectionError, match="network error"):
+        await service.get_holdings()
+
+
+@pytest.mark.asyncio
+async def test_get_funds_wraps_a_transport_exception() -> None:
+    service = _make_service()
+    service.client.funds = MagicMock(side_effect=RuntimeError("network error"))
+
+    with pytest.raises(BrokerConnectionError, match="network error"):
+        await service.get_funds()
+
+
+@pytest.mark.asyncio
+async def test_get_orders_wraps_a_transport_exception() -> None:
+    service = _make_service()
+    service.client.orderbook = MagicMock(side_effect=RuntimeError("network error"))
+
+    with pytest.raises(BrokerConnectionError, match="network error"):
+        await service.get_orders()
+
+
+# ── modify_order / cancel_order ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_modify_order_success() -> None:
+    service = _make_service()
+    service.client.modify_order = MagicMock(return_value={"s": "ok", "id": "order-1"})
+
+    result = await service.modify_order(
+        "order-1",
+        {"quantity": 100, "order_type": "LIMIT", "limit_price": 105.5, "stop_price": 0},
+    )
+
+    assert result == {"id": "order-1", "message": "Order modified"}
+
+
+@pytest.mark.asyncio
+async def test_modify_order_raises_on_broker_rejection() -> None:
+    service = _make_service()
+    service.client.modify_order = MagicMock(return_value={"s": "error", "message": "bad price"})
+
+    with pytest.raises(BrokerConnectionError):
+        await service.modify_order(
+            "order-1",
+            {"quantity": 100, "order_type": "LIMIT", "limit_price": 105.5, "stop_price": 0},
+        )
+
+
+@pytest.mark.asyncio
+async def test_modify_order_wraps_a_transport_exception() -> None:
+    service = _make_service()
+    service.client.modify_order = MagicMock(side_effect=RuntimeError("timed out"))
+
+    with pytest.raises(BrokerConnectionError, match="timed out"):
+        await service.modify_order(
+            "order-1",
+            {"quantity": 100, "order_type": "LIMIT", "limit_price": 105.5, "stop_price": 0},
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancel_order_success() -> None:
+    service = _make_service()
+    service.client.cancel_order = MagicMock(return_value={"s": "ok", "id": "order-1"})
+
+    result = await service.cancel_order("order-1")
+
+    assert result == {"id": "order-1", "message": "Order cancelled"}
+
+
+@pytest.mark.asyncio
+async def test_cancel_order_raises_on_broker_rejection() -> None:
+    service = _make_service()
+    service.client.cancel_order = MagicMock(return_value={"s": "error"})
+
+    with pytest.raises(BrokerConnectionError):
+        await service.cancel_order("order-1")
+
+
+@pytest.mark.asyncio
+async def test_cancel_order_wraps_a_transport_exception() -> None:
+    service = _make_service()
+    service.client.cancel_order = MagicMock(side_effect=RuntimeError("timed out"))
+
+    with pytest.raises(BrokerConnectionError, match="timed out"):
+        await service.cancel_order("order-1")
+
+
+# ── close ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_close_tears_down_the_market_stream_when_one_was_created() -> None:
+    service = _make_service()
+    stream = service.get_market_stream()
+    stream.close = MagicMock()
+
+    await service.close()
+
+    stream.close.assert_called_once()
+    assert service._market_stream is None
+
+
+@pytest.mark.asyncio
+async def test_close_is_a_noop_when_no_market_stream_was_ever_created() -> None:
+    service = _make_service()
+
+    await service.close()  # must not raise
+
+    assert service._market_stream is None

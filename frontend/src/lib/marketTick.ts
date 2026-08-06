@@ -1,4 +1,5 @@
 import type { MarketTick } from "@/types/market";
+import { tickTimestampMs } from "@/lib/dataFreshness";
 
 /**
  * Fyers' streaming update is intentionally small: it usually contains only
@@ -9,7 +10,24 @@ import type { MarketTick } from "@/types/market";
 export function mergeMarketTick(previous: MarketTick | undefined, next: MarketTick): MarketTick {
   if (!previous) return next;
 
-  const merged: MarketTick = { ...previous, ...next };
+  // The shared backend multiplexes two independently-timed sources onto one
+  // listener: live broker stream pushes, and a REST quote-poll fallback that
+  // runs on its own ~3s timer regardless of stream health (see
+  // FyersMarketStreamManager._quote_poll_loop). They can resolve out of
+  // arrival order at the browser — a REST snapshot fetched *before* a stream
+  // tick can still finish resolving *after* it. Trusting arrival order alone
+  // (as this used to) lets a slow, market-stale snapshot overwrite
+  // last_price/timestamp/change with older data — which flows straight into
+  // order-ticket defaults (BuyTicketModal's limit-price prefill) and GTT/
+  // stop-loss validity checks. Compare each tick's own "as of" timestamp
+  // instead (normalized to ms — stream and REST can use different units,
+  // see tickTimestampMs), and don't let an older tick overwrite anything a
+  // newer one already established.
+  const previousMs = tickTimestampMs(previous);
+  const nextMs = tickTimestampMs(next);
+  const nextIsStale = previousMs != null && nextMs != null && nextMs < previousMs;
+
+  const merged: MarketTick = nextIsStale ? { ...previous } : { ...previous, ...next };
 
   // The shared backend sends both raw websocket frames and REST fallback
   // snapshots through the same listener. Preserve the last stream timestamp

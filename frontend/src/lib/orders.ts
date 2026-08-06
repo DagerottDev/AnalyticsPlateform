@@ -21,7 +21,12 @@ export interface BrokerOrder {
 }
 
 export interface OrderActionResponse { id: string | null; message: string; }
-export interface GttOrder { id: string; broker_name: string; symbol: string; side: OrderSide; quantity: number; product_type: string; execution_type: "MARKET" | "LIMIT"; trigger_price: number; limit_price: number; expires_at: string; status: "Pending" | "Triggered" | "Placed" | "Failed" | "Cancelled" | "Expired"; native_order_id: string | null; execution_order_id: string | null; error_message: string | null; created_at: string; triggered_at: string | null; closed_at: string | null; }
+// "Unknown" means a trigger/native-GTT placement call raised without a
+// clear rejection from the broker — it's not yet known whether the order
+// actually went through before the exception happened. The server-side
+// monitor reconciles it against the broker's order book every tick,
+// resolving to "Placed" or (after a timeout with no match) "Failed".
+export interface GttOrder { id: string; broker_name: string; symbol: string; side: OrderSide; quantity: number; product_type: string; execution_type: "MARKET" | "LIMIT"; trigger_price: number; limit_price: number; expires_at: string; status: "Pending" | "Triggered" | "Placed" | "Failed" | "Cancelled" | "Expired" | "Unknown"; native_order_id: string | null; execution_order_id: string | null; error_message: string | null; created_at: string; triggered_at: string | null; closed_at: string | null; }
 export interface CreateGttOrderRequest { symbol: string; quantity: number; side: OrderSide; product_type: ProductType; execution_type: "MARKET" | "LIMIT"; trigger_price: number; limit_price: number; expires_at: string; }
 
 export interface PlaceOrderRequest {

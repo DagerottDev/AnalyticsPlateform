@@ -1,4 +1,4 @@
-type ChartCell = string | number | null | undefined;
+export type ChartCell = string | number | null | undefined;
 
 interface ChartDataTableProps {
   title: string;

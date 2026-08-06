@@ -228,7 +228,17 @@ async def _refresh_current_day_stats(
 async def iv_universe_backfill_loop(settings: Settings, stop_event: asyncio.Event) -> None:
     """Run immediately, then repeat at the configured interval until shutdown."""
     while not stop_event.is_set():
-        await run_iv_universe_backfill(settings)
+        try:
+            await run_iv_universe_backfill(settings)
+        except Exception:
+            # run_iv_universe_backfill only guards its per-symbol body — a
+            # failure in the setup/teardown around it (async_session_maker,
+            # fno_symbol_store, the stats refresh) would otherwise propagate
+            # out of this while loop and permanently end IV universe
+            # backfill for the rest of the process's life. Log and retry
+            # next cycle instead (same fix already applied to the GTT/
+            # basket monitor loops).
+            logger.exception("IV universe backfill cycle failed; will retry next cycle")
         stop_wait = asyncio.create_task(stop_event.wait())
         done, pending = await asyncio.wait(
             {stop_wait},

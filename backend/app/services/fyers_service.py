@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, NoReturn, cast
+from typing import Any, cast
 
 from fyers_apiv3 import fyersModel
 
@@ -13,65 +13,26 @@ from app.core.retry import compute_backoff_delay
 from app.models.user import TradingMode, UserProfile
 from app.services.broker_base import BrokerService
 from app.services.fyers_market_stream import FyersMarketStreamManager
+from app.services.fyers_quote_parsing import parse_fyers_quote_row
+from app.services.fyers_response_parsing import (
+    build_fyers_order_payload,
+    fyers_auth_error,
+    is_fyers_auth_response,
+    parse_fyers_basket_order_response,
+    require_fyers_order_success,
+)
+from app.services.fyers_symbols import (
+    INDEX_SYMBOL_MAP,
+    from_fyers_ws_symbol,
+    to_fyers_option_chain_symbol,
+    to_fyers_ws_symbol,
+)
 
 logger = logging.getLogger(__name__)
 
-# Fyers' option-chain endpoint expects exchange-qualified underlying symbols,
-# not the plain index names the UI uses.
-_INDEX_SYMBOL_MAP = {
-    "NIFTY": "NSE:NIFTY50-INDEX",
-    "NIFTY 50": "NSE:NIFTY50-INDEX",
-    "NIFTY50": "NSE:NIFTY50-INDEX",
-    "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
-    "BANK NIFTY": "NSE:NIFTYBANK-INDEX",
-    "FINNIFTY": "NSE:FINNIFTY-INDEX",
-    "MIDCPNIFTY": "NSE:MIDCPNIFTY-INDEX",
-    "SENSEX": "BSE:SENSEX-INDEX",
-    "BSE SENSEX": "BSE:SENSEX-INDEX",
-}
-_REVERSE_INDEX_SYMBOL_MAP = {
-    "NSE:NIFTY50-INDEX": "NIFTY",
-    "NSE:NIFTYBANK-INDEX": "BANKNIFTY",
-    "NSE:FINNIFTY-INDEX": "FINNIFTY",
-    "NSE:MIDCPNIFTY-INDEX": "MIDCPNIFTY",
-    "BSE:SENSEX-INDEX": "SENSEX",
-}
-# NSE/Fyers renamed these cash and derivative underlyings. Keep accepting the
-# legacy UI aliases while sending the current exchange symbols to every broker
-# endpoint. The live Fyers NSE_FO master currently exposes TMPV and LTM.
-_CURRENT_UNDERLYING_ALIASES = {
-    "TATAMOTORS": "TMPV",
-    "LTIM": "LTM",
-    "ZOMATO": "ETERNAL",
-}
-
-
-def to_fyers_ws_symbol(symbol: str) -> str:
-    """Map a UI symbol to what Fyers' websocket subscribe protocol expects.
-
-    Option/equity trading symbols (e.g. "NSE:NIFTY2681823200PE") come from
-    the REST instrument list already exchange-qualified and pass through
-    unchanged; bare underlying symbols (NIFTY, RELIANCE, ...) — used for the
-    underlying's own live price — get mapped the same way the option-chain
-    REST calls do. Without this, Fyers rejects a bare "NIFTY" subscribe with
-    "Please provide a valid symbol".
-    """
-    if ":" in symbol:
-        return symbol
-    return FyersService._to_fyers_symbol(symbol)
-
-
-def from_fyers_ws_symbol(fyers_symbol: str) -> str:
-    """Reverse of to_fyers_ws_symbol, for translating an incoming tick's
-    symbol back to whatever bare alias the frontend subscribed with. Option
-    contract trading symbols aren't bare aliases of anything, so they pass
-    through unchanged.
-    """
-    if fyers_symbol in _REVERSE_INDEX_SYMBOL_MAP:
-        return _REVERSE_INDEX_SYMBOL_MAP[fyers_symbol]
-    if fyers_symbol.startswith("NSE:") and fyers_symbol.endswith("-EQ"):
-        return fyers_symbol[len("NSE:") : -len("-EQ")]
-    return fyers_symbol
+# Re-exported for backward compatibility — some callers still import these
+# two directly from this module rather than from fyers_symbols.
+__all__ = ["FyersService", "from_fyers_ws_symbol", "to_fyers_ws_symbol"]
 
 
 class FyersService(BrokerService):
@@ -212,59 +173,13 @@ class FyersService(BrokerService):
                     account_name=real_name,
                     funds=None,
                 )
-            if self._is_auth_response(response):
-                raise self._auth_error(response, "profile")
+            if is_fyers_auth_response(response, self._AUTH_ERROR_CODES):
+                raise fyers_auth_error(response, "profile")
             raise BrokerConnectionError(f"Failed to retrieve profile: {response}")
         except (BrokerAuthError, BrokerConnectionError):
             raise
         except Exception as e:
             raise BrokerConnectionError(f"Failed to retrieve profile: {e}") from e
-
-    @classmethod
-    def _is_auth_response(cls, response: object) -> bool:
-        """Identify Fyers' invalid-session responses without parsing SDK text."""
-        if not isinstance(response, dict):
-            return False
-        code = response.get("code")
-        if isinstance(code, int | str):
-            try:
-                if int(code) in cls._AUTH_ERROR_CODES:
-                    return True
-            except ValueError:
-                pass
-        message = " ".join(
-            str(response.get(key, ""))
-            for key in ("message", "messageBody", "remarks", "error")
-        ).lower()
-        return any(
-            phrase in message
-            for phrase in (
-                "valid token",
-                "invalid token",
-                "token expired",
-                "token has expired",
-                "authenticate",
-                "unauthorized",
-            )
-        )
-
-    @classmethod
-    def _auth_error(cls, response: object, action: str) -> BrokerAuthError:
-        """Create a safe, actionable auth error for a failed Fyers response."""
-        detail = ""
-        if isinstance(response, dict):
-            detail = str(response.get("message") or response.get("remarks") or "").strip()
-        suffix = f": {detail}" if detail else ""
-        return BrokerAuthError(
-            f"Fyers session token is invalid or expired while retrieving {action}{suffix}"
-        )
-
-    @classmethod
-    def _raise_api_error(cls, response: object, action: str) -> NoReturn:
-        """Raise the right typed error for a non-success Fyers response."""
-        if cls._is_auth_response(response):
-            raise cls._auth_error(response, action)
-        raise BrokerConnectionError(f"Fyers {action} request failed: {response}")
 
     async def get_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
         """Fetch live quotes for a list of symbols from Fyers REST API."""
@@ -309,102 +224,9 @@ class FyersService(BrokerService):
 
             quotes_list: list[dict[str, Any]] = []
             for item in response.get("d", []):
-                val = item.get("v", {})
-                if not isinstance(val, dict):
-                    continue
-                # Fyers uses ``cmd`` for two incompatible payload shapes:
-                # some quote responses carry an OHLC mapping there, while
-                # the normal v3 response carries the command/symbol string
-                # (for example ``NSE:NIFTY50-INDEX``).  Treating the latter
-                # as a mapping raises AttributeError and used to discard the
-                # entire quote batch, leaving the Option Chain with no live
-                # seed or REST fallback despite an active broker session.
-                cmd_value = val.get("cmd")
-                cmd = cmd_value if isinstance(cmd_value, dict) else {}
-                fyers_sym = (
-                    item.get("n", "")
-                    or val.get("symbol", "")
-                    or (cmd_value if isinstance(cmd_value, str) else "")
-                )
-                lp = cmd.get("lp") or val.get("lp") or val.get("last_price")
-                if lp is None or not isinstance(lp, int | float):
-                    continue
-
-                # Fyers has returned both descriptive keys (``open_price``,
-                # ``high_price`` …) and compact OHLC keys (``o``, ``h`` …)
-                # across quote API versions. Accept both layouts so the
-                # dashboard's snapshot fields are populated consistently.
-                open_price = (
-                    val.get("open_price")
-                    or val.get("o")
-                    or cmd.get("o")
-                    or cmd.get("open_price")
-                    or 0.0
-                )
-                prev_close = (
-                    val.get("prev_close_price")
-                    or val.get("c")
-                    or cmd.get("c")
-                    or cmd.get("prev_close_price")
-                    or open_price
-                )
-
-                ch = val.get("ch") if val.get("ch") is not None else cmd.get("ch")
-                if (ch is None or ch == 0) and prev_close and prev_close > 0 and lp != prev_close:
-                    ch = round(lp - prev_close, 2)
-                elif ch is None:
-                    ch = 0.0
-
-                chp = val.get("chp") if val.get("chp") is not None else cmd.get("chp")
-                if (chp is None or chp == 0) and prev_close and prev_close > 0 and ch != 0:
-                    chp = round((ch / prev_close) * 100.0, 2)
-                elif chp is None:
-                    chp = 0.0
-
-                high_price = (
-                    val.get("high_price")
-                    or val.get("h")
-                    or cmd.get("h")
-                    or cmd.get("high_price")
-                    or 0.0
-                )
-                low_price = (
-                    val.get("low_price")
-                    or val.get("l")
-                    or cmd.get("l")
-                    or cmd.get("low_price")
-                    or 0.0
-                )
-                ask = val.get("ask") or cmd.get("ask") or 0.0
-                bid = val.get("bid") or cmd.get("bid") or 0.0
-                atp = val.get("atp") or cmd.get("atp") or 0.0
-
-                ui_symbol = from_fyers_ws_symbol(fyers_sym)
-                quotes_list.append(
-                    {
-                        "symbol": ui_symbol,
-                        "trading_symbol": ui_symbol,
-                        "last_price": float(lp),
-                        "volume": int(
-                            cmd.get("v")
-                            or cmd.get("volume")
-                            or val.get("volume")
-                            or val.get("v")
-                            or 0
-                        ),
-                        "open_interest": 0,
-                        "change": float(ch),
-                        "change_percent": float(chp),
-                        "open_price": float(open_price),
-                        "high_price": float(high_price),
-                        "low_price": float(low_price),
-                        "prev_close_price": float(prev_close) if prev_close else 0.0,
-                        "ask": float(ask),
-                        "bid": float(bid),
-                        "atp": float(atp),
-                        "timestamp": int(time.time()),
-                    }
-                )
+                parsed = parse_fyers_quote_row(item)
+                if parsed is not None:
+                    quotes_list.append(parsed)
             return quotes_list
         except Exception as e:
             import logging
@@ -423,15 +245,6 @@ class FyersService(BrokerService):
                 await asyncio.sleep(delay)
             return await asyncio.to_thread(self.client.quotes, payload)
 
-    @staticmethod
-    def _to_fyers_symbol(symbol: str) -> str:
-        """Map a UI symbol (NIFTY, RELIANCE, ...) to Fyers' option-chain
-        underlying format — indices use their exchange INDEX symbol,
-        everything else is treated as an NSE equity."""
-        upper = symbol.upper()
-        canonical = _CURRENT_UNDERLYING_ALIASES.get(upper, upper)
-        return _INDEX_SYMBOL_MAP.get(canonical, f"NSE:{canonical}-EQ")
-
     async def _fetch_option_chain(
         self, symbol: str, strikecount: int, expiry_timestamp: str = ""
     ) -> dict[str, Any] | None:
@@ -444,7 +257,7 @@ class FyersService(BrokerService):
         tightly, and get_instruments makes several of these calls per symbol.
         """
         payload = {
-            "symbol": self._to_fyers_symbol(symbol),
+            "symbol": to_fyers_option_chain_symbol(symbol),
             "strikecount": strikecount,
             "timestamp": expiry_timestamp,
         }
@@ -454,8 +267,8 @@ class FyersService(BrokerService):
             if response and response.get("s") == "ok":
                 return cast(dict[str, Any], response.get("data", {}))
             last_response = response or {}
-            if self._is_auth_response(last_response):
-                raise self._auth_error(last_response, "option chain")
+            if is_fyers_auth_response(last_response, self._AUTH_ERROR_CODES):
+                raise fyers_auth_error(last_response, "option chain")
             if last_response.get("code") == self._NO_EXPIRY_CONTRACT_CODE:
                 return None
             is_last_attempt = attempt == self._MAX_FETCH_RETRIES - 1
@@ -542,7 +355,7 @@ class FyersService(BrokerService):
                 return []
 
             self._no_contract_cache.pop(cache_key, None)
-            is_index = symbol.upper() in _INDEX_SYMBOL_MAP
+            is_index = symbol.upper() in INDEX_SYMBOL_MAP
             instruments: list[dict[str, Any]] = []
             rate_limited = False
 
@@ -699,8 +512,8 @@ class FyersService(BrokerService):
                 await asyncio.sleep(
                     compute_backoff_delay(attempt, self._RETRY_BASE_DELAY_SECONDS)
                 )
-            if self._is_auth_response(last_response):
-                raise self._auth_error(last_response, "history")
+            if is_fyers_auth_response(last_response, self._AUTH_ERROR_CODES):
+                raise fyers_auth_error(last_response, "history")
             raise BrokerConnectionError(
                 f"Failed to retrieve history for {symbol}: {last_response}"
             )
@@ -838,11 +651,10 @@ class FyersService(BrokerService):
             raise BrokerConnectionError(f"Failed to retrieve funds: {response}")
         return {"fund_limit": response.get("fund_limit", [])}
 
-    @staticmethod
-    def _require_order_success(response: dict[str, Any] | None, action: str) -> dict[str, Any]:
-        if not response or response.get("s") != "ok":
-            FyersService._raise_api_error(response, action)
-        return response
+    def _require_order_success(
+        self, response: dict[str, Any] | None, action: str
+    ) -> dict[str, Any]:
+        return require_fyers_order_success(response, action, self._AUTH_ERROR_CODES)
 
     async def get_orders(self) -> list[dict[str, Any]]:
         """Today's order book, normalized without exposing Fyers' raw shape."""
@@ -877,29 +689,20 @@ class FyersService(BrokerService):
                     "status": status,
                     "status_message": row.get("statusMessage") or row.get("message"),
                     "order_time": row.get("orderDateTime") or row.get("orderTime"),
+                    # Echoed back for any order placed with `order_tag` in
+                    # _order_payload — lets a caller reconcile an ambiguous
+                    # placement failure by searching the order book for the
+                    # tag it submitted, rather than by broker-generated id
+                    # (which it may never have received). See
+                    # order_reconciliation.find_order_by_tag.
+                    "order_tag": row.get("orderTag") or None,
                 }
             )
         return [order for order in orders if order["id"]]
 
     def _order_payload(self, order: dict[str, Any]) -> dict[str, Any]:
         """Shared per-order payload shaping for both single and basket placement."""
-        payload = {
-            "symbol": order["symbol"],
-            "qty": order["quantity"],
-            "type": self._ORDER_TYPE_CODES[order["order_type"]],
-            "side": 1 if order["side"] == "Buy" else -1,
-            "productType": order["product_type"],
-            "limitPrice": order["limit_price"],
-            "stopPrice": order["stop_price"],
-            "validity": order["validity"],
-            "disclosedQty": order["disclosed_quantity"],
-            "offlineOrder": order["offline_order"],
-            "stopLoss": order["stop_loss"],
-            "takeProfit": order["take_profit"],
-        }
-        if order.get("order_tag"):
-            payload["orderTag"] = order["order_tag"]
-        return payload
+        return build_fyers_order_payload(order, self._ORDER_TYPE_CODES)
 
     async def place_order(self, order: dict[str, Any]) -> dict[str, Any]:
         """Submit a request whose shape has already been validated at the API boundary."""
@@ -915,13 +718,9 @@ class FyersService(BrokerService):
 
     # Fyers' bulk-placement endpoint (SDK's place_basket_orders -> POST
     # /multi-order/sync) places legs sequentially, returning one result per
-    # order in the same order they were submitted. The exact success/failure
-    # shape of each element isn't documented beyond "the response of all the
-    # orders will be provided... in the same order", so parsing here is
-    # deliberately tolerant: it never reports a leg as succeeded unless it
-    # can find an explicit id/ok status for it, and falls back to an
-    # explicit failure message rather than guessing when the shape doesn't
-    # match what was expected.
+    # order in the same order they were submitted. See
+    # fyers_response_parsing.parse_fyers_basket_order_response for why that
+    # response is parsed tolerantly.
     async def place_basket_orders(self, orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not orders:
             return []
@@ -935,38 +734,7 @@ class FyersService(BrokerService):
         except Exception as e:
             raise BrokerConnectionError(f"Fyers basket order request failed: {e}") from e
 
-        rows: list[Any] | None = None
-        if isinstance(response, list):
-            rows = response
-        elif isinstance(response, dict):
-            for key in ("data", "orders", "d"):
-                candidate = response.get(key)
-                if isinstance(candidate, list):
-                    rows = candidate
-                    break
-        if rows is None or len(rows) != len(orders):
-            raise BrokerConnectionError(
-                f"Fyers basket order response did not match the submitted legs: {response}"
-            )
-
-        results: list[dict[str, Any]] = []
-        for row in rows:
-            row_data = row.get("body", row) if isinstance(row, dict) else {}
-            order_id = row_data.get("id") if isinstance(row_data, dict) else None
-            succeeded = isinstance(row, dict) and (
-                row.get("s") == "ok" or row.get("code") == 1100 or order_id is not None
-            )
-            results.append(
-                {
-                    "id": order_id if succeeded else None,
-                    "message": str(
-                        row_data.get("message", "Order submitted" if succeeded else "Leg failed")
-                        if isinstance(row_data, dict)
-                        else "Leg failed"
-                    ),
-                }
-            )
-        return results
+        return parse_fyers_basket_order_response(response, len(orders))
 
     async def modify_order(self, order_id: str, order: dict[str, Any]) -> dict[str, Any]:
         payload = {

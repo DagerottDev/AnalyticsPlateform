@@ -16,6 +16,7 @@ import { formatINR } from "@/lib/utils";
 import { usePositionStore } from "@/stores/positionStore";
 import { Instrument, MarketTick } from "@/types/market";
 import { getMarginRequirement, MarginResult } from "@/lib/market";
+import { formatIstDatetimeLocal, parseIstDatetimeLocal } from "@/lib/marketSession";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { EducationPopover } from "@/components/ui/EducationPopover";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -71,7 +72,7 @@ export function BuyTicketModal({ symbol, instrument, tick, onClose, initialSide 
   const targetValid = targetPrice <= 0 || (entryReference > 0 && (side === "Buy" ? targetPrice > entryReference : targetPrice < entryReference));
   const isValid =
     quantity > 0 && (lotSize <= 0 || quantity % lotSize === 0) &&
-    (orderType !== "LIMIT" || limitPrice > 0) && (!isGtt || (gttTriggerPrice > 0 && new Date(gttExpiry).getTime() > Date.now() && (gttExecutionType !== "LIMIT" || limitPrice > 0) && (side === "Buy" ? gttTriggerPrice > ltp : gttTriggerPrice < ltp))) && stopLossValid && targetValid;
+    (orderType !== "LIMIT" || limitPrice > 0) && (!isGtt || (gttTriggerPrice > 0 && parseIstDatetimeLocal(gttExpiry).getTime() > Date.now() && (gttExecutionType !== "LIMIT" || limitPrice > 0) && (side === "Buy" ? gttTriggerPrice > ltp : gttTriggerPrice < ltp))) && stopLossValid && targetValid;
   const riskError = !stopLossValid
     ? `${side} stop-loss must be ${side === "Buy" ? "below" : "above"} the entry premium.`
     : !targetValid
@@ -80,9 +81,8 @@ export function BuyTicketModal({ symbol, instrument, tick, onClose, initialSide 
 
   useEffect(() => {
     if (!isGtt || gttExpiry) return;
-    const date = new Date(Date.now() + defaultGttValidityDays * 86_400_000);
-    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-    setGttExpiry(date.toISOString().slice(0, 16));
+    const target = new Date(Date.now() + defaultGttValidityDays * 86_400_000);
+    setGttExpiry(formatIstDatetimeLocal(target));
   }, [defaultGttValidityDays, gttExpiry, isGtt]);
 
   const refreshMargin = useCallback(async () => {
@@ -145,7 +145,7 @@ export function BuyTicketModal({ symbol, instrument, tick, onClose, initialSide 
     try {
       if (ltp <= 0) throw new Error("A live price is not available.");
       if (isGtt) {
-        addPaperGtt({ symbol: instrument.trading_symbol, instrument, side, quantity, triggerPrice: gttTriggerPrice, executionType: gttExecutionType, limitPrice: gttExecutionType === "LIMIT" ? limitPrice : 0, expiresAt: new Date(gttExpiry).toISOString() });
+        addPaperGtt({ symbol: instrument.trading_symbol, instrument, side, quantity, triggerPrice: gttTriggerPrice, executionType: gttExecutionType, limitPrice: gttExecutionType === "LIMIT" ? limitPrice : 0, expiresAt: parseIstDatetimeLocal(gttExpiry).toISOString() });
         toast.success("Paper GTT scheduled", { description: "It remains active while this app is open and receiving prices." }); onClose(); return;
       }
       if (orderType === "LIMIT") {
@@ -191,7 +191,7 @@ export function BuyTicketModal({ symbol, instrument, tick, onClose, initialSide 
     setSubmitting(true);
     try {
       if (isGtt) {
-        const result = await createGttOrder({ symbol: instrument.trading_symbol, quantity, side, product_type: productType, execution_type: gttExecutionType, trigger_price: gttTriggerPrice, limit_price: gttExecutionType === "LIMIT" ? limitPrice : 0, expires_at: new Date(gttExpiry).toISOString() });
+        const result = await createGttOrder({ symbol: instrument.trading_symbol, quantity, side, product_type: productType, execution_type: gttExecutionType, trigger_price: gttTriggerPrice, limit_price: gttExecutionType === "LIMIT" ? limitPrice : 0, expires_at: parseIstDatetimeLocal(gttExpiry).toISOString() });
         toast.success("GTT order created", { description: `Active until ${new Date(result.expires_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` });
         onClose();
         return;
@@ -424,7 +424,7 @@ export function BuyTicketModal({ symbol, instrument, tick, onClose, initialSide 
               <Metric label="Side" value={side} />
               <Metric label="Quantity" value={String(quantity)} />
               <Metric label="Order type" value={orderType} />
-              {isGtt && <><Metric label="Trigger" value={formatINR(gttTriggerPrice)} /><Metric label="Expires" value={new Date(gttExpiry).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} /></>}
+              {isGtt && <><Metric label="Trigger" value={formatINR(gttTriggerPrice)} /><Metric label="Expires" value={parseIstDatetimeLocal(gttExpiry).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} /></>}
               <Metric label="Product" value={productType} />
               {orderType === "LIMIT" && <Metric label="Limit price" value={formatINR(limitPrice)} />}
               {stopLoss > 0 && <Metric label="Stop-loss" value={formatINR(stopLoss)} />}

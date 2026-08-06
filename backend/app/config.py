@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     basket_monitor_enabled: bool = True
     basket_monitor_interval_seconds: float = 10.0
 
+    # How long an "Unknown" GTT order (broker call raised, but may have
+    # actually been accepted — see order_reconciliation.py) is retried
+    # against the broker's order book before giving up and marking it
+    # "Failed" for real. Tagged placements should show up in the order book
+    # within seconds of actually succeeding, so this is generous headroom
+    # for a slow broker response, not an expectation it normally takes this long.
+    order_reconciliation_timeout_seconds: float = 120.0
+
     alert_smtp_host: str | None = None
     alert_smtp_port: int = 587
     alert_smtp_username: str | None = None

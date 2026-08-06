@@ -212,7 +212,16 @@ async def capture_scheduled_snapshots(settings: Settings, now: datetime | None =
 
 async def open_interest_snapshot_loop(settings: Settings, stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
-        await capture_scheduled_snapshots(settings)
+        try:
+            await capture_scheduled_snapshots(settings)
+        except Exception:
+            # capture_scheduled_snapshots only guards its per-symbol body —
+            # a failure in the setup around it (async_session_maker,
+            # purge_expired) would otherwise propagate out of this while
+            # loop and permanently end open-interest snapshotting for the
+            # rest of the process's life. Log and retry next cycle instead
+            # (same fix already applied to the GTT/basket monitor loops).
+            logger.exception("Open-interest snapshot cycle failed; will retry next cycle")
         try:
             await asyncio.wait_for(
                 stop_event.wait(), timeout=settings.open_interest_snapshot_interval_seconds

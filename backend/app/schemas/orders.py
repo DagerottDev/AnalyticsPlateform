@@ -120,7 +120,18 @@ class OrdersResponse(BaseModel):
 
 
 GttExecutionType = Literal["MARKET", "LIMIT"]
-GttStatus = Literal["Pending", "Triggered", "Placed", "Failed", "Cancelled", "Expired"]
+GttStatus = Literal[
+    "Pending", "Triggered", "Placed", "Failed", "Cancelled", "Expired", "Unknown"
+]
+"""
+"Unknown" means a GTT-trigger or Dhan-native-GTT placement call raised, but
+it's not yet known whether the broker actually accepted it before that
+happened (as opposed to "Failed", which means the broker call clearly
+returned a rejection). The GTT monitor reconciles "Unknown" records against
+the broker's order book (by the tag it submitted at placement time) every
+tick, resolving to "Placed" if found or "Failed" once
+Settings.order_reconciliation_timeout_seconds has elapsed with no match.
+"""
 
 
 class CreateGttOrderRequest(BaseModel):

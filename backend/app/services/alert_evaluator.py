@@ -215,7 +215,18 @@ async def run_alert_evaluation(session_factory: object = async_session_maker) ->
             await db.scalars(select(AlertRecord).where(AlertRecord.status == "Snoozed"))
         ).all()
         for alert in snoozed:
-            if alert.snoozed_until and alert.snoozed_until <= now:
+            snoozed_until = alert.snoozed_until
+            if snoozed_until is None:
+                continue
+            # snoozed_until is a DateTime(timezone=True) column, but not
+            # every driver round-trips tzinfo faithfully (SQLite notably
+            # does not) — comparing a naive value against the aware `now`
+            # below would raise TypeError rather than just reactivating
+            # late. Same defensive normalization already used for exactly
+            # this reason in iv_universe_backfill.py's _snapshot_is_due.
+            if snoozed_until.tzinfo is None:
+                snoozed_until = snoozed_until.replace(tzinfo=UTC)
+            if snoozed_until <= now:
                 alert.status, alert.snoozed_until = "Active", None
         await db.flush()
         active = (await db.scalars(select(AlertRecord).where(AlertRecord.status == "Active"))).all()
@@ -274,7 +285,33 @@ async def run_alert_evaluation(session_factory: object = async_session_maker) ->
                 if isinstance(quote, dict)
             }
             for alert in alerts:
-                value = await _value_for_alert(alert, quotes, chains)
+                try:
+                    value = await _value_for_alert(alert, quotes, chains)
+                except Exception:
+                    # A single alert's evaluation must not crash the whole
+                    # batch: this `async with` block spans every owner
+                    # processed in this cycle and only commits once, at the
+                    # very end (see below). An unguarded exception here
+                    # would roll back every trigger/status change already
+                    # staged for every OTHER owner too — and since nothing
+                    # would then stop this alert from being evaluated again,
+                    # the exact same record (e.g. a legacy alert with a
+                    # non-positive strike, which passes
+                    # _validate_persisted_alert's schema check but blows up
+                    # calculate_implied_volatility's math.log(S/K)) would
+                    # crash and roll back every subsequent cycle forever —
+                    # alert_evaluation_loop's own except only logs and
+                    # retries, it doesn't isolate or skip the offender.
+                    # Disable the alert instead, matching
+                    # _validate_persisted_alert's handling of a
+                    # schema-invalid record, so one bad alert costs one
+                    # skipped evaluation, not the whole platform's alert
+                    # delivery.
+                    logger.exception(
+                        "Alert %s raised during evaluation; disabling it", alert.id
+                    )
+                    alert.status = "Disabled"
+                    continue
                 if value is None or not _matches(value, alert.operator, alert.threshold):
                     continue
                 db.add(
