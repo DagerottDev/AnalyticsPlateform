@@ -7,8 +7,6 @@ import { useTickerStore } from "@/stores/tickerStore";
 import { useTickStore } from "@/stores/tickStore";
 import { useReplayStore } from "@/stores/replayStore";
 import { MarketTick } from "@/types/market";
-import { useNseMarketSession } from "@/hooks/useNseMarketSession";
-import { isFnoSymbol } from "@/lib/marketSession";
 
 /**
  * Dummy component (mounted once in the root layout, like AlertEngineMount)
@@ -32,8 +30,6 @@ export function TickerFeedMount() {
   const tickers = useTickerStore((state) => state.tickers);
   const replayIsActive = useReplayStore((state) => state.isActive);
   const replayTicks = useReplayStore((state) => state.currentTicks);
-  const fnoSession = useNseMarketSession("fno");
-  const cashSession = useNseMarketSession("cash");
   const prevSymbols = useRef<string[]>([]);
   const wasReplaying = useRef(false);
 
@@ -60,7 +56,7 @@ export function TickerFeedMount() {
   useEffect(() => {
     const ws = getWebSocket();
     const requestedSymbols = user?.client_id && !replayIsActive
-      ? tickers.filter((symbol) => isFnoSymbol(symbol) ? fnoSession.state === "open" : cashSession.state === "open")
+      ? tickers
       : [];
 
     const removedSymbols = prevSymbols.current.filter((s) => !requestedSymbols.includes(s));
@@ -75,7 +71,7 @@ export function TickerFeedMount() {
     }
 
     prevSymbols.current = requestedSymbols;
-  }, [tickers, user?.client_id, replayIsActive, fnoSession.state, cashSession.state, handleTick]);
+  }, [tickers, user?.client_id, replayIsActive, handleTick]);
 
   return null;
 }

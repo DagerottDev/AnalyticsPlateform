@@ -18,7 +18,7 @@ export interface GreekWorkspaceLayout {
 
 export const DEFAULT_GREEK_PANEL_LAYOUT: GreekPanelLayout = {
   overlay: "none",
-  period: 20,
+  period: 10,
   multiplier: 2,
 };
 

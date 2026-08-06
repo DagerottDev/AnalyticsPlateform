@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, BarChart3, BellPlus, BookOpen, Link2, RefreshCw, Save } from "lucide-react";
+import { ArrowLeft, BarChart3, BellPlus, BookOpen, ExternalLink, Link2, RefreshCw, Save } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { EducationPopover } from "@/components/ui/EducationPopover";
 import { Select } from "@/components/ui/Select";
@@ -17,6 +17,7 @@ interface WorkspaceHeaderProps {
   onSave: () => void;
   onRefresh: () => void;
   onCreateAlert: () => void;
+  onOpenMarketStructure: () => void;
   timeframe: string;
   onTimeframeChange: (timeframe: string) => void;
   syncCharts?: boolean;
@@ -32,7 +33,7 @@ interface WorkspaceHeaderProps {
 
 export function WorkspaceHeader({
   symbol, expiry, selectedCount, loading, educationOpen, layoutMessage,
-  onShowEducation, onSave, onRefresh, onCreateAlert,
+  onShowEducation, onSave, onRefresh, onCreateAlert, onOpenMarketStructure,
   timeframe, onTimeframeChange, syncCharts = false, onToggleSyncCharts = () => undefined, alertsDisabled = false, alertDisabledReason,
   rollingSelectionMode = "smooth", rollingToggleDisabled = false, onToggleRollingMode = () => undefined, replayActive = false, replaySessionDate,
 }: WorkspaceHeaderProps) {
@@ -77,6 +78,9 @@ export function WorkspaceHeader({
         </label>
         <Button variant={rollingSelectionMode === "smooth" ? "primary" : "outline"} size="sm" onClick={onToggleRollingMode} disabled={rollingToggleDisabled} aria-pressed={rollingSelectionMode === "smooth"} title={rollingToggleDisabled ? "Add a rolling ATM/OTM/ITM selection to change this mode." : "Smooth blends adjacent strikes by distance; Raw uses one exact rolled contract."}>
           {rollingSelectionMode === "smooth" ? "Smooth rolling" : "Raw rolling"}
+        </Button>
+        <Button variant="outline" size="sm" onClick={onOpenMarketStructure} disabled={!symbol || !expiry} title="Open full-expiry OI and Greek concentration in a separate tab">
+          <ExternalLink className="h-4 w-4" /> Market structure
         </Button>
         <Button variant="outline" size="sm" onClick={onCreateAlert} disabled={alertsDisabled} title={alertDisabledReason}><BellPlus className="h-4 w-4" /> Create alert</Button>
         <Button variant="outline" size="sm" onClick={onSave}><Save className="h-4 w-4" /> Save layout</Button>

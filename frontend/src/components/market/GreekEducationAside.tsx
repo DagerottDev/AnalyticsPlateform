@@ -24,6 +24,10 @@ const sections = [
     title: "4. Create an alert",
     body: "Set a threshold on the focused contract's raw Greek and choose a cooldown. Alerts are durable and evaluated server-side; they are not indicator-crossover alerts.",
   },
+  {
+    title: "5. Separate observation from risk",
+    body: "Native panels sum one selected contract per strike. Greek scenarios live in Strategy Builder, where they apply its actual sides and quantities to scenario P&L. Market Structure is OI-based concentration and cannot reveal who is long or short, so hypothetical sign modes are explicitly conditional.",
+  },
 ];
 
 export function GreekEducationAside({ onClose }: GreekEducationAsideProps) {

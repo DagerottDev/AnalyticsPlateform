@@ -44,6 +44,14 @@ export interface MarketTick {
   ask?: number;
   bid?: number;
   atp?: number;
+  /**
+   * Provenance of the quote. The broker websocket and REST quote endpoint
+   * share the same normalized shape, but only a websocket tick proves that
+   * the broker is actively streaming outside the exchange's normal schedule.
+   */
+  feed?: "stream" | "snapshot";
+  /** Timestamp of the most recent raw broker stream frame, when available. */
+  last_stream_timestamp?: number;
   /** Only set during Replay Mode — see TickData.source. */
   source?: "real" | "synthetic";
 }

@@ -21,6 +21,7 @@ describe("normalizeTick", () => {
       timestamp: 1721800000000, // seconds -> ms
       change: 12.3,
       change_percent: 0.06,
+      feed: "snapshot",
     });
   });
 
@@ -33,6 +34,8 @@ describe("normalizeTick", () => {
     expect(tick?.open_interest).toBe(0);
     expect(tick?.change).toBe(0);
     expect(tick?.change_percent).toBe(0);
+    expect(tick?.feed).toBe("stream");
+    expect(tick?.last_stream_timestamp).toBe(tick?.timestamp);
   });
 
   it("carries through volume/change fields on a raw live tick when present", () => {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { loadGreekWorkspaceLayout, saveGreekWorkspaceLayout } from "@/lib/greekWorkspaceLayout";
+import { DEFAULT_GREEK_PANEL_LAYOUT, loadGreekWorkspaceLayout, saveGreekWorkspaceLayout } from "@/lib/greekWorkspaceLayout";
+import { DEFAULT_GREEK_DISPLAY_MODE } from "@/lib/greekPresentation";
 
 describe("Greek workspace layout", () => {
   beforeEach(() => {
@@ -15,6 +16,11 @@ describe("Greek workspace layout", () => {
         get length() { return entries.size; },
       } satisfies Storage,
     });
+  });
+
+  it("uses standardized Greek panels and the 10,2 Supertrend baseline by default", () => {
+    expect(DEFAULT_GREEK_DISPLAY_MODE).toBe("standardized");
+    expect(DEFAULT_GREEK_PANEL_LAYOUT).toMatchObject({ overlay: "none", period: 10, multiplier: 2 });
   });
 
   it("persists reusable panel choices without any selected contracts", () => {

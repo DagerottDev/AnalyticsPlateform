@@ -11,8 +11,10 @@ import { EducationPopover } from "@/components/ui/EducationPopover";
 import { Input } from "@/components/ui/Input";
 import { PageContainer } from "@/components/ui/PageContainer";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { Select } from "@/components/ui/Select";
 import { IVScreenerEducationAside } from "@/components/volatility/IVScreenerEducationAside";
-import { getIvUniverse, type IvUniverseSymbol } from "@/lib/ivUniverse";
+import { expectedIvRange, getIvUniverse, type CorporateCalendarStatus, type CorporateEventType, type IvUniverseSymbol } from "@/lib/ivUniverse";
+import { useSettingsStore, type IvScreenerSigma } from "@/stores/settingsStore";
 import { cn } from "@/lib/utils";
 
 const REFRESH_INTERVAL_MS = 60_000;
@@ -20,6 +22,8 @@ const REFRESH_INTERVAL_MS = 60_000;
 type SortKey = "symbol" | "spot" | "atm_iv" | "iv_rank" | "iv_percentile";
 type SortDir = "asc" | "desc";
 type Status = IvUniverseSymbol["status"];
+
+const PROJECTION_PRESETS = [7, 14, 30, 45, 60] as const;
 
 const COLUMNS: { key: SortKey; label: string; align?: "right" }[] = [
   { key: "symbol", label: "Symbol" },
@@ -45,29 +49,58 @@ function statusTone(status: Status): "blue" | "orange" | "profit" {
   return status === "ready" ? "profit" : status === "stale" ? "orange" : "blue";
 }
 
+function inr(value: number): string {
+  return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
+
+function eventLabel(type: CorporateEventType): string {
+  return {
+    results: "Results",
+    board_meeting: "Board meeting",
+    dividend: "Dividend",
+    split: "Split",
+    bonus: "Bonus",
+    buyback: "Buyback",
+    rights: "Rights",
+  }[type];
+}
+
+function eventDate(value: string): string {
+  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
+    .format(new Date(`${value}T00:00:00Z`));
+}
+
 export default function VolatilityScreenerPage() {
   const [symbols, setSymbols] = useState<IvUniverseSymbol[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [calendarStatus, setCalendarStatus] = useState<CorporateCalendarStatus>("unavailable");
+  const [calendarUpdatedAt, setCalendarUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("iv_rank");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [educationOpen, setEducationOpen] = useState(false);
+  const ivScreener = useSettingsStore((state) => state.ivScreener);
+  const updatePreferences = useSettingsStore((state) => state.updatePreferences);
+  const projectionDays = ivScreener.projectionDays;
+  const sigma = ivScreener.sigma;
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await getIvUniverse();
+      const response = await getIvUniverse(projectionDays);
       setSymbols(response.symbols);
       setGeneratedAt(response.generated_at);
+      setCalendarStatus(response.corporate_calendar?.status ?? "unavailable");
+      setCalendarUpdatedAt(response.corporate_calendar?.updated_at ?? null);
     } catch (cause) {
       setError(cause);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [projectionDays]);
 
   useEffect(() => {
     void refresh();
@@ -108,6 +141,21 @@ export default function VolatilityScreenerPage() {
     });
   }, [symbols, search, sortKey, sortDir]);
 
+  const setProjectionDays = (value: number) => {
+    const next = Math.min(60, Math.max(1, Math.trunc(value) || 1));
+    updatePreferences((current) => ({
+      ...current,
+      ivScreener: { ...current.ivScreener, projectionDays: next },
+    }));
+  };
+
+  const setSigma = (value: IvScreenerSigma) => {
+    updatePreferences((current) => ({
+      ...current,
+      ivScreener: { ...current.ivScreener, sigma: value },
+    }));
+  };
+
   return (
     <DashboardLayout>
       <PageContainer>
@@ -140,19 +188,57 @@ export default function VolatilityScreenerPage() {
           {educationOpen && <IVScreenerEducationAside onClose={() => setEducationOpen(false)} />}
           <div className="flex min-w-0 flex-col gap-4">
             <Card className="flex flex-col gap-3">
-              <div className="relative max-w-sm">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
-                <Input
-                  aria-label="Search IV screener symbols"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search symbol or company name…"
-                  className="pl-9"
-                />
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="flex w-36 flex-col gap-1 text-xs font-semibold text-[var(--color-text-secondary)]">
+                  Projection days
+                  <Input
+                    aria-label="IV range projection days"
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={projectionDays}
+                    onChange={(event) => setProjectionDays(Number(event.target.value))}
+                  />
+                </label>
+                <div className="flex flex-wrap gap-1" aria-label="Projection day presets">
+                  {PROJECTION_PRESETS.map((days) => (
+                    <Button
+                      key={days}
+                      type="button"
+                      size="sm"
+                      variant={projectionDays === days ? "secondary" : "outline"}
+                      onClick={() => setProjectionDays(days)}
+                    >
+                      {days}D
+                    </Button>
+                  ))}
+                </div>
+                <label className="flex w-36 flex-col gap-1 text-xs font-semibold text-[var(--color-text-secondary)]">
+                  Confidence
+                  <Select
+                    aria-label="IV range confidence"
+                    value={String(sigma)}
+                    onChange={(event) => setSigma(Number(event.target.value) as IvScreenerSigma)}
+                  >
+                    <option value="1">1σ</option>
+                    <option value="1.5">1.5σ</option>
+                    <option value="2">2σ</option>
+                  </Select>
+                </label>
+                <div className="relative min-w-[220px] flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+                  <Input
+                    aria-label="Search IV screener symbols"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search symbol or company name…"
+                    className="pl-9"
+                  />
+                </div>
               </div>
               <p className="text-xs text-[var(--color-text-secondary)]">
-                Backed by a scheduled backfill job, not live per-request broker calls — refreshes roughly every 30 minutes as the
-                job progresses through the full F&O universe. Click a column header to sort.
+                IV Range is an annualized ATM-IV estimate over {projectionDays} calendar days at {sigma}σ. It does not model event gaps.
+                {calendarStatus === "ready" ? " NSE-announced events are checked for this window." : " Event calendar is not fully available; ranges are not event-checked."}
               </p>
             </Card>
 
@@ -160,7 +246,7 @@ export default function VolatilityScreenerPage() {
 
             <Card className="overflow-hidden p-0">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-left text-sm">
+                <table className="w-full min-w-[940px] text-left text-sm">
                   <caption className="sr-only">ATM implied volatility and volatility ranking for NSE F&amp;O stocks</caption>
                   <thead className="border-b border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
                     <tr>
@@ -193,23 +279,31 @@ export default function VolatilityScreenerPage() {
                           </button>
                         </th>
                       ))}
+                      <th scope="col" className="px-4 py-3 text-right">IV Range</th>
+                      <th scope="col" className="px-4 py-3">Events</th>
                       <th scope="col" className="px-4 py-3">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((row) => (
-                      <ScreenerRow key={row.symbol} row={row} />
+                      <ScreenerRow
+                        key={row.symbol}
+                        row={row}
+                        projectionDays={projectionDays}
+                        sigma={sigma}
+                        calendarStatus={calendarStatus}
+                      />
                     ))}
                     {loading && rows.length === 0 && (
                       <tr>
-                        <td colSpan={COLUMNS.length + 1} className="px-4 py-10 text-center text-sm text-[var(--color-text-secondary)]">
+                        <td colSpan={COLUMNS.length + 3} className="px-4 py-10 text-center text-sm text-[var(--color-text-secondary)]">
                           <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading IV universe…</span>
                         </td>
                       </tr>
                     )}
                     {rows.length === 0 && !loading && (
                       <tr>
-                        <td colSpan={COLUMNS.length + 1} className="px-4 py-8 text-center text-sm text-[var(--color-text-muted)]">
+                        <td colSpan={COLUMNS.length + 3} className="px-4 py-8 text-center text-sm text-[var(--color-text-muted)]">
                           No symbols match your search.
                         </td>
                       </tr>
@@ -221,8 +315,10 @@ export default function VolatilityScreenerPage() {
 
             <p className="text-xs text-[var(--color-text-muted)]">
               {generatedAt ? `Last loaded: ${new Date(generatedAt).toLocaleString()}. ` : ""}
+              {calendarUpdatedAt ? `NSE calendar updated: ${new Date(calendarUpdatedAt).toLocaleTimeString()}. ` : ""}
               Showing {rows.length} of {symbols.length} F&amp;O stocks. IV Rank/Percentile need at least 20 prior daily observations
-              to be meaningful. Stale rows have not refreshed within the expected broker snapshot window.
+              to be meaningful. Stale rows have not refreshed within the expected broker snapshot window. Events are announced only;
+              no event badge cannot rule out unknown events.
             </p>
           </div>
         </div>
@@ -231,7 +327,20 @@ export default function VolatilityScreenerPage() {
   );
 }
 
-function ScreenerRow({ row }: { row: IvUniverseSymbol }) {
+function ScreenerRow({
+  row,
+  projectionDays,
+  sigma,
+  calendarStatus,
+}: {
+  row: IvUniverseSymbol;
+  projectionDays: number;
+  sigma: IvScreenerSigma;
+  calendarStatus: CorporateCalendarStatus;
+}) {
+  const range = expectedIvRange(row.spot, row.atm_iv, projectionDays, sigma);
+  const events = [...(row.events ?? [])].sort((left, right) => left.event_date.localeCompare(right.event_date));
+  const nearestEvent = events[0];
   return (
     <tr className="border-b border-[var(--color-border-subtle)] last:border-0">
       <td className="px-4 py-3">
@@ -244,6 +353,38 @@ function ScreenerRow({ row }: { row: IvUniverseSymbol }) {
       <td className="tnum px-4 py-3 text-right font-bold">{percent(row.atm_iv)}</td>
       <td className="tnum px-4 py-3 text-right">{points(row.iv_rank)}</td>
       <td className="tnum px-4 py-3 text-right">{points(row.iv_percentile)}</td>
+      <td className="tnum px-4 py-3 text-right">
+        {range ? (
+          <div>
+            <div className="font-semibold text-[var(--color-text-primary)]">{inr(range.lower)} – {inr(range.upper)}</div>
+            <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">±{inr(range.move)}</div>
+          </div>
+        ) : "—"}
+      </td>
+      <td className="px-4 py-3">
+        {calendarStatus === "unavailable" ? (
+          <span className="text-xs text-[var(--color-text-muted)]" title="Event feed unavailable—range not event-checked">Unknown</span>
+        ) : calendarStatus === "stale" && events.length === 0 ? (
+          <span className="text-xs text-[var(--color-accent-orange)]" title="Event calendar is stale—range not fully event-checked">Unknown</span>
+        ) : nearestEvent ? (
+          <details className="group">
+            <summary className="cursor-pointer list-none">
+              <Badge tone="orange">{eventLabel(nearestEvent.event_type)} · {eventDate(nearestEvent.event_date)}</Badge>
+              {events.length > 1 && <span className="ml-1 text-[10px] text-[var(--color-text-muted)]">+{events.length - 1}</span>}
+            </summary>
+            <div className="mt-2 min-w-48 space-y-1 rounded border border-[var(--color-border-subtle)] bg-[var(--color-bg-hover)] p-2 text-[10px] text-[var(--color-text-secondary)]">
+              {events.map((event) => (
+                <div key={`${event.event_type}-${event.event_date}-${event.title}`}>
+                  <span className="font-semibold text-[var(--color-text-primary)]">{eventDate(event.event_date)} · {eventLabel(event.event_type)}</span>
+                  <span className="block">{event.title}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : (
+          <span className="text-xs text-[var(--color-text-muted)]">No announced events</span>
+        )}
+      </td>
       <td className="px-4 py-3">
         <Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge>
         {row.updated_at && <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">Updated {new Date(row.updated_at).toLocaleTimeString()}</div>}

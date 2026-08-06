@@ -62,7 +62,9 @@ export const CHART_INDICATOR_DEFINITIONS: ChartIndicatorDefinition[] = [
       { key: "period", label: "ATR length", min: 2, max: 500, step: 1 },
       { key: "multiplier", label: "Multiplier", min: 1, max: 10, step: 1 },
     ],
-    defaults: { period: 10, multiplier: 3 },
+    // The platform-wide Supertrend baseline is the conventional 10-period,
+    // 2× ATR setup. Individual charts can still edit these values.
+    defaults: { period: 10, multiplier: 2 },
   },
 ];
 

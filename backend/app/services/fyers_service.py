@@ -1,17 +1,20 @@
 """Fyers broker service implementation."""
 
 import asyncio
+import logging
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn, cast
 
 from fyers_apiv3 import fyersModel
 
-from app.core.exceptions import BrokerAuthError, BrokerConnectionError
+from app.core.exceptions import BrokerAuthError, BrokerConnectionError, BrokerRateLimitError
 from app.core.retry import compute_backoff_delay
 from app.models.user import TradingMode, UserProfile
 from app.services.broker_base import BrokerService
 from app.services.fyers_market_stream import FyersMarketStreamManager
+
+logger = logging.getLogger(__name__)
 
 # Fyers' option-chain endpoint expects exchange-qualified underlying symbols,
 # not the plain index names the UI uses.
@@ -88,7 +91,11 @@ class FyersService(BrokerService):
     # only display rows returned by the broker; the previous 20-strike request
     # silently made that setting look incomplete.
     _DEFAULT_STRIKE_COUNT = 50
-    _INSTRUMENTS_CACHE_TTL_SECONDS = 30
+    # Expiry/contract metadata changes far less often than prices. Keep it for
+    # several minutes so opening the Greek workspace does not repeatedly spend
+    # the broker's tight option-chain quota.
+    _INSTRUMENTS_CACHE_TTL_SECONDS = 5 * 60
+    _INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS = 30
 
     # Fyers' optionchain endpoint rate-limits aggressively (observed 429s from
     # well under 20 calls/sec). A single get_instruments fetch is itself
@@ -152,6 +159,7 @@ class FyersService(BrokerService):
         # symbol on page load, so this avoids doubling the Fyers API calls.
         self._instruments_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._no_contract_cache: dict[str, float] = {}
+        self._instruments_rate_limit_until: dict[str, float] = {}
         # symbol -> lock, so concurrent requests for the same symbol (e.g.
         # /instruments and /expiries firing together on page load) coalesce
         # into a single fetch instead of each independently bursting
@@ -414,6 +422,12 @@ class FyersService(BrokerService):
                 break
             delay = compute_backoff_delay(attempt, self._RETRY_BASE_DELAY_SECONDS)
             await asyncio.sleep(delay)
+        if str(last_response.get("code")) == "429":
+            message = str(last_response.get("message") or "request limit reached")
+            raise BrokerRateLimitError(
+                f"Fyers option chain request rate-limited: {message}",
+                retry_after=self._INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS,
+            )
         raise BrokerConnectionError(f"Fyers option chain request failed: {last_response}")
 
     async def _fetch_option_chain_with_pacing(
@@ -440,26 +454,56 @@ class FyersService(BrokerService):
         merged, filtered client-side by the selected one).
         """
         cache_key = symbol.upper()
+        now = time.monotonic()
         no_contract_at = self._no_contract_cache.get(cache_key)
         if no_contract_at and (
             time.monotonic() - no_contract_at
         ) < self._NO_CONTRACT_CACHE_TTL_SECONDS:
             return []
         cached = self._instruments_cache.get(cache_key)
-        if cached and (time.monotonic() - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
+        if cached and (now - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
             return cached[1]
+
+        rate_limit_until = self._instruments_rate_limit_until.get(cache_key, 0.0)
+        if rate_limit_until > now:
+            if cached and cached[1]:
+                return cached[1]
+            raise BrokerRateLimitError(
+                "Fyers option-chain request temporarily rate-limited; retry later",
+                retry_after=max(1, int(rate_limit_until - now)),
+            )
 
         lock = self._instruments_locks.setdefault(cache_key, asyncio.Lock())
         async with lock:
             # Re-check: a concurrent caller may have populated the cache
             # while we were waiting on the lock.
             cached = self._instruments_cache.get(cache_key)
-            if cached and (time.monotonic() - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
+            now = time.monotonic()
+            if cached and (now - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
                 return cached[1]
+            rate_limit_until = self._instruments_rate_limit_until.get(cache_key, 0.0)
+            if rate_limit_until > now:
+                if cached and cached[1]:
+                    return cached[1]
+                raise BrokerRateLimitError(
+                    "Fyers option-chain request temporarily rate-limited; retry later",
+                    retry_after=max(1, int(rate_limit_until - now)),
+                )
 
             try:
                 first = await self._fetch_option_chain(symbol, strikecount=1)
             except BrokerAuthError:
+                raise
+            except BrokerRateLimitError:
+                self._instruments_rate_limit_until[cache_key] = (
+                    time.monotonic() + self._INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS
+                )
+                if cached and cached[1]:
+                    logger.warning(
+                        "Fyers option-chain rate limit for %s; serving stale instrument cache",
+                        cache_key,
+                    )
+                    return cached[1]
                 raise
             except Exception as e:
                 raise BrokerConnectionError(f"Failed to fetch option chain expiries: {e}") from e
@@ -472,6 +516,7 @@ class FyersService(BrokerService):
             self._no_contract_cache.pop(cache_key, None)
             is_index = symbol.upper() in _INDEX_SYMBOL_MAP
             instruments: list[dict[str, Any]] = []
+            rate_limited = False
 
             for entry in first.get("expiryData", [])[: self._MAX_EXPIRIES_FETCHED]:
                 timestamp = str(entry.get("expiry") or "")
@@ -490,6 +535,12 @@ class FyersService(BrokerService):
                     )
                 except BrokerAuthError:
                     raise
+                except BrokerRateLimitError:
+                    rate_limited = True
+                    self._instruments_rate_limit_until[cache_key] = (
+                        time.monotonic() + self._INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS
+                    )
+                    break
                 except Exception:
                     # Skip an expiry Fyers fails to return (even after
                     # retries) rather than failing the whole request.
@@ -518,6 +569,20 @@ class FyersService(BrokerService):
                         }
                     )
 
+            if rate_limited:
+                if cached and cached[1]:
+                    logger.warning(
+                        "Fyers option-chain rate limit while refreshing %s; "
+                        "serving stale instrument cache",
+                        cache_key,
+                    )
+                    return cached[1]
+                raise BrokerRateLimitError(
+                    "Fyers option-chain request rate-limited while loading expiries",
+                    retry_after=self._INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS,
+                )
+
+            self._instruments_rate_limit_until.pop(cache_key, None)
             self._instruments_cache[cache_key] = (time.monotonic(), instruments)
             return instruments
 

@@ -2,7 +2,7 @@
 
 ## Saved Combined Premium layout
 
-The authenticated settings profile includes `combinedPremiumWorkspace`. It stores the selected candle timeframe, chart synchronization state, `seriesType` (`candlestick` or close-price `line`), and the independent indicator settings for Calls, Puts, and Calls + Puts. When `syncCharts` is enabled, the workspace synchronizes the visible time window, horizontal zoom, and crosshair time across the three charts. These are display-only preferences; a close-price line remains derived from the same synthetic composite candles.
+The authenticated settings profile includes `combinedPremiumWorkspace`. It stores the selected candle timeframe (3 minutes by default), chart synchronization state, `seriesType` (`candlestick` or close-price `line`), and the independent indicator settings for Calls, Puts, and Calls + Puts. When `syncCharts` is enabled, the workspace synchronizes the visible time window, horizontal zoom, and crosshair time across the three charts. These are display-only preferences; a close-price line remains derived from the same synthetic composite candles.
 
 Frontend/backend interface definitions.
 
@@ -304,6 +304,11 @@ and optionally seeds prior ATM-IV observations from Fyers daily option candles. 
 do not expose compatible option history leave rank/percentile in `building` until enough real
 daily observations accumulate.
 
+`projection_days` is an optional integer from 1 to 60 (default 14). It controls only the
+calendar-day event window; the ATM-IV snapshot remains broker-independent and is never
+recomputed for this request. Announced NSE events are informational and do not alter range
+calculations in the client.
+
 **Response (200):**
 ```json
 {
@@ -317,12 +322,29 @@ daily observations accumulate.
       "iv_percentile": 55.0,
       "snapshot_date": "2026-08-04",
       "updated_at": "2026-08-04T10:00:00+00:00",
-      "status": "ready"
+      "status": "ready",
+      "events": [
+        {
+          "event_type": "results",
+          "title": "Financial Results",
+          "event_date": "2026-08-08",
+          "date_kind": "meeting_date",
+          "source": "NSE"
+        }
+      ]
     }
   ],
-  "generated_at": "2026-08-04T10:00:05+00:00"
+  "generated_at": "2026-08-04T10:00:05+00:00",
+  "corporate_calendar": {
+    "status": "ready",
+    "updated_at": "2026-08-04T10:00:00+05:30"
+  }
 }
 ```
+
+`corporate_calendar.status` is `ready`, `stale`, or `unavailable`. Only `ready` plus an empty
+row `events` array means no announced matching events were found. `stale` and `unavailable`
+must not be interpreted as event-free windows.
 
 `status` is `ready` when both rank and percentile are available, `building` while history or
 the first snapshot is incomplete, and `stale` when the last worker update is older than the

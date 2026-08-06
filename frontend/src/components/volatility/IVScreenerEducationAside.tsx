@@ -20,8 +20,12 @@ const sections = [
     body: "The screener is built from one daily ATM-IV snapshot per symbol. Rank and Percentile become meaningful after at least 20 prior observations; Building and Stale describe data coverage, not a market view.",
   },
   {
-    title: "4. Compare the context",
-    body: "A high rank can reflect a real event or regime change, and does not automatically mean options are expensive. Check spot, expiry, liquidity, upcoming events, and the raw ATM IV before drawing a conclusion.",
+    title: "4. Project the IV range",
+    body: "The range is an annualized ATM-IV estimate: spot × IV × selected sigma × √(calendar days ÷ 365). 1σ is the usual one-standard-deviation estimate; 1.5σ and 2σ show wider confidence bands. It describes movement, not direction.",
+  },
+  {
+    title: "5. Treat event flags as a risk check",
+    body: "The calendar flags announced NSE results, board meetings, dividends, splits, bonuses, buybacks, and rights issues inside your projection window. These events do not change the displayed IV range. “No announced events” does not rule out unannounced or unknown events; an unavailable calendar is shown as Unknown.",
   },
 ];
 

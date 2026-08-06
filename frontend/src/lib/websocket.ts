@@ -90,17 +90,24 @@ export function normalizeTick(raw: RawFyersTick): MarketTick | null {
       ask: raw.ask,
       bid: raw.bid,
       atp: raw.atp,
+      // Quote-shaped frames are the REST seed/fallback that the backend
+      // multiplexes onto this socket. They should not override a genuinely
+      // active broker stream when the local exchange schedule is closed.
+      feed: "snapshot",
     };
   }
   if (!raw.symbol || typeof raw.ltp !== "number") return null;
+  const streamTimestamp = Date.now();
   return {
     trading_symbol: raw.symbol,
     last_price: raw.ltp,
     volume: raw.vol_traded_today ?? 0,
     open_interest: 0,
-    timestamp: Date.now(),
+    timestamp: streamTimestamp,
     change: raw.ch ?? 0,
     change_percent: raw.chp ?? 0,
+    feed: "stream",
+    last_stream_timestamp: streamTimestamp,
   };
 }
 

@@ -7,7 +7,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.core.exceptions import BrokerConnectionError
+from app.core.exceptions import BrokerConnectionError, BrokerRateLimitError
 from app.core.security import create_access_token
 from app.services.open_interest_snapshots import store_snapshot
 
@@ -34,6 +34,23 @@ async def test_get_instruments_broker_connection_error_returns_503(
     data = response.json()
     assert data["detail"] == "Fyers is down"
     assert data["error_type"] == "broker_connection_error"
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_broker_rate_limit_returns_429_with_retry_hint(
+    app: FastAPI, client: AsyncClient, access_token: str, active_broker_session: AsyncMock
+):
+    active_broker_session.get_instruments.side_effect = BrokerRateLimitError(
+        "Fyers option chain request rate-limited", retry_after=30
+    )
+    response = await client.get(
+        "/api/v1/market/instruments/NIFTY",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "30"
+    assert response.json()["error_type"] == "broker_rate_limit"
 
 
 @pytest.mark.asyncio

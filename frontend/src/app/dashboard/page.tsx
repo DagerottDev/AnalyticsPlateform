@@ -24,6 +24,7 @@ import { Eyebrow } from "@/components/ui/SectionHeader";
 import { AddTickerModal } from "@/components/market/AddTickerModal";
 import { MarketTick } from "@/types/market";
 import { DataFreshness } from "@/components/market/DataFreshness";
+import { isFreshBrokerStreamTick } from "@/lib/dataFreshness";
 import { useNseMarketSession } from "@/hooks/useNseMarketSession";
 import {
   BarChart3,
@@ -232,6 +233,11 @@ export default function DashboardPage() {
   // unmounting on navigation instead of resetting every time.
   const ticks = useTickStore((state) => state.ticks);
   const getTick = (symbol: string) => ticks[symbol] ?? null;
+  const brokerStreamActive = tickers.some((symbol) => isFreshBrokerStreamTick(ticks[symbol]));
+  const feedActive = marketSession.state === "open" || brokerStreamActive;
+  const feedDetail = brokerStreamActive && marketSession.state !== "open"
+    ? "Fyers is still sending recent ticks; broker stream activity takes precedence over the regular-session calendar."
+    : marketSession.detail;
 
   return (
     <DashboardLayout>
@@ -261,13 +267,13 @@ export default function DashboardPage() {
                 </p>
               )}
             </div>
-            <div title={marketSession.detail} className="w-fit flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5">
+            <div title={feedDetail} className="w-fit flex items-center gap-2 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5">
               <span className="relative flex h-2.5 w-2.5">
-                {marketSession.state === "open" && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-status-good)] opacity-75" />}
-                <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${marketSession.state === "open" ? "bg-[var(--color-status-good)]" : "bg-[var(--color-text-muted)]"}`} />
+                {feedActive && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-status-good)] opacity-75" />}
+                <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${feedActive ? "bg-[var(--color-status-good)]" : "bg-[var(--color-text-muted)]"}`} />
               </span>
               <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                {marketSession.state === "open" ? "Live Feed Active" : marketSession.state === "preopen" ? "Pre-open · Feed Paused" : "Market Closed · Feed Paused"}
+                {feedActive ? "Live Feed Active" : marketSession.state === "preopen" ? "Pre-open · Feed Paused" : "Market Closed · Feed Paused"}
               </span>
             </div>
           </div>
@@ -294,7 +300,7 @@ export default function DashboardPage() {
                 key={sym}
                 symbol={sym}
                 tick={getTick(sym)}
-                feedPaused={marketSession.state !== "open"}
+                feedPaused={!feedActive}
                 onRemove={tickers.length > 1 ? () => removeTicker(sym) : undefined}
               />
             ))}

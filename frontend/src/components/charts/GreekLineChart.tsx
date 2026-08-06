@@ -8,6 +8,7 @@ import { MARKET_CHART_LOCALIZATION, formatMarketTick, timeToDate } from "@/lib/c
 import { useGreekChartSync } from "@/components/greek-workspace/GreekChartSyncProvider";
 import { ChartZoomControls } from "@/components/charts/ChartZoomControls";
 import { zoomLightweightChart } from "@/lib/lightweightChartZoom";
+import { DEFAULT_GREEK_DISPLAY_MODE, displayGreekPoints, formatGreekValue, GREEK_UNITS, type GreekDisplayMode } from "@/lib/greekPresentation";
 import type { GreekMetric, GreekPoint } from "@/lib/strikeGreekAnalysis";
 
 const GRID = "#1e222d";
@@ -23,6 +24,7 @@ interface GreekLineChartProps {
   overlayPeriod: number;
   bollingerMultiplier: number;
   syncId: string;
+  displayMode?: GreekDisplayMode;
 }
 
 // Rho is quoted per one percentage-point rate move. For near-expiry index
@@ -72,7 +74,7 @@ function nearestValue(values: Map<number, number>, time: Time): number | null {
   return nearest;
 }
 
-export function GreekLineChart({ metric, points, overlay, overlayPeriod, bollingerMultiplier, syncId }: GreekLineChartProps) {
+export function GreekLineChart({ metric, points, overlay, overlayPeriod, bollingerMultiplier, syncId, displayMode = DEFAULT_GREEK_DISPLAY_MODE }: GreekLineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const lineRefs = useRef<ISeriesApi<"Line">[]>([]);
@@ -145,7 +147,7 @@ export function GreekLineChart({ metric, points, overlay, overlayPeriod, bolling
     lineRefs.current.forEach((line) => chart.removeSeries(line));
     lineRefs.current = [];
 
-    const normalizedPoints = normalizePoints(points);
+    const normalizedPoints = normalizePoints(displayGreekPoints(points, displayMode));
     crosshairValuesRef.current = new Map(
       toChartData(normalizedPoints)
         .map((point) => [timeKey(point.time), point.value] as const)
@@ -158,9 +160,13 @@ export function GreekLineChart({ metric, points, overlay, overlayPeriod, bolling
       title: "Combined",
       lastValueVisible: true,
       priceFormat,
+      priceLineVisible: false,
     });
     combined.setData(toChartData(normalizedPoints));
     lineRefs.current.push(combined);
+    const zero = chart.addLineSeries({ color: "#787b8680", lineWidth: 1, lineStyle: 2, title: "Zero", priceLineVisible: false, lastValueVisible: false, priceFormat });
+    zero.setData(normalizedPoints.map((point) => ({ time: (new Date(point.time).getTime() / 1000) as Time, value: 0 })));
+    lineRefs.current.push(zero);
 
     const ohlcv: OHLCVData[] = normalizedPoints.map((point) => ({
       time: point.time,
@@ -200,7 +206,7 @@ export function GreekLineChart({ metric, points, overlay, overlayPeriod, bolling
     }
     if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
     else chart.timeScale().fitContent();
-  }, [metric, points, overlay, overlayPeriod, bollingerMultiplier]);
+  }, [metric, points, overlay, overlayPeriod, bollingerMultiplier, displayMode]);
 
-  return <div className="relative"><div className="absolute right-2 top-2 z-10"><ChartZoomControls label={`${metric} Greek chart`} onZoomIn={() => zoomChart("in")} onZoomOut={() => zoomChart("out")} onReset={resetChartView} /></div><div ref={containerRef} className="h-[290px] w-full" aria-label="Selected option Greek chart" title="Right-click to reset chart view" onContextMenu={(event) => { event.preventDefault(); resetChartView(); }} /></div>;
+  return <div className="relative"><div className="absolute left-2 top-2 z-10 max-w-[60%] text-[10px] text-[var(--color-text-muted)]">{displayMode === "native" ? GREEK_UNITS[metric] : displayMode === "change" ? `change from first point (${GREEK_UNITS[metric]})` : "standard deviations from session mean"}</div><div className="absolute right-2 top-2 z-10"><ChartZoomControls label={`${metric} Greek chart`} onZoomIn={() => zoomChart("in")} onZoomOut={() => zoomChart("out")} onReset={resetChartView} /></div><div ref={containerRef} className="h-[290px] w-full" aria-label={`Selected option ${metric} chart in ${displayMode} mode. Current values use ${formatGreekValue(points.at(-1)?.value ?? 0)}.`} title="Right-click to reset chart view" onContextMenu={(event) => { event.preventDefault(); resetChartView(); }} /></div>;
 }

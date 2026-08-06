@@ -11,7 +11,7 @@ describe("chart indicator definitions", () => {
 
     expect(indicators.sma).toEqual({ enabled: false, parameters: { period: 20 } });
     expect(indicators.bbands.parameters).toEqual({ period: 20, multiplier: 2 });
-    expect(indicators.supertrend.parameters).toEqual({ period: 10, multiplier: 3 });
+    expect(indicators.supertrend.parameters).toEqual({ period: 10, multiplier: 2 });
   });
 
   it("provides an editable parameter definition for every indicator", () => {

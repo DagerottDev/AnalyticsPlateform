@@ -141,7 +141,7 @@ def _default_visible_greeks() -> list[GreekMetric]:
 
 
 class GreekWorkspacePreferences(PreferenceModel):
-    timeframe: Timeframe = "5"
+    timeframe: Timeframe = "3"
     visible_greeks: list[GreekMetric] = Field(
         default_factory=_default_visible_greeks, min_length=1, max_length=12
     )
@@ -174,12 +174,26 @@ def _premium_indicator_map() -> dict[Literal["calls", "puts", "both"], ChartIndi
 class CombinedPremiumWorkspacePreferences(PreferenceModel):
     """Saved display-only controls for synthetic combined-premium charts."""
 
-    timeframe: Timeframe = "5"
+    timeframe: Timeframe = "3"
     sync_charts: bool = True
     series_type: PremiumChartSeriesType = "candlestick"
     indicators: dict[Literal["calls", "puts", "both"], ChartIndicatorsPreferences] = Field(
         default_factory=_premium_indicator_map
     )
+
+
+class IvScreenerPreferences(PreferenceModel):
+    """Saved controls for ATM-IV expected-range projections."""
+
+    projection_days: int = Field(14, ge=1, le=60)
+    sigma: float = Field(1, ge=1, le=2)
+
+    @field_validator("sigma")
+    @classmethod
+    def validate_sigma(cls, value: float) -> float:
+        if value not in (1.0, 1.5, 2.0):
+            raise ValueError("sigma must be 1, 1.5, or 2")
+        return value
 
 
 class ReplayPreferences(PreferenceModel):
@@ -268,6 +282,9 @@ class UserPreferences(PreferenceModel):
     greek_workspace: GreekWorkspacePreferences = Field(default_factory=GreekWorkspacePreferences)
     combined_premium_workspace: CombinedPremiumWorkspacePreferences = Field(
         default_factory=CombinedPremiumWorkspacePreferences
+    )
+    iv_screener: IvScreenerPreferences = Field(
+        default_factory=lambda: IvScreenerPreferences.model_validate({})
     )
     replay: ReplayPreferences = Field(default_factory=ReplayPreferences)
     analytics: AnalyticsPreferences = Field(default_factory=AnalyticsPreferences)

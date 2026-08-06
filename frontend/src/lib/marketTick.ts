@@ -10,6 +10,16 @@ export function mergeMarketTick(previous: MarketTick | undefined, next: MarketTi
   if (!previous) return next;
 
   const merged: MarketTick = { ...previous, ...next };
+
+  // The shared backend sends both raw websocket frames and REST fallback
+  // snapshots through the same listener. Preserve the last stream timestamp
+  // when a snapshot arrives after a stream tick, so extended-session liveness
+  // is not lost merely because the fallback poll happened to run last.
+  if (next.feed === "stream") {
+    merged.last_stream_timestamp = next.last_stream_timestamp ?? next.timestamp;
+  } else if (previous.last_stream_timestamp != null) {
+    merged.last_stream_timestamp = previous.last_stream_timestamp;
+  }
   const snapshotFields: Array<keyof Pick<MarketTick, "open_price" | "high_price" | "low_price" | "prev_close_price">> = [
     "open_price",
     "high_price",

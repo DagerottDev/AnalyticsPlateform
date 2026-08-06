@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.core.exceptions import BrokerAuthError, BrokerConnectionError
+from app.core.exceptions import BrokerAuthError, BrokerConnectionError, BrokerRateLimitError
 from app.models.user import TradingMode
 from app.services.fyers_service import FyersService, from_fyers_ws_symbol, to_fyers_ws_symbol
 
@@ -468,6 +468,51 @@ async def test_get_instruments_gives_up_after_max_retries_on_persistent_rate_lim
     ):
         await service.get_instruments("NIFTY")
 
+    assert service.client.optionchain.call_count == FyersService._MAX_FETCH_RETRIES
+
+
+@pytest.mark.asyncio
+async def test_get_instruments_serves_stale_cache_when_refresh_is_rate_limited() -> None:
+    """A temporary broker quota hit must not blank an already loaded chain."""
+    service = _make_service()
+    near_row = {"symbol": "NSE:NIFTY25071017500CE", "option_type": "CE", "strike_price": 17500}
+    service.client.optionchain = MagicMock(
+        side_effect=[
+            _expiry_discovery_response(("10-Jul-2025", "1752105000")),
+            _chain_response(near_row),
+        ]
+    )
+    cached = await service.get_instruments("NIFTY")
+    service._instruments_cache["NIFTY"] = (0.0, cached)
+    service.client.optionchain = MagicMock(
+        return_value={"s": "error", "code": 429, "message": "request limit reached"}
+    )
+
+    with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()):
+        assert await service.get_instruments("NIFTY") == cached
+
+    assert service.client.optionchain.call_count == FyersService._MAX_FETCH_RETRIES
+
+
+@pytest.mark.asyncio
+async def test_persistent_rate_limit_uses_typed_error_without_cached_instruments() -> None:
+    service = _make_service()
+    service.client.optionchain = MagicMock(
+        return_value={"s": "error", "code": 429, "message": "request limit reached"}
+    )
+
+    with (
+        patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()),
+        pytest.raises(BrokerRateLimitError) as raised,
+    ):
+        await service.get_instruments("NIFTY")
+
+    assert raised.value.retry_after == FyersService._INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS
+
+    with pytest.raises(BrokerRateLimitError):
+        await service.get_instruments("NIFTY")
+    # Once the broker has told us to back off, a follow-up page request must
+    # not spend another three calls while the cooldown is still active.
     assert service.client.optionchain.call_count == FyersService._MAX_FETCH_RETRIES
 
 

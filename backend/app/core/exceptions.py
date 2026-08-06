@@ -20,6 +20,18 @@ class BrokerConnectionError(Exception):
         super().__init__(self.message)
 
 
+class BrokerRateLimitError(BrokerConnectionError):
+    """Raised when a broker explicitly asks the caller to slow down."""
+
+    def __init__(
+        self,
+        message: str = "Broker request rate limit reached",
+        retry_after: int = 30,
+    ) -> None:
+        self.retry_after = max(1, int(retry_after))
+        super().__init__(message)
+
+
 class BrokerAuthError(Exception):
     """Raised when broker API credential validation fails."""
 
@@ -90,6 +102,23 @@ async def broker_connection_error_handler(
     )
 
 
+async def broker_rate_limit_error_handler(
+    request: Request,
+    exc: BrokerRateLimitError,
+) -> JSONResponse:
+    """Preserve broker 429s so clients can back off instead of treating them as outages."""
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        headers={"Retry-After": str(exc.retry_after)},
+        content={
+            "detail": exc.message,
+            "error_type": "broker_rate_limit",
+            "retry_after": exc.retry_after,
+            "request_id": getattr(request.state, "request_id", None),
+        },
+    )
+
+
 async def broker_auth_error_handler(
     request: Request,
     exc: BrokerAuthError,
@@ -111,5 +140,6 @@ def register_exception_handlers(app: Any) -> None:
     Args:
         app: The FastAPI application instance.
     """
+    app.add_exception_handler(BrokerRateLimitError, broker_rate_limit_error_handler)
     app.add_exception_handler(BrokerConnectionError, broker_connection_error_handler)
     app.add_exception_handler(BrokerAuthError, broker_auth_error_handler)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeOHLCVData, sortAndDeduplicateChartData } from "@/lib/chartData";
+import { mergeLiveCandle, normalizeOHLCVData, sortAndDeduplicateChartData } from "@/lib/chartData";
 
 describe("chart data normalization", () => {
   it("sorts out-of-order history and keeps only the latest duplicate timestamp", () => {
@@ -20,5 +20,22 @@ describe("chart data normalization", () => {
     ]);
 
     expect(points[0].time).toBeLessThan(points[1].time);
+  });
+
+  it("uses the live price when warming indicators on the latest candle", () => {
+    const merged = mergeLiveCandle([
+      { time: 100, open: 10, high: 12, low: 9, close: 11, volume: 100 },
+      { time: 200, open: 11, high: 13, low: 10, close: 12, volume: 120 },
+    ], { price: 15, timestamp: 1_000 });
+
+    expect(merged).toEqual([
+      { time: 100, open: 10, high: 12, low: 9, close: 11, volume: 100 },
+      { time: 200, open: 11, high: 15, low: 10, close: 15, volume: 120 },
+    ]);
+  });
+
+  it("does not replace history with an invalid live price", () => {
+    const history = [{ time: 100, open: 10, high: 12, low: 9, close: 11 }];
+    expect(mergeLiveCandle(history, { price: 0, timestamp: 1_000 })).toEqual(history);
   });
 });

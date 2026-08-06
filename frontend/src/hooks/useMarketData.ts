@@ -3,8 +3,6 @@ import { getWebSocket } from "@/lib/websocket";
 import { MarketTick } from "@/types/market";
 import { useAuth } from "@/hooks/useAuth";
 import { useReplayStore } from "@/stores/replayStore";
-import { useNseMarketSession } from "@/hooks/useNseMarketSession";
-import { isFnoSymbol } from "@/lib/marketSession";
 import { mergeMarketTick } from "@/lib/marketTick";
 
 export function useMarketData(symbols: string[]) {
@@ -14,8 +12,6 @@ export function useMarketData(symbols: string[]) {
   // Replay Interception
   const replayIsActive = useReplayStore(state => state.isActive);
   const replayTicks = useReplayStore(state => state.currentTicks);
-  const fnoSession = useNseMarketSession("fno");
-  const cashSession = useNseMarketSession("cash");
 
   // Tracks the symbols currently registered with the shared websocket. Keeping
   // this separate from the render input lets us update subscriptions by diff
@@ -41,10 +37,12 @@ export function useMarketData(symbols: string[]) {
 
   useEffect(() => {
     const ws = getWebSocket();
+    // Keep the broker subscription alive across local session-boundary
+    // changes. NSE's calendar is useful for labelling snapshots, but it is
+    // not authoritative for extended/exception sessions; a recent Fyers
+    // websocket tick is the strongest proof that the feed is still active.
     const requestedSymbols = user?.client_id && !replayIsActive
-      ? (symbolsKey ? symbolsKey.split(",") : []).filter((symbol) => (
-        isFnoSymbol(symbol) ? fnoSession.state === "open" : cashSession.state === "open"
-      ))
+      ? (symbolsKey ? symbolsKey.split(",") : [])
       : [];
     const previousSymbols = subscribedSymbols.current;
     const addedSymbols = requestedSymbols.filter((symbol) => !previousSymbols.includes(symbol));
@@ -58,7 +56,7 @@ export function useMarketData(symbols: string[]) {
     // maintains one shared REST polling fallback per broker session. A
     // separate HTTP snapshot per mounted consumer duplicates that broker
     // traffic and can exhaust the API/broker rate limit during navigation.
-  }, [symbolsKey, user?.client_id, replayIsActive, fnoSession.state, cashSession.state, handleTick]);
+  }, [symbolsKey, user?.client_id, replayIsActive, handleTick]);
 
   useEffect(() => {
     return () => {

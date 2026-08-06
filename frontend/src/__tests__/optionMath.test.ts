@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "../lib/optionMath";
+import { daysToExpiry, timeToExpiry, nearestStrikeTo, defaultSpotFallback, DEFAULT_RISK_FREE_RATE } from "../lib/optionMath";
 
 describe("timeToExpiry", () => {
   it("returns a small positive floor when expiry is missing", () => {
@@ -26,6 +26,17 @@ describe("timeToExpiry", () => {
     const after = timeToExpiry("2026-08-03", Date.parse("2026-08-03T10:01:00Z"));
     expect(before).toBe(0.0001); // 15:31 IST: pre-change session had ended.
     expect(after).toBeGreaterThan(0); // 15:31 IST: F&O still trades until 15:40.
+  });
+});
+
+describe("daysToExpiry", () => {
+  it("counts tomorrow as one calendar day in IST", () => {
+    expect(daysToExpiry("06-Aug-2026", Date.parse("2026-08-05T09:41:00Z"))).toBe(1);
+  });
+
+  it("shows zero on the expiry calendar day even before market close", () => {
+    expect(daysToExpiry("06-Aug-2026", Date.parse("2026-08-05T20:00:00Z"))).toBe(0); // 01:30 IST on expiry day
+    expect(daysToExpiry("2026-08-06", Date.parse("2026-08-06T04:00:00Z"))).toBe(0);
   });
 });
 

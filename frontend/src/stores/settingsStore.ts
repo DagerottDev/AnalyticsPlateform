@@ -18,6 +18,7 @@ export type ReplayResolution = "1" | "5" | "15";
 export type RollingSelectionMode = "smooth" | "raw";
 export type PremiumChartSeriesType = "candlestick" | "line";
 export type CombinedPremiumGroup = "calls" | "puts" | "both";
+export type IvScreenerSigma = 1 | 1.5 | 2;
 
 export const INDEX_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"] as const;
 export const DEFAULT_RATE_SYMBOL = "DEFAULT";
@@ -31,6 +32,7 @@ export interface UserPreferences {
   optionChain: { showGreeks: boolean; showBuildup: boolean; moneyness: MoneynessFilter; strikesEachSide: 5 | 10 | 20 | null; defaultGttValidityDays: number; rollingSelectionMode: RollingSelectionMode };
   greekWorkspace: { timeframe: ChartTimeframe; visibleGreeks: GreekMetric[]; panels: Partial<Record<GreekMetric, GreekPanelLayout>>; educationOpen: boolean; syncCharts: boolean };
   combinedPremiumWorkspace: { timeframe: ChartTimeframe; syncCharts: boolean; seriesType: PremiumChartSeriesType; indicators: Record<CombinedPremiumGroup, ChartIndicators> };
+  ivScreener: { projectionDays: number; sigma: IvScreenerSigma };
   replay: { resolution: ReplayResolution; speedMultiplier: ReplaySpeed; optionSide: ReplayOptionSide; fallbackIvPercent: Record<string, number> };
   analytics: { riskFreeRatePercent: Record<string, number> };
   strategy: { defaultPreset: StrategyPresetName; backtestHoldingDays: number; backtestDaysToExpiry: number };
@@ -58,18 +60,19 @@ export const createDefaultUserPreferences = (): UserPreferences => ({
   charts: { timeframe: "1", historyDays: 7, refreshSeconds: 30, indicators: cloneIndicators() },
   optionChain: { showGreeks: true, showBuildup: true, moneyness: "all", strikesEachSide: 10, defaultGttValidityDays: 30, rollingSelectionMode: "smooth" },
   greekWorkspace: {
-    timeframe: "5",
+    timeframe: "3",
     visibleGreeks: ["delta", "gamma", "theta", "vega", "vanna", "vomma"],
     panels: {},
     educationOpen: false,
     syncCharts: false,
   },
   combinedPremiumWorkspace: {
-    timeframe: "5",
+    timeframe: "3",
     syncCharts: true,
     seriesType: "candlestick",
     indicators: { calls: premiumIndicators(), puts: premiumIndicators(), both: premiumIndicators() },
   },
+  ivScreener: { projectionDays: 14, sigma: 1 },
   replay: {
     resolution: "1",
     speedMultiplier: 1,
@@ -91,6 +94,7 @@ function preferencesFromState(state: SettingsState): UserPreferences {
     optionChain: state.optionChain,
     greekWorkspace: state.greekWorkspace,
     combinedPremiumWorkspace: state.combinedPremiumWorkspace,
+    ivScreener: state.ivScreener,
     replay: state.replay,
     analytics: state.analytics,
     strategy: state.strategy,
@@ -156,6 +160,7 @@ function migrateLegacy(persistedState: unknown): Partial<SettingsState> {
         ...legacy.combinedPremiumWorkspace?.indicators,
       },
     },
+    ivScreener: { ...defaults.ivScreener, ...legacy.ivScreener },
   };
   const preferences: UserPreferences = {
     ...defaults,

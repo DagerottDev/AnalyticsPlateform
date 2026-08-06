@@ -44,20 +44,33 @@ function dateKey(date: Date): string {
 }
 
 /**
- * Return a one-session history range in the exchange's timezone. During a
- * regular session (or after the close), use today so the chart includes the
- * newest candles. On weekends and before the regular open, use the previous
- * weekday so a closed market still shows the latest available session.
- * Exchange holidays remain broker-owned; the caller can report no data when
- * the broker has no candles for the selected weekday.
+ * Return a recent market-session history range in the exchange's timezone.
+ * During a regular session (or after the close), use today so the chart
+ * includes the newest candles. On weekends and before the regular open, use
+ * the previous weekday so a closed market still shows the latest available
+ * session. Exchange holidays remain broker-owned; the caller can report no
+ * data when the broker has no candles for the selected weekday.
  */
-export function recentMarketDateRange(now: Date = new Date()): { from: string; to: string } {
+export function recentMarketDateRange(
+  now: Date = new Date(),
+  sessionCount = 1,
+): { from: string; to: string } {
   const parts = istDateParts(now);
   let marketDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
   const isWeekend = parts.weekday === "Sat" || parts.weekday === "Sun";
   if (isWeekend || parts.minutes < REGULAR_OPEN_MINUTES) {
     marketDate = previousWeekday(marketDate);
   }
-  const key = dateKey(marketDate);
-  return { from: key, to: key };
+
+  // Walk backwards by weekdays so a three-session request really gives the
+  // chart three market sessions instead of accidentally spending its lookback
+  // on Saturday/Sunday. Exchange holidays remain broker-owned and are simply
+  // returned as no-data days by the History API.
+  const count = Number.isFinite(sessionCount) ? Math.max(1, Math.floor(sessionCount)) : 1;
+  let firstMarketDate = marketDate;
+  for (let index = 1; index < count; index += 1) {
+    firstMarketDate = previousWeekday(firstMarketDate);
+  }
+
+  return { from: dateKey(firstMarketDate), to: dateKey(marketDate) };
 }

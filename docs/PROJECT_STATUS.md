@@ -6,6 +6,11 @@ Current Milestone:
 - Targeted quality refactor (2026-07-29) — ✅ COMPLETE (see below)
 - Resilience & confidence quality pass (2026-07-30) — ✅ COMPLETE (see below)
 
+## Greek Risk & Market Structure
+
+- Greek Analysis distinguishes raw one-contract observation charts from signed, lot-adjusted Greek scenarios in Strategy Builder and OI-based Market Structure concentration. Native Greek units remain independent; normalized displays are comparison aids only.
+- Market Structure defaults to neutral OI concentration and labels hypothetical dealer sign conventions as assumptions. Scenario guides remain educational and open Strategy Builder for user review; they do not create orders.
+
 ## IV Screener data-quality pass (2026-08-04)
 
 - **✅ COMPLETE in code:** `/volatility/screener` now consumes a typed
@@ -54,7 +59,7 @@ Current Milestone:
 ## Combined premium candle analysis (2026-08-01)
 
 - Option Chain contract selection now opens a full-window Combined Premium Analysis workspace with raw-premium synthetic candles for selected Calls, selected Puts, and all selected contracts together.
-- Each composite uses matching 5-minute broker candles from the preceding five days, sums OHLC/volume only where every component is present, receives live summed premium updates, and has independent indicator controls with EMA(20) enabled initially.
+- Each composite uses matching 3-minute broker candles by default (the timeframe remains configurable) from the preceding sessions, sums OHLC/volume only where every component is present, receives live summed premium updates, and has independent indicator controls with EMA(20) enabled initially.
 
 ## Rolling ATM / OTM / ITM analysis selections (2026-08-01)
 

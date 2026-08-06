@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useMarketData } from "@/hooks/useMarketData";
-import { getInstruments, getMarketQuotes, getMarginRequirement, MarginResult } from "@/lib/market";
+import { getHistoricalCandles, getInstruments, getMarketQuotes, getMarginRequirement, MarginResult, type HistoricalCandle } from "@/lib/market";
 import { calculateImpliedVolatility } from "@/lib/greeks";
 import { timeToExpiry, defaultSpotFallback } from "@/lib/optionMath";
 import { nearestExpiry } from "@/lib/expiry";
@@ -38,6 +38,7 @@ import { PayoffChart } from "@/components/strategy-builder/PayoffChart";
 import { StrategyMetrics } from "@/components/strategy-builder/StrategyMetrics";
 import { MonteCarloPanel } from "@/components/strategy-builder/MonteCarloPanel";
 import { StrategyBacktestPanel } from "@/components/strategy-builder/StrategyBacktestPanel";
+import { GreekRiskPanel } from "@/components/greek-workspace/GreekRiskPanel";
 import { parseStrategyBasket } from "@/lib/basket";
 import { toClosedMarketQuote } from "@/lib/marketTick";
 
@@ -58,6 +59,7 @@ function StrategyBuilderContent() {
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [legs, setLegs] = useState<StrategyLeg[]>([]);
   const [snapshotTicks, setSnapshotTicks] = useState<Record<string, MarketTick>>({});
+  const [underlyingCandles, setUnderlyingCandles] = useState<HistoricalCandle[]>([]);
   const incomingBasket = useMemo(() => parseStrategyBasket(searchParams.get("basket")), [searchParams]);
 
   // Subscriptions
@@ -151,6 +153,23 @@ function StrategyBuilderContent() {
     fetchContracts();
     return () => { isMounted = false; };
   }, [symbol, incomingBasket]);
+
+  // A small, recent 5-minute window supplies the 14-period ATR used by the
+  // Greek scenario panel.  It is intentionally analysis-only: no order or
+  // strategy leg is changed if historical data is unavailable.
+  useEffect(() => {
+    let isMounted = true;
+    const to = new Date();
+    const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);
+    void getHistoricalCandles(symbol, from.toISOString().slice(0, 10), to.toISOString().slice(0, 10), "5")
+      .then((candles) => {
+        if (isMounted) setUnderlyingCandles(candles);
+      })
+      .catch(() => {
+        if (isMounted) setUnderlyingCandles([]);
+      });
+    return () => { isMounted = false; };
+  }, [symbol]);
 
   // Live Calculations
   const underlyingTick = getTick(symbol);
@@ -251,6 +270,21 @@ function StrategyBuilderContent() {
   const simulation = useMemo(() => simulateStrategyPnl(legs, spotPrice, 2000, Date.now(), riskFreeRate), [legs, riskFreeRate, spotPrice]);
 
   const validLegs = legs.filter(l => l.instrument !== null);
+  const scenarioTicks = useMemo(() => {
+    const result: Record<string, MarketTick> = {};
+    legs.forEach((leg) => {
+      const tradingSymbol = leg.instrument?.trading_symbol;
+      if (!tradingSymbol) return;
+      const liveTick = getTick(tradingSymbol);
+      const tick = replayIsActive
+        ? liveTick
+        : (marketSession.state !== "open" ? snapshotTicks[tradingSymbol] ?? liveTick : liveTick)
+          ?? sharedTicks[tradingSymbol]
+          ?? snapshotTicks[tradingSymbol];
+      if (tick) result[tradingSymbol] = tick;
+    });
+    return result;
+  }, [getTick, legs, marketSession.state, replayIsActive, sharedTicks, snapshotTicks]);
 
   const [marginResult, setMarginResult] = useState<MarginResult | null>(null);
   const [marginLoading, setMarginLoading] = useState(false);
@@ -407,6 +441,13 @@ function StrategyBuilderContent() {
               </Card>
             )}
             <StrategyMetrics metrics={profileMetrics} netGreeks={netGreeks} cost={totalCost} />
+            <GreekRiskPanel
+              legs={legs}
+              ticks={scenarioTicks}
+              spot={spotPrice}
+              candles={underlyingCandles}
+              rate={riskFreeRate}
+            />
             <MonteCarloPanel result={simulation} />
             <StrategyBacktestPanel symbol={symbol} currentSpot={spotPrice} legs={legs} defaultHoldingDays={strategyPreferences.backtestHoldingDays} defaultDaysToExpiry={strategyPreferences.backtestDaysToExpiry} />
             <PayoffChart data={payoffData} currentSpot={spotPrice} />

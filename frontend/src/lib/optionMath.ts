@@ -15,18 +15,55 @@
  */
 export function timeToExpiry(expiry: string | null | undefined, atMs: number = Date.now()): number {
   if (!expiry) return 0.0001;
+  const expiryCloseMs = expiryCloseTimestamp(expiry);
+  if (expiryCloseMs === null) return 0.0001;
+  const diffDays = (expiryCloseMs - atMs) / (1000 * 60 * 60 * 24);
+  return Math.max(diffDays / 365, 0.0001);
+}
+
+/** Exact IST F&O expiry close, sharing the CAS-aware market-session rule. */
+export function expiryCloseTimestamp(expiry: string | null | undefined): number | null {
+  if (!expiry) return null;
   const expDate = new Date(expiry);
-  if (!Number.isFinite(expDate.getTime())) return 0.0001;
+  if (!Number.isFinite(expDate.getTime())) return null;
   const year = expDate.getUTCFullYear();
   const month = expDate.getUTCMonth();
   const day = expDate.getUTCDate();
   const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  const closeMinute = dateKey >= "2026-08-03" ? 40 : 30;
-  // 15:xx IST is UTC+05:30. Date.UTC keeps this deterministic regardless of
-  // the browser's own timezone and makes historical replay use old hours.
-  const expiryCloseMs = Date.UTC(year, month, day, 10, closeMinute, 0, 0);
-  const diffDays = (expiryCloseMs - atMs) / (1000 * 60 * 60 * 24);
-  return Math.max(diffDays / 365, 0.0001);
+  return Date.UTC(year, month, day, 10, dateKey >= "2026-08-03" ? 40 : 30, 0, 0);
+}
+
+const EXPIRY_MONTHS = new Map([
+  ["JAN", 0], ["FEB", 1], ["MAR", 2], ["APR", 3], ["MAY", 4], ["JUN", 5],
+  ["JUL", 6], ["AUG", 7], ["SEP", 8], ["OCT", 9], ["NOV", 10], ["DEC", 11],
+]);
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function expiryCalendarDay(expiry: string | null | undefined): number | null {
+  if (!expiry) return null;
+  const value = expiry.trim();
+  const labelMatch = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(value);
+  if (labelMatch) {
+    const [, day, month, year] = labelMatch;
+    const monthIndex = EXPIRY_MONTHS.get(month.toUpperCase());
+    return monthIndex === undefined ? null : Date.UTC(Number(year), monthIndex, Number(day));
+  }
+  const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (isoDateMatch) return Date.UTC(Number(isoDateMatch[1]), Number(isoDateMatch[2]) - 1, Number(isoDateMatch[3]));
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime())
+    ? Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate())
+    : null;
+}
+
+/** Calendar days until expiry in the India market timezone, for display DTE. */
+export function daysToExpiry(expiry: string | null | undefined, atMs: number = Date.now()): number {
+  const expiryDay = expiryCalendarDay(expiry);
+  if (expiryDay === null || !Number.isFinite(atMs)) return 0;
+  const marketNow = new Date(atMs + IST_OFFSET_MS);
+  const currentDay = Date.UTC(marketNow.getUTCFullYear(), marketNow.getUTCMonth(), marketNow.getUTCDate());
+  return Math.max(0, Math.round((expiryDay - currentDay) / DAY_MS));
 }
 
 /** The strike in `strikes` closest to `target` (e.g. the current spot price). */

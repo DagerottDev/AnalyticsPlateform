@@ -15,6 +15,10 @@ describe("NSE market session", () => {
     expect(getNseMarketSession(new Date("2026-08-03T10:10:00Z"), "fno").state).toBe("closed");
   });
 
+  it("does not treat 15:15 IST as the F&O close", () => {
+    expect(getNseMarketSession(new Date("2026-08-05T09:45:00Z"), "fno").state).toBe("open");
+  });
+
   it("classifies explicit cash symbols separately from F&O references", () => {
     expect(isFnoSymbol("NFO:NIFTY26AUG22000CE")).toBe(true);
     expect(isFnoSymbol("NSE_FNO:12345")).toBe(true);

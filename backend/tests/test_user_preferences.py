@@ -30,8 +30,11 @@ async def test_settings_returns_defaults_without_creating_a_profile(
     assert body["general"]["defaultSymbol"] == "NIFTY"
     assert body["optionChain"]["strikesEachSide"] == 10
     assert body["optionChain"]["rollingSelectionMode"] == "smooth"
+    assert body["greekWorkspace"]["timeframe"] == "3"
+    assert body["combinedPremiumWorkspace"]["timeframe"] == "3"
     assert body["combinedPremiumWorkspace"]["seriesType"] == "candlestick"
     assert body["combinedPremiumWorkspace"]["indicators"]["calls"]["ema"]["enabled"] is True
+    assert body["ivScreener"] == {"projectionDays": 14, "sigma": 1}
     assert body["charts"]["indicators"]["supertrend"]["parameters"] == {
         "period": 10,
         "multiplier": 3,
@@ -54,6 +57,7 @@ async def test_settings_put_round_trips_normalized_camel_case_payload(
     payload["combinedPremiumWorkspace"]["indicators"]["both"]["rsi"] = {
         "enabled": True, "parameters": {"period": 21}
     }
+    payload["ivScreener"] = {"projectionDays": 30, "sigma": 1.5}
 
     saved = await client.put("/api/v1/settings", headers=auth_headers, json=payload)
     loaded = await client.get("/api/v1/settings", headers=auth_headers)
@@ -71,6 +75,7 @@ async def test_settings_put_round_trips_normalized_camel_case_payload(
     combined = loaded.json()["combinedPremiumWorkspace"]
     both_rsi_period = combined["indicators"]["both"]["rsi"]["parameters"]["period"]
     assert both_rsi_period == 21
+    assert loaded.json()["ivScreener"] == {"projectionDays": 30, "sigma": 1.5}
 
 
 @pytest.mark.asyncio
@@ -98,6 +103,7 @@ async def test_settings_reject_invalid_values_and_reset_only_generic_preferences
 ) -> None:
     invalid = UserPreferences().model_dump(mode="json", by_alias=True)
     invalid["charts"]["refreshSeconds"] = 7
+    invalid["ivScreener"] = {"projectionDays": 61, "sigma": 1}
     invalid["unexpected"] = True
 
     rejected = await client.put("/api/v1/settings", headers=auth_headers, json=invalid)

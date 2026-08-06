@@ -14,7 +14,7 @@ import { BasketOrderModal } from "@/components/market/BasketOrderModal";
 import { BasketLegDraft, BasketRiskDraft, orderBasketLegsForMargin } from "@/lib/basket";
 import { calculateImpliedVolatility, calculateGreeks, Greeks } from "@/lib/greeks";
 import { classifyBuildup } from "@/lib/buildup";
-import { timeToExpiry, nearestStrikeTo, defaultSpotFallback } from "@/lib/optionMath";
+import { daysToExpiry, timeToExpiry, nearestStrikeTo, defaultSpotFallback } from "@/lib/optionMath";
 import {
   filterOptionChainStrikes,
   MoneynessFilter,
@@ -29,7 +29,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { EducationPopover } from "@/components/ui/EducationPopover";
 import { DataFreshness } from "@/components/market/DataFreshness";
-import { describeDataFreshness } from "@/lib/dataFreshness";
+import { describeDataFreshness, isFreshBrokerStreamTick } from "@/lib/dataFreshness";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { toClosedMarketQuote } from "@/lib/marketTick";
 export { toClosedMarketQuote } from "@/lib/marketTick";
@@ -172,7 +172,9 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
         try {
           const response = await getMarketQuotes(chunk);
           quotes.push(...response.quotes.map((quote) => (
-            marketSession.state === "open" ? quote : toClosedMarketQuote(quote)
+            marketSession.state === "open"
+              ? { ...quote, feed: "snapshot" as const }
+              : { ...toClosedMarketQuote(quote), feed: "snapshot" as const }
           )));
         } catch {
           // Preserve successful chunks if one broker snapshot is unavailable.
@@ -198,6 +200,10 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
     (tradingSymbol: string): MarketTick | null => {
       const snapshot = snapshotTicks[tradingSymbol];
       const live = getLiveTick(tradingSymbol);
+      // A fresh websocket frame is broker evidence that the instrument is
+      // still trading, even if the local regular-session calendar has already
+      // elapsed. Do not replace that frame with a REST close snapshot.
+      if (isFreshBrokerStreamTick(live)) return live;
       if (!snapshot) return live ?? null;
       // useMarketData retains its last live tick when a session closes. Once
       // a snapshot exists, prefer it outside hours; during the session use it
@@ -215,6 +221,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
 
   // Time to expiry (T) in years
   const T = useMemo(() => timeToExpiry(expiry), [expiry]);
+  const dte = useMemo(() => daysToExpiry(expiry), [expiry]);
 
   const r = riskFreeRate;
 
@@ -312,8 +319,11 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
     });
     if (dynamicAnalysisSelections.length) params.set("dynamic", serializeDynamicSelections(dynamicAnalysisSelections));
     const href = `/chain/premium-analysis?${params.toString()}`;
-    const analysisWindow = window.open(href, "combined-premium-analysis");
-    if (!analysisWindow) window.location.assign(href);
+    // Use the browser's reserved `_blank` target so every click opens the
+    // combined-premium workspace in a separate tab instead of reusing a
+    // previously named popup window.
+    const analysisTab = window.open(href, "_blank");
+    if (!analysisTab) window.location.assign(href);
   };
 
   const openOpenInterestAnalysis = () => {
@@ -376,7 +386,7 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
             Underlying ({symbol}): <span className="tnum font-bold text-[var(--color-text-bright)]">{formatINR(S)}</span>
           </span>
           <span className="text-sm font-medium text-[var(--color-text-secondary)]">
-            DTE: <span className="tnum font-bold text-[var(--color-text-bright)]">{Math.round(T * 365)} days</span>
+            DTE: <span className="tnum font-bold text-[var(--color-text-bright)]">{dte} days</span>
           </span>
           <DataFreshness tick={underlyingTick} />
         </div>

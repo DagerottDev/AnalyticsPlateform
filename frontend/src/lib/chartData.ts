@@ -28,3 +28,37 @@ export function sortAndDeduplicateChartData<T extends TimePoint>(
 export function normalizeOHLCVData(data: OHLCVData[]): OHLCVData[] {
   return sortAndDeduplicateChartData(data);
 }
+
+/**
+ * Apply the latest live price to the newest historical bar before calculating
+ * indicators. The chart intentionally keeps the historical bar timestamp so
+ * the live quote updates the in-progress candle rather than creating a
+ * duplicate point at millisecond tick precision.
+ */
+export function mergeLiveCandle(
+  data: OHLCVData[],
+  liveTick: { price: number; timestamp: number } | null | undefined,
+): OHLCVData[] {
+  const normalized = normalizeOHLCVData(data);
+  if (
+    normalized.length === 0
+    || !liveTick
+    || !Number.isFinite(liveTick.price)
+    || liveTick.price <= 0
+  ) {
+    return normalized;
+  }
+
+  const lastIndex = normalized.length - 1;
+  const last = normalized[lastIndex];
+  const price = liveTick.price;
+  return [
+    ...normalized.slice(0, lastIndex),
+    {
+      ...last,
+      high: Math.max(last.high, price),
+      low: Math.min(last.low, price),
+      close: price,
+    },
+  ];
+}

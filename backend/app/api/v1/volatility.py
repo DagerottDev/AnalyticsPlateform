@@ -12,8 +12,15 @@ from app.core.security import get_current_user
 from app.data.nse_fo_symbols import NSE_FO_SYMBOLS
 from app.db.session import get_db
 from app.models.volatility_snapshot import DailyVolatilitySnapshot
-from app.schemas.volatility import IvUniverseResponse, IvUniverseStatus, IvUniverseSymbol
+from app.schemas.volatility import (
+    CorporateCalendarEvent,
+    CorporateCalendarMeta,
+    IvUniverseResponse,
+    IvUniverseStatus,
+    IvUniverseSymbol,
+)
 from app.services.atm_iv import compute_atm_iv
+from app.services.corporate_calendar_store import IST, corporate_calendar_store
 from app.services.fno_symbol_store import fno_symbol_store
 from app.services.fo_iv_universe_store import load_latest_snapshot_per_symbol
 from app.services.fyers_service import to_fyers_ws_symbol
@@ -226,6 +233,7 @@ async def compare_relative_value(
 
 @router.get("/universe", response_model=IvUniverseResponse)
 async def get_iv_universe(
+    projection_days: int = Query(default=14, ge=1, le=60),
     current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> IvUniverseResponse:
@@ -237,9 +245,25 @@ async def get_iv_universe(
     """
     snapshots = await load_latest_snapshot_per_symbol(db)
     by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
-    symbols: list[IvUniverseSymbol] = []
     generated_at = datetime.now(UTC)
     fno_symbols = await _iv_universe_symbols(current_user)
+    calendar_start = generated_at.astimezone(IST).date()
+    calendar_end = calendar_start + timedelta(days=projection_days)
+    calendar = await corporate_calendar_store.get(
+        fno_symbols.keys(), calendar_start, calendar_end
+    )
+    events_by_symbol: dict[str, list[CorporateCalendarEvent]] = {}
+    for event in calendar.events:
+        events_by_symbol.setdefault(event.symbol, []).append(
+            CorporateCalendarEvent(
+                event_type=event.event_type,
+                title=event.title,
+                event_date=event.event_date,
+                date_kind=event.date_kind,
+                source=event.source,
+            )
+        )
+    symbols: list[IvUniverseSymbol] = []
     for symbol, company_name in fno_symbols.items():
         snapshot = by_symbol.get(symbol)
         updated_at = snapshot.updated_at if snapshot is not None else None
@@ -265,9 +289,16 @@ async def get_iv_universe(
                 snapshot_date=snapshot.snapshot_date if snapshot else None,
                 updated_at=updated_at,
                 status=status,
+                events=events_by_symbol.get(symbol, []),
             )
         )
-    return IvUniverseResponse(symbols=symbols, generated_at=generated_at)
+    return IvUniverseResponse(
+        symbols=symbols,
+        generated_at=generated_at,
+        corporate_calendar=CorporateCalendarMeta(
+            status=calendar.status, updated_at=calendar.updated_at
+        ),
+    )
 
 
 async def _capture_daily_atm_iv(

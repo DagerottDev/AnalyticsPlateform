@@ -32,4 +32,13 @@ describe("describeDataFreshness", () => {
     expect(describeDataFreshness({ timestamp: at1535 }, at1535, "fno").state).toBe("live");
     expect(describeDataFreshness({ timestamp: at1535 }, at1535, "cash").state).toBe("closed");
   });
+
+  it("trusts a fresh broker stream during an extended session", () => {
+    const at1545 = Date.parse("2026-08-05T10:15:00Z"); // 15:45 IST, after the calendar close
+    expect(describeDataFreshness({
+      timestamp: at1545,
+      feed: "stream",
+      last_stream_timestamp: at1545,
+    }, at1545, "fno").state).toBe("live");
+  });
 });

@@ -6,6 +6,26 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 IvUniverseStatus = Literal["building", "ready", "stale"]
+CorporateCalendarStatus = Literal["ready", "stale", "unavailable"]
+CorporateEventType = Literal[
+    "results", "board_meeting", "dividend", "split", "bonus", "buyback", "rights"
+]
+CorporateEventDateKind = Literal["meeting_date", "ex_date", "record_date"]
+
+
+class CorporateCalendarEvent(BaseModel):
+    """One announced NSE corporate event relevant to a screener row."""
+
+    event_type: CorporateEventType
+    title: str = Field(min_length=1, max_length=500)
+    event_date: date
+    date_kind: CorporateEventDateKind
+    source: Literal["NSE"] = "NSE"
+
+
+class CorporateCalendarMeta(BaseModel):
+    status: CorporateCalendarStatus
+    updated_at: datetime | None = None
 
 
 class IvUniverseSymbol(BaseModel):
@@ -20,6 +40,7 @@ class IvUniverseSymbol(BaseModel):
     snapshot_date: date | None = None
     updated_at: datetime | None = None
     status: IvUniverseStatus
+    events: list[CorporateCalendarEvent] = Field(default_factory=list)
 
 
 class IvUniverseResponse(BaseModel):
@@ -27,3 +48,4 @@ class IvUniverseResponse(BaseModel):
 
     symbols: list[IvUniverseSymbol]
     generated_at: datetime
+    corporate_calendar: CorporateCalendarMeta

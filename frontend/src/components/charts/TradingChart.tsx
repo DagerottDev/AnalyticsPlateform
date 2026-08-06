@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createChart, IChartApi, ISeriesApi, Time, type MouseEventParams } from "lightweight-charts";
 import { OHLCVData, calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateSupertrend } from "@/lib/indicators";
 import { ChartIndicators, indicatorParameter } from "@/lib/chartIndicators";
-import { normalizeOHLCVData, sortAndDeduplicateChartData } from "@/lib/chartData";
+import { mergeLiveCandle, normalizeOHLCVData, sortAndDeduplicateChartData } from "@/lib/chartData";
 import { supertrendColor, SUPERTREND_DOWN_COLOR, SUPERTREND_UP_COLOR } from "@/lib/supertrendColors";
 import { formatMarketDateTime, MARKET_CHART_LOCALIZATION, formatMarketTick, timeToUnixSeconds } from "@/lib/chartTime";
 import { ChartLegend } from "./ChartLegend";
@@ -44,6 +44,22 @@ function nearestValue(values: Map<number, number>, time: Time): number | null {
   return nearest;
 }
 
+function removeLineSeries(
+  chart: IChartApi,
+  seriesRef: { current: ISeriesApi<"Line"> | null },
+): void {
+  const series = seriesRef.current;
+  if (!series) return;
+  try {
+    chart.removeSeries(series);
+  } catch {
+    // The chart may have been removed between effects; there is nothing left
+    // to clean up in that case.
+  } finally {
+    seriesRef.current = null;
+  }
+}
+
 interface TradingChartProps {
   data: OHLCVData[];
   liveTick?: { price: number; timestamp: number } | null;
@@ -81,6 +97,10 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
   const onCrosshairTimeChangeRef = useRef(onCrosshairTimeChange);
   onCrosshairTimeChangeRef.current = onCrosshairTimeChange;
   const { registerChart, notifyTimeRange, notifyCrosshair } = useGreekChartSync();
+  const liveData = useMemo(
+    () => mergeLiveCandle(data, liveTick),
+    [data, liveTick],
+  );
 
   const applyCrosshair = useCallback((time: Time | null) => {
     const chart = chartRef.current;
@@ -194,27 +214,11 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
     };
   }, [applyCrosshair, notifyCrosshair, notifyTimeRange, registerChart, seriesType, syncId]);
 
-  // Update Data and Indicators
+  // Update the historical chart data. Live ticks are applied with update()
+  // below so frequent quotes do not rebuild the full candle series.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || (!candleSeriesRef.current && !closeSeriesRef.current) || !volumeSeriesRef.current || !data || data.length === 0) return;
-
-    // removeSeries throws "Value is undefined" when a series belongs to a
-    // chart that has already been disposed (most commonly during Strict Mode
-    // effect replay). Treat that cleanup as idempotent and forget the stale
-    // ref so the next render can create a fresh series.
-    const removeLineSeries = (seriesRef: { current: ISeriesApi<"Line"> | null }) => {
-      const series = seriesRef.current;
-      if (!series) return;
-      try {
-        chart.removeSeries(series);
-      } catch {
-        // The chart may have been removed between effects; there is nothing
-        // left to clean up in that case.
-      } finally {
-        seriesRef.current = null;
-      }
-    };
 
     const normalizedData = normalizeOHLCVData(data);
     crosshairValuesRef.current = new Map(
@@ -243,60 +247,80 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
     }));
     volumeSeriesRef.current.setData(volumeData);
 
+    // setData may change the available time range. Let the workspace use the
+    // first chart's resulting range as the canonical horizontal scale.
+    if (syncId) {
+      queueMicrotask(() => {
+        if (chartRef.current !== chart) return;
+        const range = chart.timeScale().getVisibleRange();
+        if (range) notifyTimeRange(syncId, range);
+      });
+    }
+  }, [data, notifyTimeRange, seriesType, syncId]);
+
+  // Recalculate indicators from the historical series plus the current live
+  // price. This keeps EMA/SMA/Bollinger/Supertrend/RSI aligned with the price
+  // shown on the live composite candle without rebuilding the candle series.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !data || data.length === 0 || !indicators) return;
+
+    const indicatorData = liveData;
+
     // --- Indicators ---
 
     // SMA
-    if (indicators?.sma.enabled) {
+    if (indicators.sma.enabled) {
       if (!smaSeriesRef.current) {
         smaSeriesRef.current = chart.addLineSeries({ color: COLOR_CAT_1, lineWidth: 2 });
       }
       const smaData = sortAndDeduplicateChartData(
-        calculateSMA(normalizedData, indicatorParameter(indicators, "sma", "period"))
+        calculateSMA(indicatorData, indicatorParameter(indicators, "sma", "period"))
       ).map(d => ({
         time: d.time as Time,
         value: d.value
       }));
       smaSeriesRef.current?.setData(smaData);
     } else if (smaSeriesRef.current) {
-      removeLineSeries(smaSeriesRef);
+      removeLineSeries(chart, smaSeriesRef);
     }
 
     // EMA
-    if (indicators?.ema.enabled) {
+    if (indicators.ema.enabled) {
       if (!emaSeriesRef.current) {
         emaSeriesRef.current = chart.addLineSeries({ color: COLOR_CAT_2, lineWidth: 2 });
       }
       const emaData = sortAndDeduplicateChartData(
-        calculateEMA(normalizedData, indicatorParameter(indicators, "ema", "period"))
+        calculateEMA(indicatorData, indicatorParameter(indicators, "ema", "period"))
       ).map(d => ({
         time: d.time as Time,
         value: d.value
       }));
       emaSeriesRef.current?.setData(emaData);
     } else if (emaSeriesRef.current) {
-      removeLineSeries(emaSeriesRef);
+      removeLineSeries(chart, emaSeriesRef);
     }
 
     // Bollinger Bands
-    if (indicators?.bbands.enabled) {
+    if (indicators.bbands.enabled) {
       if (!bbUpperRef.current) {
         bbUpperRef.current = chart.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
         bbLowerRef.current = chart.addLineSeries({ color: `${COLOR_CAT_3}80`, lineWidth: 1 });
       }
       const bbData = calculateBollingerBands(
-        normalizedData,
+        indicatorData,
         indicatorParameter(indicators, "bbands", "period"),
         indicatorParameter(indicators, "bbands", "multiplier")
       );
       bbUpperRef.current?.setData(sortAndDeduplicateChartData(bbData).map(d => ({ time: d.time as Time, value: d.upper })));
       bbLowerRef.current?.setData(sortAndDeduplicateChartData(bbData).map(d => ({ time: d.time as Time, value: d.lower })));
     } else if (bbUpperRef.current && bbLowerRef.current) {
-      removeLineSeries(bbUpperRef);
-      removeLineSeries(bbLowerRef);
+      removeLineSeries(chart, bbUpperRef);
+      removeLineSeries(chart, bbLowerRef);
     }
 
     // Supertrend
-    if (indicators?.supertrend.enabled) {
+    if (indicators.supertrend.enabled) {
       if (!supertrendSeriesRef.current) {
         supertrendSeriesRef.current = chart.addLineSeries({
           color: SUPERTREND_UP_COLOR,
@@ -304,7 +328,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
         });
       }
       const supertrendData = calculateSupertrend(
-        normalizedData,
+        indicatorData,
         indicatorParameter(indicators, "supertrend", "period"),
         indicatorParameter(indicators, "supertrend", "multiplier")
       );
@@ -315,11 +339,9 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       }));
       supertrendSeriesRef.current?.setData(stData);
     } else if (supertrendSeriesRef.current) {
-      removeLineSeries(supertrendSeriesRef);
+      removeLineSeries(chart, supertrendSeriesRef);
     }
 
-    // setData may change the available time range. Let the workspace use the
-    // first chart's resulting range as the canonical horizontal scale.
     if (syncId) {
       queueMicrotask(() => {
         if (chartRef.current !== chart) return;
@@ -327,8 +349,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
         if (range) notifyTimeRange(syncId, range);
       });
     }
-
-  }, [data, indicators, notifyTimeRange, seriesType, syncId]);
+  }, [data, indicators, liveData, notifyTimeRange, seriesType, syncId]);
 
   // RSI Pane Setup
   useEffect(() => {
@@ -359,9 +380,9 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
         }
       }
 
-      if (data && data.length > 0 && rsiSeriesRef.current) {
+      if (liveData.length > 0 && rsiSeriesRef.current) {
         const rsiData = sortAndDeduplicateChartData(
-          calculateRSI(normalizeOHLCVData(data), indicatorParameter(indicators, "rsi", "period"))
+          calculateRSI(liveData, indicatorParameter(indicators, "rsi", "period"))
         ).map(d => ({
           time: d.time as Time,
           value: d.value
@@ -374,7 +395,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       rsiChartRef.current = null;
       rsiSeriesRef.current = null;
     }
-  }, [indicators, data]);
+  }, [indicators, liveData]);
 
   useEffect(() => {
     latestDataRef.current = normalizeOHLCVData(data);
@@ -404,6 +425,8 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       
       const newHigh = Math.max(lastCandle.high, liveTick.price);
       const newLow = Math.min(lastCandle.low, liveTick.price);
+      const seconds = timeToUnixSeconds(time);
+      if (seconds !== null) crosshairValuesRef.current.set(seconds, liveTick.price);
       
       if (seriesType === "candlestick") {
         candleSeriesRef.current?.update({
@@ -431,7 +454,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
     const marketTime = formatMarketDateTime(time as Time);
     return marketTime || String(time);
   };
-  const chartRows = data.map((point) => ({
+  const chartRows = liveData.map((point) => ({
     time: formatTime(point.time),
     open: point.open.toFixed(2),
     high: point.high.toFixed(2),
@@ -447,7 +470,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       <div
         ref={chartContainerRef}
         role="img"
-        aria-label={`${symbol ?? "Instrument"} ${timeframeLabel} ${seriesType === "line" ? "close-price line" : "candlestick"} chart with ${data.length} candles. Use the following data table for exact OHLC and volume values.`}
+        aria-label={`${symbol ?? "Instrument"} ${timeframeLabel} ${seriesType === "line" ? "close-price line" : "candlestick"} chart with ${liveData.length} candles. Use the following data table for exact OHLC and volume values.`}
         title="Right-click to reset chart view"
         onContextMenu={(event) => { event.preventDefault(); resetChartView(); }}
         className="h-[400px] w-full"
@@ -455,7 +478,7 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
       <ChartDataTable
         className="px-2"
         title={`${symbol ?? "Instrument"} OHLCV`}
-        summary={`${data.length} ${timeframeLabel} candles. Values are ordered from oldest to newest.`}
+        summary={`${liveData.length} ${timeframeLabel} candles. Values are ordered from oldest to newest.`}
         columns={[
           { key: "time", label: "Time" }, { key: "open", label: "Open" }, { key: "high", label: "High" },
           { key: "low", label: "Low" }, { key: "close", label: "Close" }, { key: "volume", label: "Volume" },
@@ -476,9 +499,9 @@ export function TradingChart({ data, liveTick, indicators, symbol, timeframeLabe
           <ChartDataTable
             className="px-2 pb-2"
             title="RSI"
-            summary={`RSI values for the same ${data.length} candles.`}
+            summary={`RSI values for the same ${liveData.length} candles.`}
             columns={[{ key: "time", label: "Time" }, { key: "rsi", label: "RSI" }]}
-            rows={calculateRSI(data, indicatorParameter(indicators, "rsi", "period")).map((point) => ({ time: formatTime(point.time), rsi: point.value.toFixed(2) }))}
+            rows={calculateRSI(liveData, indicatorParameter(indicators, "rsi", "period")).map((point) => ({ time: formatTime(point.time), rsi: point.value.toFixed(2) }))}
           />
         </div>
       )}

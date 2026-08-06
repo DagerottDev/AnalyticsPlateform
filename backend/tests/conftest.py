@@ -20,6 +20,7 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
 from app.models.user import TradingMode
+from app.services.corporate_calendar_store import corporate_calendar_store
 from app.services.lot_size_store import lot_size_store
 from app.services.session_manager import session_manager
 from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
@@ -43,6 +44,28 @@ def _seed_lot_size_cache() -> None:
     lot_size_store._fetched_at = time.monotonic()
     yield
     lot_size_store._lot_sizes, lot_size_store._fetched_at = previous_sizes, previous_fetched_at
+
+
+@pytest.fixture(autouse=True)
+def _seed_corporate_calendar_cache() -> None:
+    """Keep router tests offline; calendar parsing is covered by its own service tests."""
+    previous = (
+        corporate_calendar_store._events,
+        corporate_calendar_store._fetched_at,
+        corporate_calendar_store._updated_at,
+        corporate_calendar_store._has_snapshot,
+    )
+    corporate_calendar_store._events = ()
+    corporate_calendar_store._fetched_at = time.monotonic()
+    corporate_calendar_store._updated_at = datetime.now()
+    corporate_calendar_store._has_snapshot = True
+    yield
+    (
+        corporate_calendar_store._events,
+        corporate_calendar_store._fetched_at,
+        corporate_calendar_store._updated_at,
+        corporate_calendar_store._has_snapshot,
+    ) = previous
 
 
 class FakeTokenBlocklist(TokenBlocklist):

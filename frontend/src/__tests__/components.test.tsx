@@ -193,6 +193,7 @@ describe("core UI components", () => {
         onSave={vi.fn()}
         onRefresh={vi.fn()}
         onCreateAlert={vi.fn()}
+        onOpenMarketStructure={vi.fn()}
         timeframe="5"
         onTimeframeChange={onTimeframeChange}
       />

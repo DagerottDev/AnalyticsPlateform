@@ -302,7 +302,9 @@ class TestVolatilityRouter:
         assert rows["RELIANCE"]["iv_rank"] == 42.0
         assert rows["RELIANCE"]["company_name"] == "Reliance Industries"
         assert rows["RELIANCE"]["status"] == "ready"
+        assert rows["RELIANCE"]["events"] == []
         assert rows["RELIANCE"]["updated_at"] is not None
+        assert response.json()["corporate_calendar"]["status"] == "ready"
         # A symbol the backfill job hasn't reached yet still appears, with nulls.
         assert rows["TCS"]["atm_iv"] is None
         assert rows["TCS"]["snapshot_date"] is None
@@ -332,6 +334,17 @@ class TestVolatilityRouter:
         assert response.status_code == 200
         rows = {row["symbol"]: row for row in response.json()["symbols"]}
         assert rows["INFY"]["status"] == "stale"
+
+    @pytest.mark.asyncio
+    async def test_universe_validates_projection_days(
+        self, app: FastAPI, client: AsyncClient, access_token: str
+    ):
+        response = await client.get(
+            "/api/v1/volatility/universe?projection_days=61",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+        assert response.status_code == 422
 
     @pytest.mark.asyncio
     async def test_metrics_404_when_not_enough_history(

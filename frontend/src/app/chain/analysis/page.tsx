@@ -19,8 +19,8 @@ import { getHistoricalCandles, getInstruments, type HistoricalCandle } from "@/l
 import { useMarketData } from "@/hooks/useMarketData";
 import { useReplayStore } from "@/stores/replayStore";
 import { calculateGreeks, calculateImpliedVolatility } from "@/lib/greeks";
-import { defaultSpotFallback, nearestStrikeTo, timeToExpiry } from "@/lib/optionMath";
-import { riskFreeRateForSymbol, useSettingsStore } from "@/stores/settingsStore";
+import { daysToExpiry, defaultSpotFallback, nearestStrikeTo, timeToExpiry } from "@/lib/optionMath";
+import { createDefaultUserPreferences, DEFAULT_RATE_SYMBOL, useSettingsStore } from "@/stores/settingsStore";
 import { recentMarketDateRange } from "@/lib/recentHistory";
 import { appendLiveGreekValues, buildReplayResolvedGreekSeries, buildResolvedGreekSeries, calculateLiveResolvedGreeks, combineGreekSeries, FIRST_ORDER_GREEKS, HIGHER_ORDER_GREEKS, type GreekMetric } from "@/lib/strikeGreekAnalysis";
 import {
@@ -41,6 +41,11 @@ import type { Instrument, MarketTick } from "@/types/market";
 // websocket stream. Keep the analysis workspace deliberately gentle so
 // opening it never competes with the already-open option chain's live feed.
 const HISTORY_FETCH_CONCURRENCY = 2;
+
+// Persisted settings are rehydrated from localStorage on the browser, while
+// the server can only render the built-in defaults. Keep the first render
+// deterministic on both sides and apply persisted values in an effect below.
+const DEFAULT_GREEK_WORKSPACE_PREFERENCES = createDefaultUserPreferences().greekWorkspace;
 
 async function fetchOptionHistory(
   instruments: Instrument[],
@@ -102,7 +107,6 @@ interface AlertModalState {
 }
 
 function GreekAnalysisWorkspace() {
-  const initialWorkspacePreferences = useSettingsStore.getState().greekWorkspace;
   const [selected, setSelected] = useState<Instrument[]>([]);
   const [expiryInstruments, setExpiryInstruments] = useState<Instrument[]>([]);
   const [selectionPaths, setSelectionPaths] = useState<ResolvedSelectionPaths>({});
@@ -110,17 +114,22 @@ function GreekAnalysisWorkspace() {
   const [underlyingCandles, setUnderlyingCandles] = useState<HistoricalCandle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const [visibleGreeks, setVisibleGreeks] = useState<GreekMetric[]>(initialWorkspacePreferences.visibleGreeks);
+  const [visibleGreeks, setVisibleGreeks] = useState<GreekMetric[]>(() => [...DEFAULT_GREEK_WORKSPACE_PREFERENCES.visibleGreeks]);
   // Keep the chart workspace compact on first open. A saved layout can still
   // restore the user's explicit education-panel preference.
-  const [educationOpen, setEducationOpen] = useState(initialWorkspacePreferences.educationOpen);
-  const [panelLayouts, setPanelLayouts] = useState<Partial<Record<GreekMetric, GreekPanelLayout>>>(initialWorkspacePreferences.panels);
+  const [educationOpen, setEducationOpen] = useState(DEFAULT_GREEK_WORKSPACE_PREFERENCES.educationOpen);
+  const [panelLayouts, setPanelLayouts] = useState<Partial<Record<GreekMetric, GreekPanelLayout>>>({ ...DEFAULT_GREEK_WORKSPACE_PREFERENCES.panels });
   const [layoutMessage, setLayoutMessage] = useState("");
   const [activeTab, setActiveTab] = useState("core");
   const [alertModal, setAlertModal] = useState<AlertModalState>({ open: false });
-  const [timeframe, setTimeframe] = useState(initialWorkspacePreferences.timeframe);
-  const [syncCharts, setSyncCharts] = useState(initialWorkspacePreferences.syncCharts);
-  const rollingSelectionMode = useSettingsStore((state) => state.optionChain.rollingSelectionMode);
+  const [timeframe, setTimeframe] = useState(DEFAULT_GREEK_WORKSPACE_PREFERENCES.timeframe);
+  const [syncCharts, setSyncCharts] = useState(DEFAULT_GREEK_WORKSPACE_PREFERENCES.syncCharts);
+  const [rollingSelectionMode, setRollingSelectionMode] = useState<"smooth" | "raw">("smooth");
+  const [riskFreeRate, setRiskFreeRate] = useState(0.1);
+  const [settingsReady, setSettingsReady] = useState(false);
+  const persistedGreekWorkspace = useSettingsStore((state) => state.greekWorkspace);
+  const persistedRollingSelectionMode = useSettingsStore((state) => state.optionChain.rollingSelectionMode);
+  const persistedRiskFreeRates = useSettingsStore((state) => state.analytics.riskFreeRatePercent);
   const updatePreferences = useSettingsStore((state) => state.updatePreferences);
   const replayIsActive = useReplayStore((state) => state.isActive);
   const replaySymbol = useReplayStore((state) => state.symbol);
@@ -136,8 +145,26 @@ function GreekAnalysisWorkspace() {
   const fixedSelections = useMemo(() => parseFixedSelections(contractsQuery), [contractsQuery]);
   const dynamicSelections = useMemo(() => parseDynamicSelections(searchParams.get("dynamic")), [searchParams]);
   const selections = useMemo<AnalysisSelection[]>(() => [...fixedSelections, ...dynamicSelections].slice(0, MAX_ANALYSIS_SELECTIONS), [fixedSelections, dynamicSelections]);
+  const persistedRiskFreeRatePercent = persistedRiskFreeRates[symbol.trim().toUpperCase()]
+    ?? persistedRiskFreeRates[DEFAULT_RATE_SYMBOL]
+    ?? 10;
+
+  // Zustand's persist middleware may expose browser-only values before the
+  // hydration pass. Do not put those values in the initial JSX; synchronize
+  // them after mount so SSR and the first browser render stay identical.
+  useEffect(() => {
+    setVisibleGreeks([...persistedGreekWorkspace.visibleGreeks]);
+    setEducationOpen(persistedGreekWorkspace.educationOpen);
+    setPanelLayouts({ ...persistedGreekWorkspace.panels });
+    setTimeframe(persistedGreekWorkspace.timeframe);
+    setSyncCharts(persistedGreekWorkspace.syncCharts);
+    setRollingSelectionMode(persistedRollingSelectionMode);
+    setRiskFreeRate(persistedRiskFreeRatePercent / 100);
+    setSettingsReady(true);
+  }, [persistedGreekWorkspace, persistedRiskFreeRatePercent, persistedRollingSelectionMode]);
 
   const load = useCallback(async () => {
+    if (!settingsReady) return;
     if (!symbol || selections.length === 0) {
       setLoading(false);
       return;
@@ -191,7 +218,7 @@ function GreekAnalysisWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, [expiry, fixedSelections, replayInstruments, replayIsActive, replaySymbol, replayTimeline, rollingSelectionMode, selections, symbol, timeframe]);
+  }, [expiry, fixedSelections, replayInstruments, replayIsActive, replaySymbol, replayTimeline, rollingSelectionMode, selections, settingsReady, symbol, timeframe]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -205,7 +232,6 @@ function GreekAnalysisWorkspace() {
   const liveSymbols = useMemo(() => Array.from(new Set(Object.values(currentResolved).flatMap((resolution) => resolution?.components.map(({ instrument }) => instrument.trading_symbol) ?? []))), [currentResolved]);
   const { ticks: optionTicks } = useMarketData(liveSymbols);
   const ticks = useMemo(() => ({ ...underlyingTicks, ...optionTicks }), [underlyingTicks, optionTicks]);
-  const riskFreeRate = riskFreeRateForSymbol(symbol);
   const historicalGreekSeries = useMemo(() => buildResolvedGreekSeries(selectionPaths, candles, underlyingCandles, riskFreeRate, selections, fixedBySymbol, expiryInstruments, rollingSelectionMode), [selectionPaths, candles, underlyingCandles, riskFreeRate, selections, fixedBySymbol, expiryInstruments, rollingSelectionMode]);
   const historicalCombinedSeries = useMemo(() => combineGreekSeries(historicalGreekSeries), [historicalGreekSeries]);
   const resolvedLiveSelections = useMemo(() => selections.map((selection) => currentResolved[selection.id] ?? null), [selections, currentResolved]);
@@ -233,7 +259,7 @@ function GreekAnalysisWorkspace() {
       ?? underlyingCandles[underlyingCandles.length - 1]?.close
       ?? defaultSpotFallback(symbol);
     const valuationTime = tickTimeMs(ticks[symbol]?.timestamp) ?? Date.now();
-    const dte = Math.round(timeToExpiry(expiry, valuationTime) * 365);
+    const dte = daysToExpiry(expiry, valuationTime);
 
     const strikes = selected.map((instrument) => instrument.strike).filter((strike): strike is number => strike != null);
     let atmIv: number | null = null;
@@ -294,6 +320,7 @@ function GreekAnalysisWorkspace() {
           onSave={saveLayout}
           onRefresh={() => void load()}
           onCreateAlert={() => setAlertModal({ open: true })}
+          onOpenMarketStructure={() => window.open(`/market-structure?symbol=${encodeURIComponent(symbol)}&expiry=${encodeURIComponent(expiry)}`, "_blank", "noopener,noreferrer")}
           alertsDisabled={dynamicSelections.length > 0}
           alertDisabledReason={dynamicSelections.length > 0 ? "Rolling ATM/OTM/ITM selections cannot be saved as durable broker-contract alerts." : undefined}
           timeframe={timeframe}
@@ -328,6 +355,7 @@ function GreekAnalysisWorkspace() {
                   atmPrice={summary.atmPrice}
                   liveContracts={liveContracts}
                   totalContracts={totalContracts}
+                  quoteQuality={liveGreeks?.quoteQuality}
                 />
 
                 <GreekMetricSelector

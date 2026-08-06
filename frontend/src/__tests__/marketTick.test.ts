@@ -38,6 +38,23 @@ describe("mergeMarketTick", () => {
       prev_close_price: 58247.95,
     });
   });
+
+  it("retains the latest stream provenance when a REST snapshot arrives later", () => {
+    const streamTimestamp = 10_000;
+    const streamed = mergeMarketTick(snapshot, {
+      ...snapshot,
+      timestamp: streamTimestamp,
+      feed: "stream",
+      last_stream_timestamp: streamTimestamp,
+    });
+    const merged = mergeMarketTick(streamed, {
+      ...snapshot,
+      timestamp: streamTimestamp + 3_000,
+      feed: "snapshot",
+    });
+
+    expect(merged.last_stream_timestamp).toBe(streamTimestamp);
+  });
 });
 
 describe("toClosedMarketQuote", () => {

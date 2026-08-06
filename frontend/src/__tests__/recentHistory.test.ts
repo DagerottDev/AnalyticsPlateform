@@ -14,4 +14,18 @@ describe("recent market history range", () => {
   it("uses the previous weekday before the regular open", () => {
     expect(recentMarketDateRange(new Date("2026-07-31T03:00:00Z"))).toEqual({ from: "2026-07-30", to: "2026-07-30" });
   });
+
+  it("returns the requested number of weekday sessions", () => {
+    expect(recentMarketDateRange(new Date("2026-07-31T04:00:00Z"), 3)).toEqual({
+      from: "2026-07-29",
+      to: "2026-07-31",
+    });
+  });
+
+  it("does not spend a multi-session lookback on the weekend", () => {
+    expect(recentMarketDateRange(new Date("2026-08-01T04:00:00Z"), 3)).toEqual({
+      from: "2026-07-29",
+      to: "2026-07-31",
+    });
+  });
 });

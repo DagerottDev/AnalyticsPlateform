@@ -9,12 +9,13 @@ interface WorkspaceSummaryStripProps {
   atmPrice: number | null;
   liveContracts: number;
   totalContracts: number;
+  quoteQuality?: "mid" | "ltp";
 }
 
 /** At-a-glance context (spot, time-to-expiry, ATM IV/theoretical price, live
  * coverage) shown above the detailed Greek panels. Purely presentational —
  * all values are derived by the page from data it already fetches. */
-export function WorkspaceSummaryStrip({ spot, dte, atmIv, atmPrice, liveContracts, totalContracts }: WorkspaceSummaryStripProps) {
+export function WorkspaceSummaryStrip({ spot, dte, atmIv, atmPrice, liveContracts, totalContracts, quoteQuality }: WorkspaceSummaryStripProps) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <StatTile label="Spot" value={formatINR(spot)} icon={TrendingUp} />
@@ -27,6 +28,7 @@ export function WorkspaceSummaryStrip({ spot, dte, atmIv, atmPrice, liveContract
         tone={liveContracts === totalContracts && totalContracts > 0 ? "profit" : "neutral"}
         className="col-span-2 sm:col-span-4"
       />
+      <p className="col-span-2 text-[10px] text-[var(--color-text-muted)]">Greek IV input: {quoteQuality === "mid" ? "bid/ask midpoint" : quoteQuality === "ltp" ? "last traded price fallback" : "awaiting live option quotes"}.</p>
     </div>
   );
 }

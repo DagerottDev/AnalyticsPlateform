@@ -1,7 +1,8 @@
 import { calculateGreeks, calculateImpliedVolatility, type Greeks } from "@/lib/greeks";
 import type { HistoricalCandle } from "@/lib/market";
 import type { Instrument, MarketTick } from "@/types/market";
-import { timeToExpiry } from "@/lib/optionMath";
+import { expiryCloseTimestamp, timeToExpiry } from "@/lib/optionMath";
+import { quotePrice } from "@/lib/greekRisk";
 import {
   resolveSelection,
   type AnalysisSelection,
@@ -20,6 +21,7 @@ export interface LiveGreekCalculation {
   timestamp: string;
   liveContracts: number;
   totalContracts: number;
+  quoteQuality: "mid" | "ltp";
 }
 
 export const FIRST_ORDER_GREEKS: GreekMetric[] = ["delta", "gamma", "theta", "vega", "rho"];
@@ -41,13 +43,7 @@ const EMPTY_GREEK_VALUES = (): Record<GreekMetric, number> => ({
 });
 
 function expiryTime(expiry: string | null): number | null {
-  if (!expiry) return null;
-  const match = expiry.match(/^(\d{2})-([A-Za-z]{3})-(\d{4})$/);
-  if (!match) return null;
-  const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-  const month = months.indexOf(match[2].toLowerCase());
-  if (month < 0) return null;
-  return Date.UTC(Number(match[3]), month, Number(match[1]), 10, 0, 0);
+  return expiryCloseTimestamp(expiry);
 }
 
 /** Recalculate each selected contract's Greeks from matched historical option
@@ -149,6 +145,7 @@ export function calculateLiveResolvedGreeks(
   const values = EMPTY_GREEK_VALUES();
   const timestamps = [ticks[underlyingSymbol].timestamp];
   let liveContracts = 0;
+  let usedLtp = false;
   for (const resolution of resolutions) {
     if (!resolution?.optionType || !resolution.effectiveStrike) continue;
     const expiry = expiryTime(resolution.components[0]?.instrument.expiry ?? null);
@@ -157,8 +154,10 @@ export function calculateLiveResolvedGreeks(
     let complete = true;
     for (const { instrument, weight } of resolution.components) {
       const tick = ticks[instrument.trading_symbol];
-      if (!tick || !tick.last_price || !Number.isFinite(tick.last_price)) { complete = false; break; }
-      premium += tick.last_price * weight;
+      const quote = quotePrice(tick);
+      if (!tick || !quote) { complete = false; break; }
+      premium += quote.price * weight;
+      usedLtp ||= quote.quality === "ltp";
       timestamps.push(tick.timestamp);
     }
     if (!complete) continue;
@@ -176,7 +175,7 @@ export function calculateLiveResolvedGreeks(
   const latestTimestamp = timestamps.reduce((latest, timestamp) => (
     Number.isFinite(timestamp) && timestamp > latest ? timestamp : latest
   ), 0) || Date.now();
-  return { values, timestamp: new Date(latestTimestamp).toISOString(), liveContracts, totalContracts: resolutions.length };
+  return { values, timestamp: new Date(latestTimestamp).toISOString(), liveContracts, totalContracts: resolutions.length, quoteQuality: usedLtp ? "ltp" : "mid" };
 }
 
 function tickTimestampMs(timestamp: number): number | null {
@@ -343,6 +342,7 @@ export function calculateLiveCombinedGreeks(
     timestamp: new Date(latestTimestamp).toISOString(),
     liveContracts,
     totalContracts: instruments.length,
+    quoteQuality: "ltp",
   };
 }
 
