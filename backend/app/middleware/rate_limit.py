@@ -15,7 +15,15 @@ logger = logging.getLogger(__name__)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Fixed-window limiter keyed by client IP and request class."""
+    """Fixed-window limiter keyed by client IP and request class.
+
+    Broker-facing buckets ("broker", "quotes") are exempt from this cap —
+    see dispatch() below. Only the broker itself decides how many of those
+    calls are too many; this middleware still guards non-broker routes
+    (auth, generic API) that have no equivalent upstream signal of their own.
+    """
+
+    _BROKER_FACING_BUCKETS = frozenset({"broker", "quotes"})
 
     def __init__(self, app: Callable[..., Awaitable[None]], settings: Settings) -> None:
         super().__init__(app)
@@ -53,6 +61,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         client_ip = request.client.host if request.client else "unknown"
         bucket, limit = self._bucket(request.url.path)
+        if bucket in self._BROKER_FACING_BUCKETS:
+            # These paths call out to the broker. Fyers is the only party
+            # that actually knows its own capacity, so this middleware no
+            # longer imposes its own cap here — FyersService surfaces the
+            # broker's real 429s (BrokerRateLimitError) instead. Keeping a
+            # local ceiling in front of that just adds a second, disconnected
+            # limit that can reject requests the broker would have accepted.
+            return await call_next(request)
         key = f"{client_ip}:{bucket}"
         now = time.monotonic()
         window = self.settings.api_rate_limit_window_seconds

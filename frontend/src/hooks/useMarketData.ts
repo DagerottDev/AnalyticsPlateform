@@ -6,7 +6,7 @@ import { useReplayStore } from "@/stores/replayStore";
 import { mergeMarketTick } from "@/lib/marketTick";
 
 export function useMarketData(symbols: string[]) {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [ticks, setTicks] = useState<Record<string, MarketTick>>({});
 
   // Replay Interception
@@ -36,27 +36,31 @@ export function useMarketData(symbols: string[]) {
   const symbolsKey = Array.from(new Set(symbols)).join(",");
 
   useEffect(() => {
-    const ws = getWebSocket();
     // Keep the broker subscription alive across local session-boundary
     // changes. NSE's calendar is useful for labelling snapshots, but it is
     // not authoritative for extended/exception sessions; a recent Fyers
     // websocket tick is the strongest proof that the feed is still active.
-    const requestedSymbols = user?.client_id && !replayIsActive
+    const requestedSymbols = token && user?.client_id && !replayIsActive
       ? (symbolsKey ? symbolsKey.split(",") : [])
       : [];
     const previousSymbols = subscribedSymbols.current;
     const addedSymbols = requestedSymbols.filter((symbol) => !previousSymbols.includes(symbol));
     const removedSymbols = previousSymbols.filter((symbol) => !requestedSymbols.includes(symbol));
 
-    if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
-    if (addedSymbols.length > 0) ws.subscribeMany(addedSymbols, handleTick);
+    // Avoid constructing the shared transport at all for an unauthenticated
+    // page. This keeps reloads quiet and lets the UI explain the auth state.
+    if (previousSymbols.length > 0 || addedSymbols.length > 0) {
+      const ws = getWebSocket();
+      if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
+      if (addedSymbols.length > 0) ws.subscribeMany(addedSymbols, handleTick);
+    }
     subscribedSymbols.current = requestedSymbols;
 
     // The backend websocket seeds newly-subscribed symbols with quotes and
     // maintains one shared REST polling fallback per broker session. A
     // separate HTTP snapshot per mounted consumer duplicates that broker
     // traffic and can exhaust the API/broker rate limit during navigation.
-  }, [symbolsKey, user?.client_id, replayIsActive, handleTick]);
+  }, [symbolsKey, token, user?.client_id, replayIsActive, handleTick]);
 
   useEffect(() => {
     return () => {

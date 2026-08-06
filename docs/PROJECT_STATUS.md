@@ -6,6 +6,23 @@ Current Milestone:
 - Targeted quality refactor (2026-07-29) — ✅ COMPLETE (see below)
 - Resilience & confidence quality pass (2026-07-30) — ✅ COMPLETE (see below)
 
+## NSE Participant Flow analytics (2026-08-06)
+
+- **✅ COMPLETE in code:** `/participant-flow` provides a broker-independent NSE F&O
+  participant workspace for Client, DII, FII/FPI, and Proprietary categories. It stores
+  official daily participant-wise OI and trading-volume reports, backfills one year at a
+  bounded cadence, and shows explicit ready, backfilling, stale, or unavailable states.
+- The workspace offers 1M/3M/6M/1Y views, Index/Stock and Futures/Options filtering,
+  net-position trends, gross long/short balance, trading volume, and daily OI change.
+  It labels the report as official end-of-day data and does not infer intraday participant
+  positioning.
+- The scheduled importer reads the official HTTPS NSE archive directly (with both archive hosts
+  as fallbacks), records the latest retry error, and never calls a broker service. The dashboard
+  therefore remains available without an active broker session; a report that has not been
+  published yet is shown as unavailable and retried on the next poll.
+- Verification: frontend tests 51 files / 233 tests, backend tests 260 passed, ESLint,
+  TypeScript, Ruff, Mypy, and the production frontend build all pass locally.
+
 ## Greek Risk & Market Structure
 
 - Greek Analysis distinguishes raw one-contract observation charts from signed, lot-adjusted Greek scenarios in Strategy Builder and OI-based Market Structure concentration. Native Greek units remain independent; normalized displays are comparison aids only.

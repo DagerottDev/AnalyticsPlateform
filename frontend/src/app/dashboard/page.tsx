@@ -115,11 +115,13 @@ function IndexTickerCard({
   symbol,
   tick,
   feedPaused,
+  authenticated,
   onRemove,
 }: {
   symbol: string;
   tick: MarketTick | null;
   feedPaused: boolean;
+  authenticated: boolean;
   onRemove?: () => void;
 }) {
   const isUp = (tick?.change ?? 0) >= 0;
@@ -148,9 +150,14 @@ function IndexTickerCard({
         )}
       </div>
 
-      <div className="mt-2"><DataFreshness tick={tick} /></div>
+      <div className="mt-2">{authenticated ? <DataFreshness tick={tick} /> : <Badge tone="neutral">Not authenticated</Badge>}</div>
 
-      {!tick && feedPaused ? (
+      {!authenticated ? (
+        <div className="mt-4 flex min-h-20 flex-col justify-center rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-tertiary)]/50 px-3">
+          <p className="text-xs font-semibold text-[var(--color-text-secondary)]">Not authenticated</p>
+          <p className="mt-1 text-[11px] leading-4 text-[var(--color-text-muted)]">Connect a broker account from Accounts to receive live quotes.</p>
+        </div>
+      ) : !tick && feedPaused ? (
         <div className="mt-4 flex min-h-20 flex-col justify-center rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-tertiary)]/50 px-3">
           <p className="text-xs font-semibold text-[var(--color-text-secondary)]">Live quotes are paused</p>
           <p className="mt-1 text-[11px] leading-4 text-[var(--color-text-muted)]">This ticker will resume automatically when the regular session opens.</p>
@@ -217,7 +224,7 @@ function IndexTickerCard({
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, tradingMode } = useAuth();
+  const { user, tradingMode, isAuthenticated } = useAuth();
   const marketSession = useNseMarketSession();
   const alerts = useAlertStore((state) => state.alerts);
   const triggerLog = useAlertStore((state) => state.triggerLog);
@@ -235,7 +242,9 @@ export default function DashboardPage() {
   const getTick = (symbol: string) => ticks[symbol] ?? null;
   const brokerStreamActive = tickers.some((symbol) => isFreshBrokerStreamTick(ticks[symbol]));
   const feedActive = marketSession.state === "open" || brokerStreamActive;
-  const feedDetail = brokerStreamActive && marketSession.state !== "open"
+  const feedDetail = !isAuthenticated
+    ? "Connect a broker account from the Accounts page to start the market stream."
+    : brokerStreamActive && marketSession.state !== "open"
     ? "Fyers is still sending recent ticks; broker stream activity takes precedence over the regular-session calendar."
     : marketSession.detail;
 
@@ -273,7 +282,7 @@ export default function DashboardPage() {
                 <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${feedActive ? "bg-[var(--color-status-good)]" : "bg-[var(--color-text-muted)]"}`} />
               </span>
               <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                {feedActive ? "Live Feed Active" : marketSession.state === "preopen" ? "Pre-open · Feed Paused" : "Market Closed · Feed Paused"}
+                {!isAuthenticated ? "Not authenticated" : feedActive ? "Live Feed Active" : marketSession.state === "preopen" ? "Pre-open · Feed Paused" : "Market Closed · Feed Paused"}
               </span>
             </div>
           </div>
@@ -301,6 +310,7 @@ export default function DashboardPage() {
                 symbol={sym}
                 tick={getTick(sym)}
                 feedPaused={!feedActive}
+                authenticated={isAuthenticated}
                 onRemove={tickers.length > 1 ? () => removeTicker(sym) : undefined}
               />
             ))}

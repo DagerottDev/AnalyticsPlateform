@@ -15,7 +15,7 @@ def test_settings_migration_is_the_single_alembic_head() -> None:
     config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["0015_open_interest_snapshots"]
+    assert script.get_heads() == ["0016_nse_participant_data"]
 
 
 @pytest.mark.asyncio

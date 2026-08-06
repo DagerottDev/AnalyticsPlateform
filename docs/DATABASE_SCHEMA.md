@@ -77,3 +77,16 @@ Migration: `0011_create_fo_iv_universe_snapshots.py`.
 **Indexes:**
 - composite primary key `(symbol, snapshot_date)`
 - `ix_fo_iv_universe_snapshot_symbol_date` for symbol history and latest-row lookup
+
+## NSE participant snapshots
+
+`nse_participant_snapshots` stores one normalized official NSE participant report per
+`(trade_date, participant_type)`. `nse_participant_import_state` stores the independent importer
+cursor and retry status; it is intentionally separate from broker sessions and user preferences.
+
+| Table | Key columns | Notes |
+|---|---|---|
+| `nse_participant_snapshots` | `trade_date`, `participant_type` | OI and volume long/short metrics for Client, DII, FII/FPI, and Proprietary categories; updated on retry-safe upsert |
+| `nse_participant_import_state` | `source` | Latest successful date, attempt/success timestamps, backfill target/completion, and bounded `last_error` |
+
+Migration: `0016_nse_participant_data.py`.

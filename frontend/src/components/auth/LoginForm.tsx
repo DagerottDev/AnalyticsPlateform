@@ -64,6 +64,7 @@ export function LoginForm() {
   // Toggles for masking secrets
   const [showApiSecret, setShowApiSecret] = useState(false);
   const [showTotpSecret, setShowTotpSecret] = useState(false);
+  const [savedFieldsLoaded, setSavedFieldsLoaded] = useState(false);
 
   // Load from localStorage on mount (hydration safe)
   useEffect(() => {
@@ -83,12 +84,17 @@ export function LoginForm() {
 
       const savedTradingMode = localStorage.getItem(SAVED_LOGIN_KEYS.tradingMode);
       if (savedTradingMode) setTradingMode(savedTradingMode as TradingMode);
+      // Do not let the persistence effect below write the initial empty
+      // React state over the values we just loaded. This guard is especially
+      // important after a refresh, when both effects run during the same
+      // mount cycle.
+      setSavedFieldsLoaded(true);
     }
   }, []);
 
   // Save to localStorage on change
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && savedFieldsLoaded) {
       localStorage.setItem(SAVED_LOGIN_KEYS.loginType, loginType);
       localStorage.setItem(SAVED_LOGIN_KEYS.broker, broker);
       localStorage.setItem(SAVED_LOGIN_KEYS.appId, appId);
@@ -100,7 +106,7 @@ export function LoginForm() {
       localStorage.setItem(SAVED_LOGIN_KEYS.redirectUri, redirectUri);
       localStorage.setItem(SAVED_LOGIN_KEYS.tradingMode, tradingMode);
     }
-  }, [loginType, broker, appId, apiSecret, clientId, totpSecret, pin, dhanAccessToken, redirectUri, tradingMode]);
+  }, [savedFieldsLoaded, loginType, broker, appId, apiSecret, clientId, totpSecret, pin, dhanAccessToken, redirectUri, tradingMode]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

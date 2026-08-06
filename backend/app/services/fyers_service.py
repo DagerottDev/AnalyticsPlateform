@@ -121,6 +121,12 @@ class FyersService(BrokerService):
     # starts with a small gap for every broker session as a final safeguard,
     # even if a client bypasses the UI's limited-concurrency loader.
     _HISTORY_REQUEST_MIN_INTERVAL_SECONDS = 0.25
+    # Every consumer (Option Chain, the websocket seed, the stream fallback,
+    # strategy workspaces) shares the same broker session. Serializing quote
+    # starts prevents their otherwise simultaneous 40-symbol batches from
+    # tripping Fyers' /quotes 429 limit and freezing every visible premium.
+    _QUOTE_REQUEST_MIN_INTERVAL_SECONDS = 0.12
+    _MAX_QUOTE_FETCH_RETRIES = 2
 
     # Fyers returns these codes for an expired/invalid access token.  Keep the
     # mapping here so every REST path can stop retrying the same dead session.
@@ -159,7 +165,6 @@ class FyersService(BrokerService):
         # symbol on page load, so this avoids doubling the Fyers API calls.
         self._instruments_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._no_contract_cache: dict[str, float] = {}
-        self._instruments_rate_limit_until: dict[str, float] = {}
         # symbol -> lock, so concurrent requests for the same symbol (e.g.
         # /instruments and /expiries firing together on page load) coalesce
         # into a single fetch instead of each independently bursting
@@ -169,6 +174,8 @@ class FyersService(BrokerService):
         self._next_option_chain_request_at = 0.0
         self._history_request_lock = asyncio.Lock()
         self._next_history_request_at = 0.0
+        self._quote_request_lock = asyncio.Lock()
+        self._next_quote_request_at = 0.0
         self._market_stream: FyersMarketStreamManager | None = None
 
     def get_market_stream(
@@ -283,17 +290,42 @@ class FyersService(BrokerService):
         # latter into "NSE:NSE:...-EQ", which Fyers rejects.
         fyers_symbols = [to_fyers_ws_symbol(s) for s in symbols]
         try:
-            response = await asyncio.to_thread(
-                self.client.quotes, {"symbols": ",".join(fyers_symbols)}
-            )
+            payload = {"symbols": ",".join(fyers_symbols)}
+            response: dict[str, Any] | None = None
+            for attempt in range(self._MAX_QUOTE_FETCH_RETRIES):
+                response = await self._fetch_quotes_with_pacing(payload)
+                if response and response.get("s") == "ok":
+                    break
+                if (
+                    not response
+                    or response.get("code") != 429
+                    or attempt == self._MAX_QUOTE_FETCH_RETRIES - 1
+                ):
+                    return []
+                await asyncio.sleep(compute_backoff_delay(attempt, self._RETRY_BASE_DELAY_SECONDS))
+
             if not response or response.get("s") != "ok":
                 return []
 
             quotes_list: list[dict[str, Any]] = []
             for item in response.get("d", []):
                 val = item.get("v", {})
-                fyers_sym = item.get("n", "") or val.get("symbol", "")
-                cmd = val.get("cmd", {})
+                if not isinstance(val, dict):
+                    continue
+                # Fyers uses ``cmd`` for two incompatible payload shapes:
+                # some quote responses carry an OHLC mapping there, while
+                # the normal v3 response carries the command/symbol string
+                # (for example ``NSE:NIFTY50-INDEX``).  Treating the latter
+                # as a mapping raises AttributeError and used to discard the
+                # entire quote batch, leaving the Option Chain with no live
+                # seed or REST fallback despite an active broker session.
+                cmd_value = val.get("cmd")
+                cmd = cmd_value if isinstance(cmd_value, dict) else {}
+                fyers_sym = (
+                    item.get("n", "")
+                    or val.get("symbol", "")
+                    or (cmd_value if isinstance(cmd_value, str) else "")
+                )
                 lp = cmd.get("lp") or val.get("lp") or val.get("last_price")
                 if lp is None or not isinstance(lp, int | float):
                     continue
@@ -378,6 +410,18 @@ class FyersService(BrokerService):
             import logging
             logging.getLogger(__name__).error("Failed to fetch Fyers quotes: %s", e)
             return []
+
+    async def _fetch_quotes_with_pacing(self, payload: dict[str, str]) -> dict[str, Any] | None:
+        """Start quote requests at one safe cadence for the broker session."""
+        async with self._quote_request_lock:
+            now = time.monotonic()
+            delay = self._next_quote_request_at - now
+            self._next_quote_request_at = max(now, self._next_quote_request_at) + (
+                self._QUOTE_REQUEST_MIN_INTERVAL_SECONDS
+            )
+            if delay > 0:
+                await asyncio.sleep(delay)
+            return await asyncio.to_thread(self.client.quotes, payload)
 
     @staticmethod
     def _to_fyers_symbol(symbol: str) -> str:
@@ -464,15 +508,6 @@ class FyersService(BrokerService):
         if cached and (now - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
             return cached[1]
 
-        rate_limit_until = self._instruments_rate_limit_until.get(cache_key, 0.0)
-        if rate_limit_until > now:
-            if cached and cached[1]:
-                return cached[1]
-            raise BrokerRateLimitError(
-                "Fyers option-chain request temporarily rate-limited; retry later",
-                retry_after=max(1, int(rate_limit_until - now)),
-            )
-
         lock = self._instruments_locks.setdefault(cache_key, asyncio.Lock())
         async with lock:
             # Re-check: a concurrent caller may have populated the cache
@@ -481,23 +516,16 @@ class FyersService(BrokerService):
             now = time.monotonic()
             if cached and (now - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
                 return cached[1]
-            rate_limit_until = self._instruments_rate_limit_until.get(cache_key, 0.0)
-            if rate_limit_until > now:
-                if cached and cached[1]:
-                    return cached[1]
-                raise BrokerRateLimitError(
-                    "Fyers option-chain request temporarily rate-limited; retry later",
-                    retry_after=max(1, int(rate_limit_until - now)),
-                )
 
+            # No local pre-emptive lockout here — every call is actually sent
+            # to Fyers. A prior rate-limit response no longer blocks the next
+            # attempt on its own; only a fresh 429 from Fyers (handled below)
+            # does that, and only for that one request.
             try:
                 first = await self._fetch_option_chain(symbol, strikecount=1)
             except BrokerAuthError:
                 raise
             except BrokerRateLimitError:
-                self._instruments_rate_limit_until[cache_key] = (
-                    time.monotonic() + self._INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS
-                )
                 if cached and cached[1]:
                     logger.warning(
                         "Fyers option-chain rate limit for %s; serving stale instrument cache",
@@ -537,9 +565,6 @@ class FyersService(BrokerService):
                     raise
                 except BrokerRateLimitError:
                     rate_limited = True
-                    self._instruments_rate_limit_until[cache_key] = (
-                        time.monotonic() + self._INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS
-                    )
                     break
                 except Exception:
                     # Skip an expiry Fyers fails to return (even after
@@ -582,7 +607,6 @@ class FyersService(BrokerService):
                     retry_after=self._INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS,
                 )
 
-            self._instruments_rate_limit_until.pop(cache_key, None)
             self._instruments_cache[cache_key] = (time.monotonic(), instruments)
             return instruments
 

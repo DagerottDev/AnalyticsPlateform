@@ -26,10 +26,6 @@ A production-grade, responsive web platform for Indian options analytics with na
 # Clone and start all services with frontend and backend hot reload
 ./start.sh
 
-# mitmweb opens at http://localhost:8081 and traces app API calls by default.
-# Install once if needed: pipx install mitmproxy
-# Disable tracing for a normal start: MITMWEB_ENABLED=0 ./start.sh
-
 # Or run detached. Rebuild only after changing dependencies or a Dockerfile.
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
 

@@ -103,6 +103,14 @@ class Settings(BaseSettings):
     iv_universe_historical_seed_lookback_days: int = 60
     iv_universe_historical_seed_symbols_per_cycle: int = 12
 
+    # NSE publishes F&O participant-wise OI and volume after the trading day.
+    # This collector is exchange-data based and never uses broker APIs.
+    participant_data_enabled: bool = True
+    participant_data_poll_interval_seconds: float = 1800.0
+    participant_data_history_days: int = 366
+    participant_data_backfill_batch_size: int = 8
+    participant_data_request_delay_seconds: float = 0.5
+
     # Watches open live basket orders for per-leg targets and combined
     # stop-loss/target (see app.services.basket_monitor). Unlike the
     # read-only jobs above, this actively exits real positions, so it polls

@@ -88,7 +88,7 @@ export function Header() {
                   : "bg-[var(--color-text-muted)]"
             )}
           />
-          {isConnected ? "Connected" : isAuthenticated ? "Session Lost" : "Not Connected"}
+          {isConnected ? "Connected" : isAuthenticated ? "Session Lost" : "Not authenticated"}
         </div>
       </div>
 

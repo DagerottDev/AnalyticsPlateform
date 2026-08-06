@@ -53,6 +53,110 @@ async def test_on_connect_flushes_accumulated_subscriptions() -> None:
 
 
 @pytest.mark.asyncio
+async def test_upstream_close_reconnects_same_socket_and_replays_subscriptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Fyers SDK socket that closes must not leave the session stalled.
+
+    The SDK's built-in reconnect loop is bounded and can abandon a socket
+    without invoking OnClose.  The manager owns the retry now — but
+    FyersDataSocket is a process-wide singleton inside the SDK (its
+    ``__new__`` always returns the same object), so it must reconnect by
+    calling ``connect()`` again on the *same* object rather than
+    constructing a second one (which would silently reset the first one's
+    live state instead of replacing it — see fyers_market_stream.py).
+    """
+    socket = MagicMock()
+    connected = {"value": False}
+    socket.is_connected.side_effect = lambda: connected["value"]
+
+    def do_connect() -> None:
+        connected["value"] = True
+        manager._on_connect()
+
+    def do_close() -> None:
+        # Mirrors the real SDK: close_connection() is what clears its
+        # internal __ws_object / is_connected() state, not the on_close
+        # callback firing on its own.
+        connected["value"] = False
+
+    socket.connect.side_effect = do_connect
+    socket.close_connection.side_effect = do_close
+
+    with patch("app.services.fyers_market_stream.data_ws.FyersDataSocket") as mock_cls:
+        mock_cls.return_value = socket
+        manager = FyersMarketStreamManager(app_id="TESTAPP-100", access_token="fake-token")
+        manager.bind_loop()
+        monkeypatch.setattr(manager, "_RECONNECT_BASE_DELAY_SECONDS", 0.01)
+        monkeypatch.setattr(manager, "_RECONNECT_MAX_DELAY_SECONDS", 0.01)
+
+        await asyncio.to_thread(manager.subscribe, ["NSE:NIFTY50-INDEX", "NSE:RELIANCE-EQ"])
+        socket.subscribe.reset_mock()
+
+        manager._on_close({"code": 1006, "message": "network drop"})
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if socket.subscribe.call_count:
+                break
+
+        assert mock_cls.call_count == 1  # never reconstructed — same singleton object
+        assert mock_cls.call_args.kwargs["reconnect"] is False
+        assert mock_cls.call_args.kwargs["litemode"] is True
+        socket.close_connection.assert_called_once()
+        assert socket.connect.call_count == 2  # initial connect + reconnect
+        socket.subscribe.assert_called_once_with(
+            symbols=["NSE:NIFTY50-INDEX", "NSE:RELIANCE-EQ"], data_type="SymbolUpdate"
+        )
+        manager.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_initial_connect_is_retried_on_the_same_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An OnError that fires before the first refcount must still recover,
+    by retrying connect() on the one socket object the manager owns rather
+    than constructing a second (see the reconnect test above for why)."""
+    socket = MagicMock()
+    connected = {"value": False}
+    socket.is_connected.side_effect = lambda: connected["value"]
+    attempts = {"count": 0}
+
+    def do_connect() -> None:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return  # first attempt: simulate it failing before on_connect
+        connected["value"] = True
+        manager._on_connect()
+
+    socket.connect.side_effect = do_connect
+
+    with patch("app.services.fyers_market_stream.data_ws.FyersDataSocket") as mock_cls:
+        mock_cls.return_value = socket
+        manager = FyersMarketStreamManager(app_id="TESTAPP-100", access_token="fake-token")
+        manager.bind_loop()
+        monkeypatch.setattr(manager, "_RECONNECT_BASE_DELAY_SECONDS", 0.01)
+        monkeypatch.setattr(manager, "_RECONNECT_MAX_DELAY_SECONDS", 0.01)
+
+        await asyncio.to_thread(manager.subscribe, ["NSE:NIFTY50-INDEX"])
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+            if socket.subscribe.call_count:
+                break
+
+        assert mock_cls.call_count == 1
+        # The first connect attempt never completed the handshake (never
+        # went through close_connection's is_connected() guard), so the
+        # teardown before retrying must join the stale ws_thread instead.
+        socket.close_connection.assert_not_called()
+        socket.ws_thread.join.assert_called_once_with(timeout=5.0)
+        socket.subscribe.assert_called_once_with(
+            symbols=["NSE:NIFTY50-INDEX"], data_type="SymbolUpdate"
+        )
+        manager.close()
+
+
+@pytest.mark.asyncio
 async def test_subscribe_after_connect_calls_socket_directly_for_new_symbols() -> None:
     with patch("app.services.fyers_market_stream.data_ws.FyersDataSocket") as mock_cls:
         mock_socket = MagicMock()
@@ -86,7 +190,8 @@ async def test_second_subscriber_for_same_symbol_does_not_resubscribe_upstream()
 
 
 @pytest.mark.asyncio
-async def test_unsubscribe_only_drops_upstream_when_refcount_hits_zero() -> None:
+async def test_unsubscribe_drops_local_refcount_without_corrupting_upstream_socket() -> None:
+    """Fyers SDK unsubscribe has a state-corruption bug; reconnect reclaims it."""
     with patch("app.services.fyers_market_stream.data_ws.FyersDataSocket") as mock_cls:
         mock_socket = MagicMock()
         mock_cls.return_value = mock_socket
@@ -99,9 +204,8 @@ async def test_unsubscribe_only_drops_upstream_when_refcount_hits_zero() -> None
         mock_socket.unsubscribe.assert_not_called()  # still one listener left
 
         manager.unsubscribe(["NSE:NIFTY50-INDEX"])
-        mock_socket.unsubscribe.assert_called_once_with(
-            symbols=["NSE:NIFTY50-INDEX"], data_type="SymbolUpdate"
-        )
+        mock_socket.unsubscribe.assert_not_called()
+        assert manager._refcounts == {}
 
 
 @pytest.mark.asyncio

@@ -40,13 +40,21 @@ async def test_rate_limit_returns_429_and_retry_headers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_quote_snapshots_have_a_separate_budget_from_broker_reads() -> None:
+async def test_broker_facing_routes_are_exempt_from_the_local_cap() -> None:
+    """Only Fyers gets to decide when its own endpoints are too busy.
+
+    /market/quotes ("quotes" bucket) and /market/history ("broker" bucket)
+    both reach the broker, so this middleware must never 429 them itself —
+    FyersService surfaces the broker's real rate-limit responses instead.
+    Routes with no broker round-trip (static symbol search, health) are
+    unaffected either way.
+    """
     app = FastAPI()
     app.add_middleware(
         RateLimitMiddleware,
         settings=Settings(
             api_rate_limit_broker_requests=1,
-            api_rate_limit_quote_requests=2,
+            api_rate_limit_quote_requests=1,
             api_rate_limit_default_requests=1,
         ),
     )
@@ -69,13 +77,14 @@ async def test_quote_snapshots_have_a_separate_budget_from_broker_reads() -> Non
 
     transport = ASGITransport(app=app, client=("198.51.100.2", 50000))
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        assert (await client.get("/api/v1/market/quotes")).status_code == 200
-        assert (await client.get("/api/v1/market/quotes")).status_code == 200
-        assert (await client.get("/api/v1/market/quotes")).status_code == 429
-        assert (await client.get("/api/v1/market/history")).status_code == 200
-        assert (await client.get("/api/v1/market/history")).status_code == 429
-        # Static autocomplete uses the normal API bucket, not broker quota.
+        # Well past either budget of 1 — still never locally capped.
+        for _ in range(3):
+            assert (await client.get("/api/v1/market/quotes")).status_code == 200
+        for _ in range(3):
+            assert (await client.get("/api/v1/market/history")).status_code == 200
+        # Static autocomplete uses the normal API bucket, which still applies.
         assert (await client.get("/api/v1/market/symbols/search")).status_code == 200
+        assert (await client.get("/api/v1/market/symbols/search")).status_code == 429
         assert (await client.get("/api/v1/health")).status_code == 200
         assert (await client.get("/api/v1/health")).status_code == 200
 

@@ -26,7 +26,7 @@ import { MarketTick } from "@/types/market";
  * because the user looked at another page.
  */
 export function TickerFeedMount() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const tickers = useTickerStore((state) => state.tickers);
   const replayIsActive = useReplayStore((state) => state.isActive);
   const replayTicks = useReplayStore((state) => state.currentTicks);
@@ -54,24 +54,26 @@ export function TickerFeedMount() {
   }, [replayIsActive, replayTicks]);
 
   useEffect(() => {
-    const ws = getWebSocket();
-    const requestedSymbols = user?.client_id && !replayIsActive
+    const requestedSymbols = token && user?.client_id && !replayIsActive
       ? tickers
       : [];
 
     const removedSymbols = prevSymbols.current.filter((s) => !requestedSymbols.includes(s));
-    if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
 
     const addedSymbols = requestedSymbols.filter((s) => !prevSymbols.current.includes(s));
-    if (addedSymbols.length > 0) {
-      ws.subscribeMany(addedSymbols, handleTick);
-      // The shared websocket sends an immediate broker snapshot and keeps a
-      // per-session fallback poll running. Do not duplicate it with a REST
-      // request for every mount/navigation.
+    if (prevSymbols.current.length > 0 || addedSymbols.length > 0) {
+      const ws = getWebSocket();
+      if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
+      if (addedSymbols.length > 0) {
+        ws.subscribeMany(addedSymbols, handleTick);
+        // The shared websocket sends an immediate broker snapshot and keeps a
+        // per-session fallback poll running. Do not duplicate it with a REST
+        // request for every mount/navigation.
+      }
     }
 
     prevSymbols.current = requestedSymbols;
-  }, [tickers, user?.client_id, replayIsActive, handleTick]);
+  }, [tickers, token, user?.client_id, replayIsActive, handleTick]);
 
   return null;
 }

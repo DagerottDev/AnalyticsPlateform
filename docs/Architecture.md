@@ -19,8 +19,10 @@
 - PostgreSQL with TimescaleDB stores historical OHLCV, daily volatility snapshots, and the
   F&O IV-universe snapshots consumed by the screener. A bounded background worker refreshes
   current-day ATM-IV rows and, when the broker supports option candles (currently Fyers),
-  seeds prior true ATM-IV observations. Redis supports token revocation and is provisioned
-  through Docker Compose.
+  seeds prior true ATM-IV observations. A separate broker-independent participant worker reads
+  official NSE HTTPS archive reports, persists daily OI/volume snapshots, and records retry state
+  without fabricating intraday values. Redis supports token revocation and is provisioned through
+  Docker Compose.
 
 ## Deployment
 

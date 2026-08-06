@@ -11,3 +11,7 @@ from app.models.live_basket import LiveBasketRecord  # noqa
 from app.models.gtt_order import GttOrderRecord  # noqa
 from app.models.user_preferences import UserPreferencesRecord  # noqa
 from app.models.open_interest_snapshot import OpenInterestSnapshot  # noqa
+from app.models.nse_participant_snapshot import (  # noqa
+    NseParticipantImportState,
+    NseParticipantSnapshot,
+)

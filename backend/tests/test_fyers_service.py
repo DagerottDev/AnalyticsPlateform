@@ -509,11 +509,15 @@ async def test_persistent_rate_limit_uses_typed_error_without_cached_instruments
 
     assert raised.value.retry_after == FyersService._INSTRUMENTS_RATE_LIMIT_COOLDOWN_SECONDS
 
-    with pytest.raises(BrokerRateLimitError):
+    with (
+        patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()),
+        pytest.raises(BrokerRateLimitError),
+    ):
         await service.get_instruments("NIFTY")
-    # Once the broker has told us to back off, a follow-up page request must
-    # not spend another three calls while the cooldown is still active.
-    assert service.client.optionchain.call_count == FyersService._MAX_FETCH_RETRIES
+    # There is no local cooldown gate anymore — only Fyers decides. A
+    # follow-up request must actually ask the broker again rather than being
+    # rejected locally from a cached "still cooling down" timer.
+    assert service.client.optionchain.call_count == 2 * FyersService._MAX_FETCH_RETRIES
 
 
 @pytest.mark.asyncio
@@ -540,6 +544,55 @@ async def test_get_quotes_does_not_double_prefix_already_qualified_symbols() -> 
     service.client.quotes.assert_called_once_with(
         {"symbols": "NSE:RELIANCE-EQ,NSE:NIFTY26JUL23000PE"}
     )
+
+
+@pytest.mark.asyncio
+async def test_get_quotes_accepts_fyers_string_cmd_payload() -> None:
+    """The common Fyers v3 quote response stores ``cmd`` as a symbol string.
+
+    It is not an OHLC mapping. The parser must still return the quote instead
+    of throwing while attempting ``cmd.get(...)`` and losing the entire batch.
+    """
+    service = _make_service()
+    service.client.quotes = MagicMock(
+        return_value={
+            "s": "ok",
+            "d": [{
+                "v": {
+                    "cmd": "NSE:NIFTY50-INDEX",
+                    "lp": 24_550.5,
+                    "ch": 50.25,
+                    "chp": 0.21,
+                    "volume": 123,
+                },
+            }],
+        }
+    )
+
+    quotes = await service.get_quotes(["NIFTY"])
+
+    assert len(quotes) == 1
+    assert quotes[0]["trading_symbol"] == "NIFTY"
+    assert quotes[0]["last_price"] == 24_550.5
+    assert quotes[0]["volume"] == 123
+
+
+@pytest.mark.asyncio
+async def test_get_quotes_retries_a_rate_limited_batch() -> None:
+    """A transient /quotes 429 must not freeze the live option chain."""
+    service = _make_service()
+    service.client.quotes = MagicMock(
+        side_effect=[
+            {"s": "error", "code": 429, "message": "request limit reached"},
+            {"s": "ok", "d": [{"n": "NSE:NIFTY50-INDEX", "v": {"lp": 24_550.0}}]},
+        ]
+    )
+
+    with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()):
+        quotes = await service.get_quotes(["NIFTY"])
+
+    assert service.client.quotes.call_count == 2
+    assert quotes[0]["trading_symbol"] == "NIFTY"
 
 
 @pytest.mark.asyncio

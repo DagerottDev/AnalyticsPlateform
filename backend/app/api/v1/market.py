@@ -357,7 +357,9 @@ async def market_ws(
 
     Protocol (JSON text frames):
       client -> server: {"action": "subscribe" | "unsubscribe", "symbols": [...]}
-      server -> client: {"type": "tick", "data": {...}} | {"type": "info", "message": "..."}
+      client -> server: {"action": "ping"}
+      server -> client: {"type": "tick", "data": {...}} | {"type": "pong"}
+        | {"type": "info", "message": "..."}
     """
     try:
         payload = decode_token(token)
@@ -411,6 +413,15 @@ async def market_ws(
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("action") == "ping":
+                # Keep idle browser/intermediary connections alive without
+                # involving the broker stream.  The frontend sends this
+                # heartbeat after every successful open and still relies on
+                # the normal close/error path for reconnect scheduling.
+                await websocket.send_json({"type": "pong"})
+                continue
             symbols = msg.get("symbols") or []
             if not symbols:
                 continue
@@ -454,6 +465,19 @@ async def market_ws(
     async def writer() -> None:
         while True:
             message = await queue.get()
+            # The Fyers SDK cannot safely unsubscribe an individual symbol
+            # on every React unmount (see FyersMarketStreamManager). A symbol
+            # may therefore remain upstream until its next reconnect. Never
+            # forward those dormant stream frames to this browser connection.
+            upstream_symbol = message.get("symbol") or message.get("trading_symbol")
+            if isinstance(upstream_symbol, str):
+                expected_symbol = (
+                    to_fyers_ws_symbol(upstream_symbol)
+                    if isinstance(service, FyersService)
+                    else upstream_symbol
+                )
+                if expected_symbol not in subscribed:
+                    continue
             if isinstance(service, FyersService) and "symbol" in message and "ltp" in message:
                 # Raw live-tick shape from the Fyers websocket — translate the
                 # upstream-qualified symbol back to what the frontend

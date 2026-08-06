@@ -1,5 +1,74 @@
-import { describe, it, expect } from "vitest";
-import { normalizeTick } from "../lib/websocket";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MarketWebSocketClient, normalizeTick } from "../lib/websocket";
+
+class FakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  static readonly instances: FakeWebSocket[] = [];
+
+  readonly url: string;
+  readonly sent: string[] = [];
+  readyState = FakeWebSocket.CONNECTING;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onclose: ((event: { code: number; reason: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  constructor(url: string) {
+    this.url = url;
+    FakeWebSocket.instances.push(this);
+  }
+
+  send(message: string): void {
+    this.sent.push(message);
+  }
+
+  open(): void {
+    this.readyState = FakeWebSocket.OPEN;
+    this.onopen?.();
+  }
+
+  emitClose(code: number, reason = ""): void {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.onclose?.({ code, reason });
+  }
+
+  close(code = 1000, reason = ""): void {
+    this.emitClose(code, reason);
+  }
+}
+
+function createMemoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => void values.set(key, value),
+    removeItem: (key) => void values.delete(key),
+    clear: () => values.clear(),
+    key: (index) => Array.from(values.keys())[index] ?? null,
+    get length() {
+      return values.size;
+    },
+  };
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  FakeWebSocket.instances.length = 0;
+  vi.stubGlobal("localStorage", createMemoryStorage());
+  localStorage.setItem(
+    "auth-storage",
+    JSON.stringify({ state: { token: "test-token" } }),
+  );
+  vi.stubGlobal("WebSocket", FakeWebSocket);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("normalizeTick", () => {
   it("normalizes an already-quote-shaped message (from the REST quotes poller)", () => {
@@ -56,5 +125,63 @@ describe("normalizeTick", () => {
     expect(normalizeTick({})).toBeNull();
     expect(normalizeTick({ symbol: "NIFTY" })).toBeNull(); // no ltp
     expect(normalizeTick({ ltp: 100 })).toBeNull(); // no symbol
+  });
+});
+
+describe("MarketWebSocketClient lifecycle", () => {
+  it("stays idle without an auth token instead of logging a transport failure", () => {
+    localStorage.removeItem("auth-storage");
+
+    const client = new MarketWebSocketClient();
+    client.subscribeMany(["NSE:NIFTY50-INDEX"], () => undefined);
+    vi.advanceTimersByTime(30_000);
+
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    client.destroy();
+  });
+
+  it("reconnects after an unexpected close and replays all subscriptions", () => {
+    const client = new MarketWebSocketClient();
+    client.subscribeMany(["NSE:NIFTY50-INDEX"], () => undefined);
+
+    const firstSocket = FakeWebSocket.instances[0];
+    firstSocket.open();
+    expect(firstSocket.sent).toEqual([
+      JSON.stringify({ action: "subscribe", symbols: ["NSE:NIFTY50-INDEX"] }),
+    ]);
+
+    firstSocket.emitClose(1006, "network drop");
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+
+    const replacementSocket = FakeWebSocket.instances[1];
+    replacementSocket.open();
+    expect(replacementSocket.sent).toEqual([
+      JSON.stringify({ action: "subscribe", symbols: ["NSE:NIFTY50-INDEX"] }),
+    ]);
+
+    client.destroy();
+  });
+
+  it("suspends on pagehide and resumes the retained subscription set on pageshow", () => {
+    const client = new MarketWebSocketClient();
+    client.subscribeMany(["NSE:NIFTY50-INDEX"], () => undefined);
+    const firstSocket = FakeWebSocket.instances[0];
+    firstSocket.open();
+
+    window.dispatchEvent(new Event("pagehide"));
+    window.dispatchEvent(new Event("pageshow"));
+    vi.advanceTimersByTime(0);
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    const replacementSocket = FakeWebSocket.instances[1];
+    replacementSocket.open();
+    expect(replacementSocket.sent).toContain(
+      JSON.stringify({ action: "subscribe", symbols: ["NSE:NIFTY50-INDEX"] }),
+    );
+
+    client.destroy();
   });
 });

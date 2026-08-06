@@ -24,6 +24,7 @@ from app.services.broker_session_store import restore_broker_session
 from app.services.gtt_monitor import gtt_monitor_loop
 from app.services.iv_universe_backfill import iv_universe_backfill_loop
 from app.services.market_data_backfill import market_data_backfill_loop
+from app.services.nse_participant_backfill import participant_data_loop
 from app.services.open_interest_snapshots import open_interest_snapshot_loop
 from app.services.session_manager import session_manager
 
@@ -85,6 +86,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             open_interest_snapshot_loop(settings, open_interest_stop_event),
             name="open-interest-snapshots",
         )
+    participant_data_stop_event = asyncio.Event()
+    participant_data_task: asyncio.Task[None] | None = None
+    if settings.participant_data_enabled:
+        participant_data_task = asyncio.create_task(
+            participant_data_loop(settings, participant_data_stop_event),
+            name="nse-participant-data",
+        )
     yield
     # Shutdown
     backfill_stop_event.set()
@@ -104,6 +112,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     open_interest_stop_event.set()
     if open_interest_task is not None:
         await open_interest_task
+    participant_data_stop_event.set()
+    if participant_data_task is not None:
+        await participant_data_task
     await session_manager.clear()
     logger.info("Shutting down %s", settings.app_title)
 

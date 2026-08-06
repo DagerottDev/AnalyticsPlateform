@@ -12,7 +12,7 @@ import {
   ChartIndicatorId,
   createDefaultChartIndicators,
 } from "@/lib/chartIndicators";
-import { Instrument } from "@/types/market";
+import { Instrument, type MarketTick } from "@/types/market";
 import { getInstruments, getHistoricalCandles, getMarketQuotes } from "@/lib/market";
 import { useSettingsStore, type ChartTimeframe } from "@/stores/settingsStore";
 import { Card } from "@/components/ui/Card";
@@ -26,8 +26,10 @@ import { Select } from "@/components/ui/Select";
 import { defaultSpotFallback, nearestStrikeTo } from "@/lib/optionMath";
 import { formatStrikeWithPosition } from "@/lib/strikePositions";
 import { quoteLastPrice } from "@/lib/marketTick";
+import { combinePremiumCandles, combinedLivePremium } from "@/lib/combinedPremium";
 
 type OptionType = "CE" | "PE";
+type ChartMode = "single" | "combined";
 type SelectedOption = Instrument & { strike: number; option_type: OptionType };
 const FALLBACK_CHART_PREFERENCES = {
   timeframe: "1" as const,
@@ -45,6 +47,7 @@ export default function ChartsPage() {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>(chartPreferences.timeframe);
   const [expiry, setExpiry] = useState<string | null>(null);
   const [optionType, setOptionType] = useState<OptionType>("CE");
+  const [chartMode, setChartMode] = useState<ChartMode>("single");
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
   const [snapshotSpot, setSnapshotSpot] = useState<number | null>(null);
   // A picker selection is deliberately seeded from ATM, but a user's choice
@@ -93,7 +96,10 @@ export default function ChartsPage() {
     () => Array.from(new Set([...tradingSymbols, symbol])),
     [symbol, tradingSymbols]
   );
-  const { getTick } = useMarketData(allSymbols); // Subscribe to options + underlying
+  const { getTick, ticks: marketTicks } = useMarketData(allSymbols); // Subscribe to options + underlying
+  // Keep chart rendering safe while the market-data hook is booting (and for
+  // lightweight test/offline adapters that only provide getTick).
+  const ticks = marketTicks ?? {};
   const underlyingTick = getTick(symbol);
   const spot = underlyingTick?.last_price && underlyingTick.last_price > 0
     ? underlyingTick.last_price
@@ -113,8 +119,30 @@ export default function ChartsPage() {
       instrument.strike === activeStrike && instrument.option_type === optionType
     ) ?? null;
   }, [activeStrike, instruments, optionType]);
-  const chartSymbol = selectedOption?.trading_symbol ?? symbol;
-  const chartLabel = selectedOption
+  const selectedCall = useMemo<SelectedOption | null>(() => {
+    if (activeStrike === null) return null;
+    return instruments.find((instrument): instrument is SelectedOption => (
+      instrument.strike === activeStrike && instrument.option_type === "CE"
+    )) ?? null;
+  }, [activeStrike, instruments]);
+  const selectedPut = useMemo<SelectedOption | null>(() => {
+    if (activeStrike === null) return null;
+    return instruments.find((instrument): instrument is SelectedOption => (
+      instrument.strike === activeStrike && instrument.option_type === "PE"
+    )) ?? null;
+  }, [activeStrike, instruments]);
+  const combinedSymbols = useMemo(
+    () => selectedCall && selectedPut ? [selectedCall.trading_symbol, selectedPut.trading_symbol] : [],
+    [selectedCall, selectedPut],
+  );
+  const chartSymbols = useMemo(
+    () => chartMode === "combined" ? combinedSymbols : [selectedOption?.trading_symbol ?? symbol],
+    [chartMode, combinedSymbols, selectedOption, symbol],
+  );
+  const chartSymbol = chartSymbols[0] ?? symbol;
+  const chartLabel = chartMode === "combined" && activeStrike !== null
+    ? `${symbol} ${activeStrike.toLocaleString("en-IN")} CE + PE · ${expiry}`
+    : selectedOption
     ? `${symbol} ${selectedOption.strike} ${selectedOption.option_type} · ${expiry}`
     : symbol;
 
@@ -190,7 +218,13 @@ export default function ChartsPage() {
   // Load Historical OHLCV for Chart
   useEffect(() => {
     let isMounted = true;
-    if (!chartSymbol) return;
+    if (chartSymbols.length === 0) {
+      setLoading(false);
+      setChartError(null);
+      setHistoricalData([]);
+      setChartEmptyMessage("Both the Call and Put contract are required for a combined premium chart.");
+      return;
+    }
 
     async function fetchHistorical() {
       setLoading(true);
@@ -198,31 +232,43 @@ export default function ChartsPage() {
       setChartEmptyMessage(null);
       setHistoricalData([]);
       try {
-        // Pulled directly from the broker. When a strike is selected,
-        // chartSymbol is that exact exchange-qualified option contract, so
-        // this is real option OHLCV rather than a synthetic premium series.
+        // Individual charts use one broker instrument. Combined mode sums
+        // matching CE and PE candles from the selected strike; it is a
+        // transparent synthetic premium, not an exchange-traded instrument.
         const rangeTo = new Date();
         const rangeFrom = new Date(rangeTo);
         rangeFrom.setDate(rangeFrom.getDate() - chartPreferences.historyDays);
         const toIso = (d: Date) => d.toISOString().slice(0, 10);
 
-        const candles = await getHistoricalCandles(chartSymbol, toIso(rangeFrom), toIso(rangeTo), timeframe);
+        const candleSets = await Promise.all(chartSymbols.map((requestedSymbol) => (
+          getHistoricalCandles(requestedSymbol, toIso(rangeFrom), toIso(rangeTo), timeframe)
+        )));
         if (isMounted) {
+          const candles = chartMode === "combined"
+            ? combinePremiumCandles(candleSets.map((series) => series.map((candle) => ({
+              time: candle.timestamp,
+              open: candle.open,
+              high: candle.high,
+              low: candle.low,
+              close: candle.close,
+              volume: candle.volume,
+            }))))
+            : candleSets[0].map((candle) => ({
+              time: candle.timestamp,
+              open: candle.open,
+              high: candle.high,
+              low: candle.low,
+              close: candle.close,
+              volume: candle.volume,
+            }));
           if (candles.length > 0) {
-            setHistoricalData(
-              candles.map((c) => ({
-                time: c.timestamp,
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close,
-                volume: c.volume,
-              }))
-            );
+            setHistoricalData(candles);
           } else {
             setHistoricalData([]);
             setChartEmptyMessage(
-              selectedOption
+              chartMode === "combined"
+                ? "No matching broker candles were returned for both legs of this combined premium."
+                : selectedOption
                 ? "No real historical data was returned by the broker for this option contract."
                 : "No historical data was returned for this symbol."
             );
@@ -241,10 +287,37 @@ export default function ChartsPage() {
     fetchHistorical();
 
     return () => { isMounted = false; };
-  }, [chartPreferences.historyDays, chartSymbol, selectedOption, timeframe]);
+  }, [chartMode, chartPreferences.historyDays, chartSymbols, selectedOption, timeframe]);
 
   // The active chart instrument receives live updates on top of broker history.
-  const chartTick = getTick(chartSymbol);
+  const singleChartTick = getTick(chartSymbol);
+  const combinedPremium = chartMode === "combined" ? combinedLivePremium(combinedSymbols, ticks) : null;
+  const combinedTimestamp = combinedSymbols.reduce(
+    (latest, requestedSymbol) => Math.max(latest, ticks[requestedSymbol]?.timestamp ?? 0),
+    0,
+  );
+  const combinedStreamTimestamps = combinedSymbols.map((requestedSymbol) => {
+    const tick = ticks[requestedSymbol];
+    return tick && "last_stream_timestamp" in tick ? tick.last_stream_timestamp : undefined;
+  });
+  const combinedLastStreamTimestamp = combinedStreamTimestamps.every(
+    (timestamp) => typeof timestamp === "number" && timestamp > 0,
+  ) ? Math.min(...combinedStreamTimestamps as number[]) : undefined;
+  const combinedFeed: MarketTick["feed"] = combinedSymbols.every((requestedSymbol) => {
+    const tick = ticks[requestedSymbol];
+    return tick && "feed" in tick && tick.feed === "stream";
+  }) ? "stream" : "snapshot";
+  const chartTick = chartMode === "combined" && combinedPremium !== null ? {
+    trading_symbol: `${symbol}:COMBINED_PREMIUM`,
+    last_price: combinedPremium,
+    volume: 0,
+    open_interest: 0,
+    timestamp: combinedTimestamp,
+    change: 0,
+    change_percent: 0,
+    feed: combinedFeed,
+    last_stream_timestamp: combinedLastStreamTimestamp,
+  } : singleChartTick;
   const liveChartTick = chartTick ? { price: chartTick.last_price, timestamp: chartTick.timestamp } : null;
 
   const handleSymbolChange = (nextSymbol: string) => {
@@ -252,6 +325,7 @@ export default function ChartsPage() {
     setExpiry(null);
     setInstruments([]);
     setSelectedStrike(null);
+    setChartMode("single");
     strikePickerTouchedRef.current = false;
     autoSelectedStrikeRef.current = null;
   };
@@ -260,6 +334,7 @@ export default function ChartsPage() {
     setExpiry(nextExpiry);
     setInstruments([]);
     setSelectedStrike(null);
+    setChartMode("single");
     strikePickerTouchedRef.current = false;
     autoSelectedStrikeRef.current = null;
   };
@@ -305,6 +380,21 @@ export default function ChartsPage() {
                 ))}
               </Select>
               <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Reloads broker OHLCV candles.</p>
+            </div>
+            <div className="min-w-40 flex-1">
+              <label htmlFor="chart-mode" className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
+                Chart data
+              </label>
+              <Select
+                id="chart-mode"
+                value={chartMode}
+                onChange={(event) => setChartMode(event.target.value as ChartMode)}
+                disabled={!expiry || instruments.length === 0}
+              >
+                <option value="single">Single contract</option>
+                <option value="combined" disabled={!selectedCall || !selectedPut}>Combined CE + PE</option>
+              </Select>
+              <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Sums both premium legs at the selected strike.</p>
             </div>
             <div className="min-w-40 flex-1">
               <label htmlFor="chart-option-type" className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
@@ -357,7 +447,11 @@ export default function ChartsPage() {
               </p>
             </div>
             <p className="max-w-64 text-xs leading-5 text-[var(--color-text-secondary)]">
-              {selectedOption
+              {chartMode === "combined"
+                ? activeStrike === null
+                  ? "Choose a strike to chart the combined Call + Put premium."
+                  : "Charting a synthetic CE + PE premium from matching broker candles and live leg prices."
+                : selectedOption
                 ? `Charting real broker OHLCV for ${selectedOption.strike.toLocaleString()} ${selectedOption.option_type}.`
                 : "Select a strike to chart that option contract's real broker OHLCV."}
             </p>

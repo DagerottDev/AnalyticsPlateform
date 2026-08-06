@@ -117,47 +117,94 @@ export function normalizeTick(raw: RawFyersTick): MarketTick | null {
  * Reconnects with backoff on drop, and re-subscribes to everything that
  * had listeners once the connection (re)opens.
  */
-class MarketWebSocketClient {
+export class MarketWebSocketClient {
   private ws: WebSocket | null = null;
   private subscribers: Map<string, Set<TickHandler>> = new Map();
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
-  private noTokenLogged = false;
-  private readonly handlePageHide = (event: PageTransitionEvent) => {
-    // Keep the connection if the browser places the page in the back/forward
-    // cache; a real unload/reload should close it cleanly.
-    if (!event.persisted) this.destroy();
+  private suspended = false;
+  private readonly handlePageHide = () => {
+    // Do not permanently destroy the singleton on pagehide.  Mobile browsers
+    // and bfcache transitions can emit pagehide while the React tree remains
+    // mounted; destroying here used to leave the shared client in a terminal
+    // state with no way for TickerFeedMount to recreate it.  Suspend the
+    // transport, retain subscriptions, and resume it from pageshow instead.
+    this.suspended = true;
+    this.stopHeartbeat();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const ws = this.ws;
+    this.ws = null;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      ws.close(1000, "Page hidden");
+    }
+  };
+  private readonly handlePageShow = () => {
+    this.suspended = false;
+    if (!this.destroyed && this.subscribers.size > 0 && !this.ws) {
+      this.scheduleReconnect(0);
+    }
+  };
+  private readonly handleVisibilityChange = () => {
+    if (typeof document !== "undefined" && document.visibilityState === "visible") {
+      this.handlePageShow();
+    }
   };
 
   constructor() {
     if (typeof window !== "undefined") {
-      // A browser reload otherwise reports the old socket as code 1006 before
-      // the replacement page has a chance to establish its new connection.
       window.addEventListener("pagehide", this.handlePageHide);
+      window.addEventListener("pageshow", this.handlePageShow);
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", this.handleVisibilityChange);
     }
     this.connect();
   }
 
   private connect(): void {
-    if (this.destroyed) return;
+    if (this.destroyed || this.suspended) return;
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+    this.ws = null;
     const token = getAuthToken();
     if (!token) {
-      if (!this.noTokenLogged) {
-        this.noTokenLogged = true;
-        logWsFailure("Market stream: no auth token found yet — will retry.", null);
-      }
+      // Authentication is a normal prerequisite, not a transport failure.
+      // Hooks subscribe only after auth hydration/login, so waiting here must
+      // not create a reconnect timer or pollute the API-failure log on every
+      // unauthenticated page reload.
+      return;
+    }
+
+    const url = `${toWebSocketUrl(API_URL_WITH_VERSION)}/market/ws?token=${encodeURIComponent(token)}`;
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch (error) {
+      // Some browsers throw synchronously for malformed URLs or a transport
+      // that is unavailable.  Treat that exactly like an asynchronous close
+      // so a transient failure cannot permanently stop the stream.
+      logWsFailure(
+        "Market stream could not be opened; retrying.",
+        null,
+        error instanceof Error ? error.message : String(error),
+      );
       this.scheduleReconnect();
       return;
     }
-    this.noTokenLogged = false;
-
-    const url = `${toWebSocketUrl(API_URL_WITH_VERSION)}/market/ws?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(url);
     this.ws = ws;
 
     ws.onopen = () => {
       this.reconnectAttempts = 0;
+      this.startHeartbeat();
       const symbols = Array.from(this.subscribers.keys());
       if (symbols.length > 0) {
         this.send({ action: "subscribe", symbols });
@@ -184,12 +231,17 @@ class MarketWebSocketClient {
     ws.onclose = (event) => {
       // A late close event from an older socket must not clear a newer one.
       const isCurrentSocket = this.ws === ws;
-      if (isCurrentSocket) this.ws = null;
+      if (isCurrentSocket) {
+        this.ws = null;
+        this.stopHeartbeat();
+      }
       if (!this.destroyed && event.code !== 1000) {
         const reason = WS_CLOSE_REASONS[event.code] || event.reason || "Connection closed unexpectedly.";
         logWsFailure(`Market stream disconnected (code ${event.code}): ${reason}`, event.code);
       }
-      if (isCurrentSocket) this.scheduleReconnect();
+      if (isCurrentSocket && !this.suspended && this.subscribers.size > 0) {
+        this.scheduleReconnect();
+      }
     };
 
     ws.onerror = () => {
@@ -200,9 +252,10 @@ class MarketWebSocketClient {
     };
   }
 
-  private scheduleReconnect(): void {
-    if (this.destroyed || this.reconnectTimer) return;
-    const delay = Math.min(1000 * 2 ** this.reconnectAttempts, MAX_RECONNECT_DELAY_MS);
+  private scheduleReconnect(delayOverrideMs?: number): void {
+    if (this.destroyed || this.suspended || this.reconnectTimer) return;
+    const delay =
+      delayOverrideMs ?? Math.min(1000 * 2 ** this.reconnectAttempts, MAX_RECONNECT_DELAY_MS);
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -213,6 +266,23 @@ class MarketWebSocketClient {
   private send(message: Record<string, unknown>): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    // A small application-level heartbeat prevents an idle intermediary from
+    // silently dropping the browser socket.  The backend answers with pong;
+    // reconnect still relies on the normal close/error events.
+    this.heartbeatTimer = setInterval(() => {
+      this.send({ action: "ping" });
+    }, 20_000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
   }
 
@@ -232,7 +302,13 @@ class MarketWebSocketClient {
       this.subscribers.get(symbol)!.add(handler);
       if (isNewSymbol) newSymbols.push(symbol);
     }
-    if (newSymbols.length > 0) this.send({ action: "subscribe", symbols: newSymbols });
+    if (newSymbols.length > 0) {
+      // TickerFeedMount can subscribe while the previous socket is still
+      // connecting, or after a close event cleared it.  Ensure a transport is
+      // scheduled before sending; onopen will replay the complete set too.
+      if (!this.ws && !this.reconnectTimer) this.connect();
+      this.send({ action: "subscribe", symbols: newSymbols });
+    }
   }
 
   unsubscribeMany(symbols: string[], handler: TickHandler): void {
@@ -251,16 +327,31 @@ class MarketWebSocketClient {
 
   destroy(): void {
     this.destroyed = true;
+    this.suspended = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.stopHeartbeat();
     this.ws?.close();
+    this.ws = null;
     this.subscribers.clear();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("pagehide", this.handlePageHide);
+      window.removeEventListener("pageshow", this.handlePageShow);
+    }
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    }
+  }
+
+  isDestroyed(): boolean {
+    return this.destroyed;
   }
 }
 
 let instance: MarketWebSocketClient | null = null;
 
 export function getWebSocket(): MarketWebSocketClient {
-  if (!instance) {
+  if (!instance || instance.isDestroyed()) {
     instance = new MarketWebSocketClient();
   }
   return instance;

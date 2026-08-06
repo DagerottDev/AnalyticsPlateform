@@ -105,6 +105,31 @@ Deletes only the generic settings profile and returns defaults. It does not
 delete encrypted alert-delivery channels, broker credentials, sessions, or
 orders.
 
+## NSE Participant Flow
+
+### GET `/participant-flow?days=90`
+
+Returns persisted official NSE F&O participant-wise open-interest and trading-volume reports.
+The importer runs independently of broker sessions and publishes a bounded history. `status` is
+`ready`, `backfilling`, `stale`, or `unavailable`; `last_error` contains the latest sanitized
+archive/import error when no usable report has been stored yet. NSE participant reports are
+end-of-day publications, so this endpoint does not claim to provide intraday participant data.
+
+```json
+{
+  "source": "NSE",
+  "status": "unavailable",
+  "latest_report_date": null,
+  "last_success_at": null,
+  "last_attempt_at": "2026-08-06T12:00:00+00:00",
+  "last_error": "NSE report has not been published yet",
+  "rows": []
+}
+```
+
+When a report is not yet published, the response remains `200` with an empty `rows` array and
+`status: "unavailable"`; the importer retries automatically rather than fabricating estimates.
+
 ---
 
 ## Market Data

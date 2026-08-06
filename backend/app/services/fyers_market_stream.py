@@ -106,6 +106,9 @@ class FyersMarketStreamManager:
     depend on how many tabs happened to be open.
     """
 
+    _RECONNECT_BASE_DELAY_SECONDS = 1.0
+    _RECONNECT_MAX_DELAY_SECONDS = 30.0
+
     def __init__(
         self,
         app_id: str,
@@ -123,6 +126,9 @@ class FyersMarketStreamManager:
         self._quote_fetcher = quote_fetcher
         self._quote_poll_interval_seconds = quote_poll_interval_seconds
         self._quote_poll_task: asyncio.Task[None] | None = None
+        self._reconnect_task: asyncio.Task[None] | None = None
+        self._state_lock = threading.RLock()
+        self._closing = False
 
     def bind_loop(self) -> None:
         """Capture the asyncio event loop that should receive dispatched
@@ -167,31 +173,64 @@ class FyersMarketStreamManager:
         a hardcoded sleep on first connect) — callers on an asyncio event
         loop must run this via asyncio.to_thread, not call it directly.
         """
+        if self._closing:
+            return
         self._ensure_connected()
         new_symbols = [s for s in symbols if self._increment(s) == 1]
         if new_symbols and self._connected and self._socket is not None:
             self._socket.subscribe(symbols=new_symbols, data_type="SymbolUpdate")
+        elif self._loop is not None and self._refcounts:
+            # A failed initial SDK connect can report OnError before the
+            # refcount is incremented, so that callback has no symbols with
+            # which to start the supervisor.  Re-check after recording the
+            # subscription to cover that race.
+            self._loop.call_soon_threadsafe(self._start_reconnect_task)
 
     def unsubscribe(self, symbols: list[str]) -> None:
-        """Drop refcounts and unsubscribe upstream for symbols whose
-        refcount just hit zero."""
-        drop_symbols = [s for s in symbols if self._decrement(s)]
-        if drop_symbols and self._connected and self._socket is not None:
-            self._socket.unsubscribe(symbols=drop_symbols, data_type="SymbolUpdate")
+        """Drop local refcounts without mutating Fyers' live socket state.
+
+        The current Fyers SDK regularly raises inside ``unsubscribe`` (and
+        can corrupt its ``channel_num``/symbol bookkeeping afterwards) when
+        React unmounts a large Option Chain subscription.  Once corrupted,
+        later valid subscriptions stop producing ticks.  Keep an unused
+        symbol subscribed upstream until the next normal reconnect instead;
+        it is no longer REST-polled because it leaves ``_refcounts``, and the
+        browser proxy filters it out.  Reconnects replay only current
+        refcounts, reclaiming the upstream set safely.
+        """
+        for symbol in symbols:
+            self._decrement(symbol)
 
     def close(self) -> None:
+        self._closing = True
+        reconnect_task = self._reconnect_task
+        if reconnect_task is not None and not reconnect_task.done():
+            self._cancel_task_on_loop(reconnect_task)
+        self._reconnect_task = None
         if self._quote_poll_task is not None:
-            self._quote_poll_task.cancel()
+            self._cancel_task_on_loop(self._quote_poll_task)
             self._quote_poll_task = None
-        if self._socket is not None:
-            try:
-                self._socket.close_connection()
-            except Exception:
-                logger.exception("Error closing Fyers market stream socket")
-            self._socket = None
+        socket = self._socket
+        self._socket = None
         self._connected = False
+        if socket is not None:
+            self._teardown_socket(socket, log_exceptions=True)
         self._refcounts.clear()
         self._listeners.clear()
+
+    def _cancel_task_on_loop(self, task: asyncio.Task[None]) -> None:
+        """Cancel an asyncio task safely from either the loop or SDK thread."""
+        if self._loop is None or not self._loop.is_running():
+            task.cancel()
+            return
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is self._loop:
+            task.cancel()
+        else:
+            self._loop.call_soon_threadsafe(task.cancel)
 
     def _increment(self, symbol: str) -> int:
         self._refcounts[symbol] = self._refcounts.get(symbol, 0) + 1
@@ -208,35 +247,91 @@ class FyersMarketStreamManager:
         return False
 
     def _ensure_connected(self) -> None:
+        """Connect the shared SDK socket, constructing it at most once.
+
+        ``data_ws.FyersDataSocket`` is a process-wide singleton internally
+        (its ``__new__`` caches and always returns the same object — see the
+        installed ``fyers_apiv3`` package). Calling the constructor again on
+        every reconnect attempt, as this used to do, does not get a fresh
+        object: it re-runs ``__init__`` on the *same* one, replacing its
+        locks/queues/thread handles while a background thread from the
+        previous connection attempt (``ws_thread``/``ping_thread``/
+        ``message_thread``) can still be alive and holding references to the
+        versions being replaced. Two threads then drive what looks like one
+        socket concurrently, which is what produced the
+        "[SSL] record layer failure" errors and left the manager stuck
+        offline. Constructing once and only ever calling ``connect()`` /
+        ``close_connection()`` on that same instance afterwards avoids the
+        race entirely.
+        """
+        if self._closing:
+            return
         if self._socket is not None:
             return
-        self._socket = data_ws.FyersDataSocket(
+        socket = data_ws.FyersDataSocket(
             access_token=f"{self._app_id}:{self._access_token}",
             log_path="",
-            litemode=False,
+            # The Fyers SDK's full-mode decoder currently raises IndexError
+            # for index update packets before it calls On_message, which
+            # leaves browser clients on the REST fallback despite a connected
+            # broker session. Lite mode emits the symbol and LTP directly —
+            # exactly what this live ticker needs. REST seeds/fallbacks still
+            # provide the non-stream quote fields (OHLC, volume, etc.).
+            litemode=True,
             write_to_file=False,
-            reconnect=True,
+            # The SDK stops retrying after a small fixed number of attempts
+            # and then leaves the socket object alive without invoking
+            # OnClose.  Reconnect supervision lives here instead, where it
+            # can retry for the lifetime of the authenticated session.
+            reconnect=False,
             on_connect=self._on_connect,
             on_close=self._on_close,
             on_error=self._on_error,
             on_message=self._on_message,
         )
-        self._socket.connect()
+        # Assign before connect(): a synchronous on_error/on_close fired from
+        # inside connect() must see self._socket already set, or its
+        # call_soon_threadsafe(self._start_reconnect_task) would race ahead
+        # of this assignment.
+        self._socket = socket
+        try:
+            socket.connect()
+        except Exception:
+            # Fyers' SDK usually reports connection errors through OnError
+            # rather than raising, but if an adapter or a future SDK version
+            # does raise, keep the reference anyway — see _recreate_socket's
+            # docstring for why constructing a second FyersDataSocket is
+            # unsafe. The reconnect supervisor retries connect() on this same
+            # object instead of us discarding it here.
+            self._connected = False
+            raise
 
     # ── Callbacks — invoked from the SDK's background thread ──────────────
 
     def _on_connect(self) -> None:
-        self._connected = True
-        if self._refcounts and self._socket is not None:
-            self._socket.subscribe(
-                symbols=list(self._refcounts.keys()), data_type="SymbolUpdate"
+        with self._state_lock:
+            self._connected = True
+            socket = self._socket
+            symbols = list(self._refcounts.keys())
+        if symbols and socket is not None:
+            socket.subscribe(
+                symbols=symbols, data_type="SymbolUpdate"
             )
 
     def _on_close(self, message: dict[str, Any]) -> None:
         self._connected = False
+        logger.warning("Fyers market stream closed: %s", message)
+        if self._closing or not self._refcounts or self._loop is None:
+            return
+        # Fyers invokes this callback from its websocket-client thread.  Only
+        # create/cancel asyncio tasks on the owning event loop.
+        self._loop.call_soon_threadsafe(self._start_reconnect_task)
 
     def _on_error(self, message: Any) -> None:
         logger.error("Fyers market stream error: %s", message)
+        if self._closing or not self._refcounts or self._loop is None:
+            return
+        self._loop.call_soon_threadsafe(self._start_reconnect_task)
 
     def _on_message(self, message: dict[str, Any]) -> None:
         self._dispatch(message)
@@ -246,3 +341,95 @@ class FyersMarketStreamManager:
             return
         for listener in list(self._listeners):
             self._loop.call_soon_threadsafe(listener, message)
+
+    def _start_reconnect_task(self) -> None:
+        """Start one supervisor task on the manager's asyncio loop."""
+        if self._closing or not self._refcounts:
+            return
+        if self._reconnect_task is None or self._reconnect_task.done():
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _reconnect_loop(self) -> None:
+        """Recreate the SDK socket until it opens or the session closes.
+
+        The SDK's own reconnect flag is deliberately disabled (see
+        ``_ensure_connected``), because its bounded retry loop can abandon a
+        dead socket without notifying this manager.  This task retains the
+        refcounted symbol set and lets ``_on_connect`` replay it on every new
+        socket.
+        """
+        task = asyncio.current_task()
+        attempt = 0
+        try:
+            while not self._closing and self._refcounts:
+                if self._connected and self._socket is not None:
+                    return
+                delay = min(
+                    self._RECONNECT_BASE_DELAY_SECONDS * 2**attempt,
+                    self._RECONNECT_MAX_DELAY_SECONDS,
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                if self._closing or not self._refcounts:
+                    return
+                try:
+                    await asyncio.to_thread(self._recreate_socket)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Fyers market stream reconnect attempt failed")
+                if self._connected:
+                    return
+                attempt += 1
+        finally:
+            if self._reconnect_task is task:
+                self._reconnect_task = None
+
+    def _recreate_socket(self) -> None:
+        """Tear down the dead connection attempt and reconnect.
+
+        Despite the name (kept for a smaller diff against the reconnect
+        supervisor calling it), this does *not* construct a new
+        ``FyersDataSocket`` — see ``_ensure_connected``'s docstring: the SDK
+        object is a process-wide singleton, so a second construction would
+        silently reset the *same* object's locks/queues while a background
+        thread from the dying connection could still be running against
+        them. Instead it tears down and calls ``connect()`` again on the one
+        object the manager already owns. If the very first connect never
+        happened at all (``self._socket`` still ``None``), falls back to
+        ``_ensure_connected()``, which owns that first construction.
+        """
+        self._connected = False
+        socket = self._socket
+        if socket is None:
+            self._ensure_connected()
+            return
+        self._teardown_socket(socket, log_exceptions=False)
+        if self._closing or not self._refcounts:
+            return
+        socket.connect()
+
+    def _teardown_socket(self, socket: "data_ws.FyersDataSocket", *, log_exceptions: bool) -> None:
+        """Block until ``socket``'s background threads have actually ended.
+
+        ``close_connection()`` only does anything once the handshake has
+        completed (it's a no-op while its internal ``__ws_object`` is still
+        unset). If a connection attempt fails or errors before that point,
+        its ``ws_thread`` is left running with no join — and because the SDK
+        socket is a singleton (see ``_ensure_connected``), reconnecting
+        without waiting for that thread to actually finish would start a
+        second one racing the first over the same object. Cover both paths
+        explicitly rather than relying on the ``__ws_object`` guard alone.
+        """
+        try:
+            if socket.is_connected():
+                socket.close_connection()  # joins ws/message/ping threads
+            else:
+                ws_thread = getattr(socket, "ws_thread", None)
+                if ws_thread is not None and ws_thread.is_alive():
+                    ws_thread.join(timeout=5.0)
+        except Exception:
+            if log_exceptions:
+                logger.exception("Error closing Fyers market stream socket")
+            else:
+                logger.debug("Error closing stale Fyers market stream socket", exc_info=True)

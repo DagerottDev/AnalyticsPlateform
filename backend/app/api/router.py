@@ -14,6 +14,7 @@ from app.api.v1 import (
     historical,
     market,
     orders,
+    participant_flow,
     portfolio,
     settings,
     trade_journal,
@@ -28,6 +29,7 @@ api_router = APIRouter()
 api_router.include_router(health.router, prefix="/v1")
 api_router.include_router(auth.router, prefix="/v1")
 api_router.include_router(market.router, prefix="/v1")
+api_router.include_router(participant_flow.router, prefix="/v1")
 api_router.include_router(historical.router, prefix="/v1")
 api_router.include_router(volatility.router, prefix="/v1")
 api_router.include_router(greeks.router, prefix="/v1")

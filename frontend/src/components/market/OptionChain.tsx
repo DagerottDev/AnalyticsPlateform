@@ -1,11 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState, useMemo, useRef } from "react";
-import { Instrument, MarketTick } from "@/types/market";
-import { getInstruments, getMarketQuotes } from "@/lib/market";
+import { useEffect, useState, useMemo, useRef } from "react";
+import { Instrument } from "@/types/market";
+import { getInstruments } from "@/lib/market";
 import { useMarketData } from "@/hooks/useMarketData";
-import { useNseMarketSession } from "@/hooks/useNseMarketSession";
-import { useReplayStore } from "@/stores/replayStore";
 import { formatApiError } from "@/lib/apiError";
 import { cn, formatINR } from "@/lib/utils";
 import { BarChart3, Check, Download, Plus, ShoppingCart, Settings2, TrendingDown, TrendingUp, X } from "lucide-react";
@@ -29,9 +27,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ApiErrorDisplay } from "@/components/ui/ApiErrorDisplay";
 import { EducationPopover } from "@/components/ui/EducationPopover";
 import { DataFreshness } from "@/components/market/DataFreshness";
-import { describeDataFreshness, isFreshBrokerStreamTick } from "@/lib/dataFreshness";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { toClosedMarketQuote } from "@/lib/marketTick";
+// Backward-compatible re-export for consumers that previously imported this
+// closed-market normalizer from the Option Chain module.
 export { toClosedMarketQuote } from "@/lib/marketTick";
 import {
   dynamicSelection,
@@ -80,9 +78,6 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   const [basketRisk, setBasketRisk] = useState<BasketRiskDraft>({});
   const [basketOpen, setBasketOpen] = useState(false);
   const latestOiBySymbol = useRef<Map<string, number>>(new Map());
-  const [snapshotTicks, setSnapshotTicks] = useState<Record<string, MarketTick>>({});
-  const marketSession = useNseMarketSession();
-  const replayIsActive = useReplayStore((state) => state.isActive);
 
   // Fetch instruments when symbol or expiry changes, then keep OI/buildup
   // fresh with a background poll matching the backend's own ~30s cache TTL —
@@ -142,78 +137,11 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   // Subscribe to live market data + underlying index
   const tradingSymbols = useMemo(() => instruments.map((i) => i.trading_symbol), [instruments]);
   const allSymbols = useMemo(() => [...tradingSymbols, symbol], [tradingSymbols, symbol]);
-  const allSymbolsKey = allSymbols.join(",");
-  const { getTick: getLiveTick } = useMarketData(allSymbols);
-
-  // Keep a small, chunked REST poll as a safety net. During regular hours the
-  // WebSocket remains preferred, but a stalled stream must not freeze the
-  // chain at its last tick. Outside hours this is the primary data source and
-  // uses the broker's latest traded quote snapshot below.
-  useEffect(() => {
-    if (!symbol || replayIsActive || !allSymbolsKey) {
-      if (replayIsActive) setSnapshotTicks({});
-      return;
-    }
-
-    let isMounted = true;
-    setSnapshotTicks({});
-    const snapshotSymbols = allSymbolsKey.split(",").filter(Boolean);
-    const snapshotInterval = Math.max(refreshMilliseconds, 15_000);
-
-    async function fetchSnapshotQuotes() {
-      const chunks: string[][] = [];
-      for (let index = 0; index < snapshotSymbols.length; index += 40) {
-        chunks.push(snapshotSymbols.slice(index, index + 40));
-      }
-      const quotes: MarketTick[] = [];
-      // Keep chunks sequential so a large chain does not create a second
-      // quote burst precisely when the websocket is paused.
-      for (const chunk of chunks) {
-        try {
-          const response = await getMarketQuotes(chunk);
-          quotes.push(...response.quotes.map((quote) => (
-            marketSession.state === "open"
-              ? { ...quote, feed: "snapshot" as const }
-              : { ...toClosedMarketQuote(quote), feed: "snapshot" as const }
-          )));
-        } catch {
-          // Preserve successful chunks if one broker snapshot is unavailable.
-        }
-      }
-      if (!isMounted) return;
-      if (quotes.length === 0) return;
-      setSnapshotTicks((current) => ({
-        ...current,
-        ...Object.fromEntries(quotes.map((quote) => [quote.trading_symbol, quote])),
-      }));
-    }
-
-    void fetchSnapshotQuotes();
-    const interval = window.setInterval(() => void fetchSnapshotQuotes(), snapshotInterval);
-    return () => {
-      isMounted = false;
-      window.clearInterval(interval);
-    };
-  }, [allSymbolsKey, marketSession.state, refreshMilliseconds, replayIsActive, symbol]);
-
-  const getTick = useCallback(
-    (tradingSymbol: string): MarketTick | null => {
-      const snapshot = snapshotTicks[tradingSymbol];
-      const live = getLiveTick(tradingSymbol);
-      // A fresh websocket frame is broker evidence that the instrument is
-      // still trading, even if the local regular-session calendar has already
-      // elapsed. Do not replace that frame with a REST close snapshot.
-      if (isFreshBrokerStreamTick(live)) return live;
-      if (!snapshot) return live ?? null;
-      // useMarketData retains its last live tick when a session closes. Once
-      // a snapshot exists, prefer it outside hours; during the session use it
-      // only when the live tick is missing or no longer fresh.
-      if (!replayIsActive && marketSession.state !== "open") return snapshot;
-      if (!live || describeDataFreshness(live).state !== "live") return snapshot;
-      return live;
-    },
-    [getLiveTick, marketSession.state, replayIsActive, snapshotTicks]
-  );
+  // The backend websocket has one session-scoped, rate-limited REST quote
+  // fallback for all browser tabs. A second Option-Chain-only REST poll here
+  // created duplicate 40-symbol bursts and repeatedly hit Fyers' 429 limit,
+  // leaving the entire table frozen. Keep this view on the shared feed.
+  const { getTick } = useMarketData(allSymbols);
   
   // Get underlying price
   const underlyingTick = getTick(symbol);

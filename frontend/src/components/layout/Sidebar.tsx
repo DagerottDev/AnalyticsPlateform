@@ -21,6 +21,7 @@ import {
   LineChart,
   Search,
   Settings,
+  UsersRound,
   Waves,
   Zap,
 } from "lucide-react";
@@ -57,6 +58,7 @@ const navigation: NavGroup[] = [
       { icon: Search, label: "IV Screener", href: "/volatility/screener" },
       { icon: BarChart3, label: "Relative Value", href: "/relative-value" },
       { icon: BarChart3, label: "Dealer Flow", href: "/dealer-flow" },
+      { icon: UsersRound, label: "Participant Flow", href: "/participant-flow" },
     ],
   },
   {

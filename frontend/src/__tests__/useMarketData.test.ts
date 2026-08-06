@@ -10,15 +10,22 @@ import { renderHook, act } from "@testing-library/react";
 import { useMarketData } from "@/hooks/useMarketData";
 import type { MarketTick } from "@/types/market";
 
-const subscribeMany = vi.fn();
-const unsubscribeMany = vi.fn();
+const { subscribeMany, unsubscribeMany, getWebSocket } = vi.hoisted(() => {
+  const subscribeMany = vi.fn();
+  const unsubscribeMany = vi.fn();
+  const getWebSocket = vi.fn(() => ({ subscribeMany, unsubscribeMany }));
+  return { subscribeMany, unsubscribeMany, getWebSocket };
+});
 
 // Hoisted so useAuth() returns the SAME object reference on every call, like
 // the real Zustand-store-backed useAuth does — a fresh object literal per
 // call would make the effect's `user` dependency look "changed" every
 // render for reasons unrelated to what this test is verifying.
 const stableUser = { client_id: "TEST_CLIENT" };
-const authState: { user: typeof stableUser | null } = { user: stableUser };
+const authState: { user: typeof stableUser | null; token: string | null } = {
+  user: stableUser,
+  token: "test-token",
+};
 const replayState = { isActive: false, currentTicks: {} as Record<string, unknown> };
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => authState,
@@ -38,16 +45,28 @@ vi.mock("@/lib/market", () => ({
 }));
 
 vi.mock("@/lib/websocket", () => ({
-  getWebSocket: () => ({ subscribeMany, unsubscribeMany }),
+  getWebSocket,
 }));
 
 describe("useMarketData", () => {
   beforeEach(() => {
     subscribeMany.mockClear();
     unsubscribeMany.mockClear();
+    getWebSocket.mockClear();
     authState.user = stableUser;
+    authState.token = "test-token";
     replayState.isActive = false;
     replayState.currentTicks = {};
+  });
+
+  it("does not start a market transport before authentication", () => {
+    authState.user = null;
+    authState.token = null;
+
+    renderHook(() => useMarketData(["NIFTY"]));
+
+    expect(getWebSocket).not.toHaveBeenCalled();
+    expect(subscribeMany).not.toHaveBeenCalled();
   });
 
   it("does not re-subscribe or unsubscribe when re-rendered with a new-but-equal symbols array", async () => {
@@ -136,6 +155,7 @@ describe("useMarketData", () => {
     const first = renderHook(() => useMarketData(["NIFTY"]));
 
     authState.user = null;
+    authState.token = null;
     first.rerender();
     expect(unsubscribeMany).toHaveBeenCalledWith(["NIFTY"], expect.any(Function));
 

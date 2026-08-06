@@ -59,7 +59,7 @@ export function useAuth() {
     // Derived
     canTrade: store.isAuthenticated && store.tradingMode === "live",
     isPaperMode: store.tradingMode === "paper",
-    brokerName: store.user?.broker_name || "Not Connected",
+    brokerName: store.user?.broker_name || "Not authenticated",
 
     // Actions
     login,
