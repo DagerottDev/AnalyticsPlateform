@@ -84,15 +84,15 @@ export default function ParticipantFlowPage() {
   const divergent = useMemo(() => {
     if (!response) return null;
     const latest = latestRows(response.rows);
-    const fii = latest.get("FII_FPI"); const client = latest.get("CLIENT");
-    if (!fii || !client) return null;
-    const fiiNet = positionSummary(fii.oi, segment, exposure).net;
-    const clientNet = positionSummary(client.oi, segment, exposure).net;
-    if (!fiiNet || !clientNet) return "FII/FPI and Client positioning is balanced in this view.";
-    return fiiNet * clientNet < 0
-      ? "FII/FPI and Client net positioning are on opposite sides in this view."
-      : "FII/FPI and Client net positioning point to the same side in this view.";
-  }, [response, segment, exposure]);
+    const fii = latest.get("FII_FPI"); const prop = latest.get("PROPRIETARY");
+    if (!fii || !prop) return null;
+    const fiiNet = positionSummary(fii.oi, "index", "futures").net;
+    const propNet = positionSummary(prop.oi, "index", "futures").net;
+    if (!fiiNet || !propNet) return "FII/FPI and Proprietary index-futures positioning is balanced on the latest report.";
+    return fiiNet * propNet < 0
+      ? "FII/FPI and Proprietary net index-futures positioning are on opposite sides on the latest report."
+      : "FII/FPI and Proprietary net index-futures positioning point to the same side on the latest report.";
+  }, [response]);
 
   const toggleParticipant = (participant: ParticipantType) => setParticipants((current) => {
     if (current.includes(participant)) return current.length > 1 ? current.filter((item) => item !== participant) : current;
@@ -138,7 +138,7 @@ export default function ParticipantFlowPage() {
           <ParticipantInsight participant="FII_FPI" response={response} segment={segment} exposure={exposure} />
           <ParticipantInsight participant="PROPRIETARY" response={response} segment={segment} exposure={exposure} />
           <ParticipantInsight participant="CLIENT" response={response} segment={segment} exposure={exposure} />
-          <StatTile label="FII / Client read" value={divergent?.includes("opposite") ? "Divergent" : "Aligned"} icon={UsersRound} education={<EducationPopover title="FII / Client comparison" description={divergent ?? "Comparison becomes available when both categories have a report."} tips={["This compares net positions under the selected segment and exposure filters.", "It does not predict market direction or individual participant intent."]} />} />
+          <StatTile label="FII / Prop read (Index Fut)" value={divergent?.includes("opposite") ? "Divergent" : "Aligned"} icon={UsersRound} education={<EducationPopover title="FII / Proprietary comparison" description={divergent ?? "Comparison becomes available when both categories have a report."} tips={["This compares net index-futures positions on the latest published NSE report only.", "It always uses Index segment + Futures exposure, independent of the page filters above.", "It does not predict market direction or individual participant intent."]} />} />
         </div>
         {response.status !== "ready" && <div className="mt-4 rounded-lg border border-[var(--color-accent-orange)]/30 bg-[var(--color-accent-orange)]/5 px-4 py-3 text-sm text-[var(--color-text-secondary)]">The dashboard is showing the latest stored official data. NSE participant reports are daily publications, so no intraday participant position is inferred.</div>}
         <div className="mt-4 grid gap-4 xl:grid-cols-2">

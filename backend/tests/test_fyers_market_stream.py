@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -103,7 +104,7 @@ async def test_upstream_close_reconnects_same_socket_and_replays_subscriptions(
 
         assert mock_cls.call_count == 1  # never reconstructed — same singleton object
         assert mock_cls.call_args.kwargs["reconnect"] is False
-        assert mock_cls.call_args.kwargs["litemode"] is True
+        assert mock_cls.call_args.kwargs["litemode"] is False
         socket.close_connection.assert_called_once()
         assert socket.connect.call_count == 2  # initial connect + reconnect
         socket.subscribe.assert_called_once_with(
@@ -872,3 +873,112 @@ def test_teardown_socket_joins_a_still_alive_stale_ws_thread() -> None:
     manager._teardown_socket(socket, log_exceptions=False)
 
     socket.ws_thread.join.assert_called_once_with(timeout=5.0)
+
+
+def test_teardown_socket_force_clears_ws_object_even_when_close_connection_raises() -> None:
+    """The actual regression test for "live feed goes stale and never
+    recovers": MagicMock can't reproduce this because it has no real
+    internal state, so the tests above (which use it) can't catch it.
+
+    The real ``FyersDataSocket.close_connection()`` only sets its private
+    ``__ws_object`` to ``None`` *after* calling ``self.__ws_object.close()``
+    — and closing a transport that already died from a network drop
+    (exactly what fyersDataSocket.log shows repeatedly: "Connection to
+    remote host was lost.") routinely raises, aborting before that line.
+    ``FyersDataSocket.connect()`` then treats a merely-non-``None``
+    ``__ws_object`` as "already connected" and just re-fires the open
+    callback without establishing a new transport — so without
+    ``_force_clear_ws_object``, the manager marks itself connected forever
+    with nothing live underneath, and no exception or log line points at
+    why.
+    """
+    manager = FyersMarketStreamManager(app_id="TESTAPP-100", access_token="fake-token")
+    socket = MagicMock()
+    socket.is_connected.return_value = True
+    socket.close_connection.side_effect = RuntimeError("transport already gone")
+    # Named after the real SDK's mangled attribute directly, rather than
+    # relying on `self.__ws_object` inside a same-named class, so the
+    # attribute exists on this MagicMock exactly as production code expects.
+    socket._FyersDataSocket__ws_object = object()
+
+    manager._teardown_socket(socket, log_exceptions=False)
+
+    assert socket._FyersDataSocket__ws_object is None
+
+
+class _FakeFyersDataSocket:  # noqa: N801 - name mangling below relies on the literal name
+    """Faithful-enough stand-in for the real SDK socket's connect() /
+    close_connection() / is_connected() semantics — MagicMock only records
+    calls, it has no real internal state, so it cannot reproduce the actual
+    bug this module works around (see ``_force_clear_ws_object``).
+    """
+
+    def __init__(self, *, close_raises: bool) -> None:
+        # Deliberately assigned as the real class's mangled name (not this
+        # class's own `__ws_object`, which would mangle to
+        # `_FakeFyersDataSocket__ws_object`) — production code reaches into
+        # this exact attribute name on whatever socket object it is given.
+        self._FyersDataSocket__ws_object = None
+        self._close_raises = close_raises
+        self.real_connects = 0
+        self.on_connect: Callable[[], None] | None = None
+        self.ws_thread = None
+
+    def is_connected(self) -> bool:
+        return self._FyersDataSocket__ws_object is not None
+
+    def connect(self) -> None:
+        # Mirrors the real SDK: only a None __ws_object gets a genuine new
+        # transport; otherwise this just re-fires the open callback.
+        if self._FyersDataSocket__ws_object is None:
+            self._FyersDataSocket__ws_object = object()
+            self.real_connects += 1
+        if self.on_connect is not None:
+            self.on_connect()
+
+    def close_connection(self) -> None:
+        if self._FyersDataSocket__ws_object is not None:
+            if self._close_raises:
+                raise RuntimeError("transport already gone")
+            self._FyersDataSocket__ws_object = None
+
+    def subscribe(self, symbols: list[str], data_type: str = "SymbolUpdate") -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_reconnect_after_a_failing_close_still_establishes_a_real_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end regression test: a broker drop whose teardown's
+    close_connection() raises (the routine case for an already-dead
+    transport — see fyersDataSocket.log's repeated "Connection to remote
+    host was lost.") must still result in a genuine reconnect, not a
+    manager that silently marks itself connected with a dead socket."""
+    socket = _FakeFyersDataSocket(close_raises=True)
+    with patch("app.services.fyers_market_stream.data_ws.FyersDataSocket", return_value=socket):
+        manager = FyersMarketStreamManager(app_id="TESTAPP-100", access_token="fake-token")
+        manager.bind_loop()
+        socket.on_connect = manager._on_connect
+        monkeypatch.setattr(manager, "_RECONNECT_BASE_DELAY_SECONDS", 0.01)
+        monkeypatch.setattr(manager, "_RECONNECT_MAX_DELAY_SECONDS", 0.01)
+
+        await asyncio.to_thread(manager.subscribe, ["NSE:NIFTY50-INDEX"])
+        assert socket.real_connects == 1
+        assert manager._is_connected()
+
+        # Simulate exactly what fyersDataSocket.log shows happening
+        # repeatedly during market hours.
+        manager._on_close({"code": 1006, "message": "Connection to remote host was lost."})
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if socket.real_connects >= 2:
+                break
+
+        assert socket.real_connects == 2, (
+            "connect() after the drop must establish a genuinely new transport "
+            "instead of silently no-op'ing because __ws_object was left stale "
+            "by a close_connection() that raised"
+        )
+        assert manager._is_connected()
+        manager.close()

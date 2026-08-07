@@ -281,13 +281,26 @@ class FyersMarketStreamManager:
             socket = data_ws.FyersDataSocket(
                 access_token=f"{self._app_id}:{self._access_token}",
                 log_path="",
-                # The Fyers SDK's full-mode decoder currently raises IndexError
-                # for index update packets before it calls On_message, which
-                # leaves browser clients on the REST fallback despite a connected
-                # broker session. Lite mode emits the symbol and LTP directly —
-                # exactly what this live ticker needs. REST seeds/fallbacks still
-                # provide the non-stream quote fields (OHLC, volume, etc.).
-                litemode=True,
+                # The Fyers SDK's full-mode "Update" decoder raises IndexError
+                # for index topics specifically (data_ws.py's __datafeed_resp
+                # indexes self.index_val, an 8-entry list, with a field_count
+                # the server can send larger than that for "if"-prefixed
+                # topics — see fyersDataSocket.log's "list index out of
+                # range" tracebacks, all in the index_sym branch). It is
+                # caught and logged there, not fatal, but it silently drops
+                # that frame — degrading NIFTY/BANKNIFTY's own tick to the
+                # REST fallback cadence.
+                #
+                # litemode is a single flag for the *whole session's socket*,
+                # not per-symbol: turning it on to dodge the index bug also
+                # collapses every option/equity ("sf" scrips) tick — which
+                # never hit this bug — down to bare {ltp, symbol, type},
+                # dropping volume/change/bid-ask from the live stream for
+                # the entire Option Chain. REST seeds/polls still backfill
+                # OHLC/volume on their own ~3s cadence, but that regression
+                # (losing genuinely live option ticks) is bigger than the
+                # index-only bug it was meant to fix, so stay in full mode.
+                litemode=False,
                 write_to_file=False,
                 # The SDK stops retrying after a small fixed number of attempts
                 # and then leaves the socket object alive without invoking
@@ -481,3 +494,42 @@ class FyersMarketStreamManager:
                 logger.exception("Error closing Fyers market stream socket")
             else:
                 logger.debug("Error closing stale Fyers market stream socket", exc_info=True)
+        finally:
+            self._force_clear_ws_object(socket)
+
+    def _force_clear_ws_object(self, socket: "data_ws.FyersDataSocket") -> None:
+        """Guarantee the SDK's private ``__ws_object`` is ``None`` after teardown.
+
+        This is the actual fix for live ticks going dead permanently after a
+        broker-side drop ("Connection to remote host was lost" in
+        fyersDataSocket.log). ``FyersDataSocket.connect()`` reconnects for
+        real only ``if self.__ws_object is None`` — otherwise it just calls
+        ``on_open()`` directly, which fires our ``on_connect`` callback (and
+        this manager marks itself connected) with *no live socket underneath
+        it at all*. ``close_connection()`` is supposed to null that
+        attribute out, but it does so only *after* calling
+        ``self.__ws_object.close()`` — and closing a transport that already
+        died from a network drop routinely raises, aborting
+        ``close_connection()`` before it reaches that line. With
+        ``reconnect=False`` (deliberately set in ``_ensure_connected`` — see
+        its docstring), the SDK's own ``__on_close`` never clears
+        ``__ws_object`` either, since that only happens on its now-disabled
+        internal restart path. Left alone, the next reconnect attempt then
+        silently no-ops forever: no exception, no log line, just a
+        permanently stale "connected" flag and a market stream that never
+        ticks again until the process restarts.
+
+        There is no public API for this, so reach into the SDK's
+        name-mangled attribute directly. Best-effort: if a future SDK
+        version renames it, this quietly does nothing and the manager falls
+        back to the previous (occasionally-stuck) behavior rather than
+        raising.
+        """
+        try:
+            socket._FyersDataSocket__ws_object = None  # noqa: SLF001
+        except Exception:
+            logger.debug(
+                "Could not force-clear FyersDataSocket's internal ws object; "
+                "SDK internals may have changed.",
+                exc_info=True,
+            )

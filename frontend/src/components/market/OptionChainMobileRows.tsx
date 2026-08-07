@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { BarChart3, Check, Plus, ShoppingCart, TrendingDown } from "lucide-react";
 import { Instrument, MarketTick } from "@/types/market";
 import { cn, formatINR } from "@/lib/utils";
@@ -8,6 +9,8 @@ import { classifyBuildup } from "@/lib/buildup";
 import { BasketLegDraft } from "@/lib/basket";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { OiStrengthBar } from "@/components/market/OiStrengthBar";
+import { OiChangeBar } from "@/components/market/OiChangeBar";
 import type { OptionChainStrikeRow } from "@/lib/optionChainFilters";
 import type { TicketSide } from "@/components/market/OptionChain";
 
@@ -39,6 +42,22 @@ export function OptionChainMobileRows({
   basketLegs, selectedAnalysisSymbols, analysisSelectionsCount, maxAnalysisContracts,
   oiSnapshotChange, setOrderTarget, addBasketLeg, toggleAnalysisContract,
 }: OptionChainMobileRowsProps) {
+  // Shared scale for the OI strength bars so a strike's call and put bar
+  // lengths are comparable to every other strike currently in view.
+  const maxOi = useMemo(
+    () => filteredStrikes.reduce((max, row) => Math.max(max, row.CE?.oi ?? 0, row.PE?.oi ?? 0), 0),
+    [filteredStrikes]
+  );
+  // Same idea for the "OI Δ" bars, scaled to the largest swing in view
+  // rather than to raw OI so a modest-OI strike with a big move still shows.
+  const maxAbsOiChange = useMemo(
+    () => filteredStrikes.reduce(
+      (max, row) => Math.max(max, Math.abs(oiSnapshotChange(row.CE) ?? 0), Math.abs(oiSnapshotChange(row.PE) ?? 0)),
+      0
+    ),
+    [filteredStrikes, oiSnapshotChange]
+  );
+
   return (
     <div className="divide-y divide-[var(--color-border-subtle)] lg:hidden">
       {filteredStrikes.map((row) => {
@@ -94,9 +113,15 @@ export function OptionChainMobileRows({
                     )}
                   </p>
                   <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[10px] text-[var(--color-text-muted)]">
-                    <span>OI <b className="tnum text-[var(--color-text-secondary)]">{side.instrument?.oi?.toLocaleString() ?? "—"}</b></span>
+                    <span className="min-w-0">
+                      OI <b className="tnum text-[var(--color-text-secondary)]">{side.instrument?.oi?.toLocaleString() ?? "—"}</b>
+                      <OiStrengthBar oi={side.instrument?.oi} maxOi={maxOi} change={side.oiChange} className="mt-1" />
+                    </span>
                     <span>Vol <b className="tnum text-[var(--color-text-secondary)]">{side.tick?.volume.toLocaleString() ?? "—"}</b></span>
-                    <span className={cn("tnum", side.oiChange && side.oiChange > 0 ? "text-[var(--color-profit)]" : side.oiChange && side.oiChange < 0 ? "text-[var(--color-loss)]" : "text-[var(--color-text-muted)]")}>OI Δ {side.oiChange == null ? "—" : `${side.oiChange > 0 ? "+" : ""}${side.oiChange.toLocaleString()}`}</span>
+                    <span className={cn("tnum min-w-0", side.oiChange && side.oiChange > 0 ? "text-[var(--color-profit)]" : side.oiChange && side.oiChange < 0 ? "text-[var(--color-loss)]" : "text-[var(--color-text-muted)]")}>
+                      OI Δ {side.oiChange == null ? "—" : `${side.oiChange > 0 ? "+" : ""}${side.oiChange.toLocaleString()}`}
+                      <OiChangeBar change={side.oiChange} maxAbsChange={maxAbsOiChange} className="mt-1" />
+                    </span>
                     {showGreeks && <span className="tnum">IV {side.iv > 0 ? `${(side.iv * 100).toFixed(1)}%` : "—"}</span>}
                     {showGreeks && <span className="tnum">Δ {side.delta?.toFixed(2) ?? "—"}</span>}
                   </div>

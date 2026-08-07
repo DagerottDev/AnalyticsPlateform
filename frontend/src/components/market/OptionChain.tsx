@@ -175,7 +175,12 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
   const oiSnapshotChange = (instrument: Instrument | undefined): number | null => {
     if (!instrument || instrument.oi == null) return null;
     const previous = previousOiBySymbol.get(instrument.trading_symbol);
-    return previous == null ? null : instrument.oi - previous;
+    if (previous != null) return instrument.oi - previous;
+    // No local snapshot yet — right after a symbol/expiry switch, or during
+    // the backend's up-to-5-minute instrument cache window, this otherwise
+    // sits on "—" for a long time. Fall back to the broker's own OI change
+    // (vs. previous day's close) so the column isn't empty in the meantime.
+    return instrument.oi_change ?? null;
   };
 
   const toggleAnalysisContract = (instrument: Instrument | undefined) => {
@@ -257,8 +262,8 @@ export function OptionChain({ symbol, expiry }: OptionChainProps) {
 
   const downloadCsv = () => {
     const header = [
-      "Symbol", "Expiry", "Strike", "Call OI", "Call OI snapshot change", "Call LTP", "Call volume", "Call change %",
-      "Put LTP", "Put change %", "Put volume", "Put OI", "Put OI snapshot change",
+      "Symbol", "Expiry", "Strike", "Call OI", "Call OI change", "Call LTP", "Call volume", "Call change %",
+      "Put LTP", "Put change %", "Put volume", "Put OI", "Put OI change",
     ];
     const rows = filteredStrikes.map((row) => {
       const ceTick = row.CE ? getTick(row.CE.trading_symbol) : null;

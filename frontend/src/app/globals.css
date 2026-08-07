@@ -31,6 +31,20 @@
   --color-profit: #26a69a;
   --color-loss: #ef5350;
 
+  /* Deliberately more saturated than --color-profit/--color-loss — used only
+     for small decorative marks (e.g. the option chain's OI strength bars)
+     that need to pop at a glance against the muted financial palette above. */
+  --color-vibrant-up: #00e676;
+  --color-vibrant-down: #ff3b30;
+  --color-vibrant-neutral: #00bcd4;
+
+  /* A deliberately different hue family from --color-vibrant-up/-down —
+     the "OI Δ" bar sits right next to the OI strength bar (which uses those)
+     and mirrors its fill direction, so it needs its own palette to read as
+     a contrasting companion bar rather than a duplicate. */
+  --color-vibrant-change-up: #2979ff;
+  --color-vibrant-change-down: #f50057;
+
   /* Status — reserved for state (connection/alerts), never reused as a series
      color. Fixed values, not derived from the accent scale on purpose. */
   --color-status-good: #0ca30c;
@@ -126,6 +140,15 @@
 
   --color-profit: #1f8a7e;
   --color-loss: #dd3d3d;
+
+  /* Richer than dark-mode's neon versions so they still hold contrast on a
+     white surface — see the dark @theme block for why these exist. */
+  --color-vibrant-up: #00b359;
+  --color-vibrant-down: #e0241f;
+  --color-vibrant-neutral: #0089a0;
+
+  --color-vibrant-change-up: #1a56db;
+  --color-vibrant-change-down: #c2185b;
 
   --color-status-good: #0d8f0d;
   --color-status-warning: #a66a09;

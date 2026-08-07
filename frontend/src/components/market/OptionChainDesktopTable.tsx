@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { BarChart3, Check, Plus, ShoppingCart, TrendingDown } from "lucide-react";
 import { Instrument, MarketTick } from "@/types/market";
 import { cn, formatINR } from "@/lib/utils";
@@ -7,6 +8,8 @@ import { calculateImpliedVolatility, calculateGreeks, Greeks } from "@/lib/greek
 import { classifyBuildup } from "@/lib/buildup";
 import { BasketLegDraft } from "@/lib/basket";
 import { Badge } from "@/components/ui/Badge";
+import { OiStrengthBar } from "@/components/market/OiStrengthBar";
+import { OiChangeBar } from "@/components/market/OiChangeBar";
 import type { OptionChainStrikeRow } from "@/lib/optionChainFilters";
 import type { TicketSide } from "@/components/market/OptionChain";
 
@@ -38,6 +41,22 @@ export function OptionChainDesktopTable({
   basketLegs, selectedAnalysisSymbols, analysisSelectionsCount, maxAnalysisContracts,
   oiSnapshotChange, setOrderTarget, addBasketLeg, toggleAnalysisContract,
 }: OptionChainDesktopTableProps) {
+  // Shared scale for the OI strength bars so a strike's call and put bar
+  // lengths are comparable to every other strike currently in view.
+  const maxOi = useMemo(
+    () => filteredStrikes.reduce((max, row) => Math.max(max, row.CE?.oi ?? 0, row.PE?.oi ?? 0), 0),
+    [filteredStrikes]
+  );
+  // Same idea for the "OI Δ" bars, scaled to the largest swing in view
+  // rather than to raw OI so a modest-OI strike with a big move still shows.
+  const maxAbsOiChange = useMemo(
+    () => filteredStrikes.reduce(
+      (max, row) => Math.max(max, Math.abs(oiSnapshotChange(row.CE) ?? 0), Math.abs(oiSnapshotChange(row.PE) ?? 0)),
+      0
+    ),
+    [filteredStrikes, oiSnapshotChange]
+  );
+
   return (
     <div className="hidden overflow-x-auto lg:block">
       <table className="min-w-[1100px] w-full text-right text-xs">
@@ -152,10 +171,16 @@ export function OptionChainDesktopTable({
                   </td>
                 )}
                 <td className={cn("px-3 py-2", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "", ceOiChange && ceOiChange > 0 ? "bg-[var(--color-profit)]/10 text-[var(--color-profit)]" : ceOiChange && ceOiChange < 0 ? "bg-[var(--color-loss)]/10 text-[var(--color-loss)]" : "")}>
-                  {row.CE?.oi != null ? row.CE.oi.toLocaleString() : "-"}
+                  <div className="flex flex-col items-end gap-1">
+                    {row.CE?.oi != null ? row.CE.oi.toLocaleString() : "-"}
+                    <OiStrengthBar oi={row.CE?.oi} maxOi={maxOi} change={ceOiChange} />
+                  </div>
                 </td>
                 <td className={cn("px-3 py-2", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "", ceOiChange && ceOiChange > 0 ? "text-[var(--color-profit)]" : ceOiChange && ceOiChange < 0 ? "text-[var(--color-loss)]" : "text-[var(--color-text-muted)]")}>
-                  {ceOiChange == null ? "—" : `${ceOiChange > 0 ? "+" : ""}${ceOiChange.toLocaleString()}`}
+                  <div className="flex flex-col items-end gap-1">
+                    {ceOiChange == null ? "—" : `${ceOiChange > 0 ? "+" : ""}${ceOiChange.toLocaleString()}`}
+                    <OiChangeBar change={ceOiChange} maxAbsChange={maxAbsOiChange} />
+                  </div>
                 </td>
                 <td className={cn("px-3 py-2", ceIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
                   {ceTick?.volume.toLocaleString() || "-"}
@@ -259,10 +284,16 @@ export function OptionChainDesktopTable({
                   {peTick?.volume.toLocaleString() || "-"}
                 </td>
                 <td className={cn("px-3 py-2", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "", peOiChange && peOiChange > 0 ? "bg-[var(--color-profit)]/10 text-[var(--color-profit)]" : peOiChange && peOiChange < 0 ? "bg-[var(--color-loss)]/10 text-[var(--color-loss)]" : "")}>
-                  {row.PE?.oi != null ? row.PE.oi.toLocaleString() : "-"}
+                  <div className="flex flex-col items-end gap-1">
+                    {row.PE?.oi != null ? row.PE.oi.toLocaleString() : "-"}
+                    <OiStrengthBar oi={row.PE?.oi} maxOi={maxOi} change={peOiChange} />
+                  </div>
                 </td>
                 <td className={cn("px-3 py-2", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "", peOiChange && peOiChange > 0 ? "text-[var(--color-profit)]" : peOiChange && peOiChange < 0 ? "text-[var(--color-loss)]" : "text-[var(--color-text-muted)]")}>
-                  {peOiChange == null ? "—" : `${peOiChange > 0 ? "+" : ""}${peOiChange.toLocaleString()}`}
+                  <div className="flex flex-col items-end gap-1">
+                    {peOiChange == null ? "—" : `${peOiChange > 0 ? "+" : ""}${peOiChange.toLocaleString()}`}
+                    <OiChangeBar change={peOiChange} maxAbsChange={maxAbsOiChange} />
+                  </div>
                 </td>
                 {showBuildup && (
                   <td className={cn("px-3 py-2 text-center", peIsITM ? "bg-[var(--color-accent-yellow)]/5" : "")}>
