@@ -51,8 +51,11 @@ export function useMarketData(symbols: string[]) {
     // page. This keeps reloads quiet and lets the UI explain the auth state.
     if (previousSymbols.length > 0 || addedSymbols.length > 0) {
       const ws = getWebSocket();
+      ws.updateAuthToken(token);
       if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
       if (addedSymbols.length > 0) ws.subscribeMany(addedSymbols, handleTick);
+    } else if (token) {
+      getWebSocket().updateAuthToken(token);
     }
     subscribedSymbols.current = requestedSymbols;
 

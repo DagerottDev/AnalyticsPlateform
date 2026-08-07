@@ -31,10 +31,10 @@ export function tickAgeSeconds(
 }
 
 /**
- * A recent websocket tick is stronger evidence than our calendar. Fyers can
- * keep streaming during extended/exception sessions, so callers should not
- * discard this tick just because the browser's regular-session schedule has
- * already elapsed.
+ * A recent websocket tick is evidence of a healthy in-session transport.
+ * Callers must still apply the exchange-session boundary: Fyers can emit
+ * duplicate/final frames after close that must not make a settled market
+ * appear live.
  */
 export function isFreshBrokerStreamTick(
   tick: Pick<MarketTick, "timestamp" | "feed" | "last_stream_timestamp"> | null | undefined,
@@ -69,11 +69,13 @@ export function describeDataFreshness(
     ? null
     : streamAgeSeconds < 60 ? `${streamAgeSeconds}s ago` : `${Math.floor(streamAgeSeconds / 60)}m ago`;
 
-  // A fresh stream tick is broker evidence that wins over a stale local
-  // session calendar (extended hours, special sessions, or a clock skew).
-  // REST snapshots deliberately do not take this path: they are still shown
-  // as closed outside regular hours, rather than pretending the market is
-  // trading merely because the quotes endpoint answered.
+  // Apply the authoritative exchange-session boundary before considering
+  // transport freshness. Fyers may keep sending final/duplicate websocket
+  // frames after close, and those must not be labelled as live market data.
+  if (marketSession.state !== "open") {
+    return { state: "closed", label: marketSession.label, detail: marketSession.detail };
+  }
+
   if (streamAgeSeconds != null && streamAgeSeconds <= DELAYED_TICK_MAX_AGE_SECONDS) {
     if (streamAgeSeconds <= LIVE_TICK_MAX_AGE_SECONDS) {
       return { state: "live", label: "Live", detail: `Latest broker stream tick (${streamAgeLabel}).` };
@@ -81,9 +83,6 @@ export function describeDataFreshness(
     return { state: "delayed", label: `Delayed · ${streamAgeLabel}`, detail: "A broker stream tick arrived recently; waiting for the next update." };
   }
 
-  if (marketSession.state !== "open") {
-    return { state: "closed", label: marketSession.label, detail: marketSession.detail };
-  }
   if (ageSeconds == null) {
     return { state: "waiting", label: "Awaiting quote", detail: "No market-data timestamp received yet." };
   }

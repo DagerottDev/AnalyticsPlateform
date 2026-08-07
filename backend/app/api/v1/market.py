@@ -369,7 +369,7 @@ async def market_ws(
         return
 
     client_id = payload.get("sub")
-    service = session_manager.get_session(client_id) if client_id else None
+    service, session_generation, session_changed = session_manager.get_session_snapshot(client_id)
 
     await websocket.accept()
 
@@ -487,10 +487,38 @@ async def market_ws(
                 message = {**message, "symbol": from_fyers_ws_symbol(message["symbol"])}
             await websocket.send_json({"type": "tick", "data": message})
 
+    async def watch_session_generation() -> None:
+        """Disconnect this proxy when its captured broker service is replaced.
+
+        Browser heartbeats only prove that this FastAPI socket is reachable;
+        they do not prove that the captured Fyers service is still current.
+        A new login closes that service, so keeping this proxy open would
+        strand the browser on a permanently silent stream.
+        """
+        await session_changed.wait()
+        logger.info(
+            "Closing market websocket for broker session generation %s; active generation is %s",
+            session_generation,
+            session_manager.generation,
+        )
+        await websocket.close(code=4410, reason="Broker session changed")
+
     try:
-        await asyncio.gather(reader(), writer())
+        tasks = {
+            asyncio.create_task(reader(), name="market-ws-reader"),
+            asyncio.create_task(writer(), name="market-ws-writer"),
+            asyncio.create_task(watch_session_generation(), name="market-ws-session-watch"),
+        }
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            task.result()
     except WebSocketDisconnect:
         pass
+    except asyncio.CancelledError:
+        raise
     except Exception:
         logger.exception("Market data websocket connection failed")
     finally:

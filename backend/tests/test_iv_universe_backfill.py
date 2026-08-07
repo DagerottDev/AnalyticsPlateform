@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.core.exceptions import BrokerAuthError
+from app.core.exceptions import BrokerAuthError, BrokerRateLimitError
 from app.services import iv_universe_backfill
 from app.services.fo_iv_universe_store import (
     load_latest_snapshot_per_symbol,
@@ -46,9 +46,10 @@ async def test_skips_entirely_without_an_active_broker_session(
         iv_universe_backfill, "async_session_maker", lambda: _FakeSessionContext(db_session)
     )
 
-    await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
+    completed = await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
 
     compute_atm_iv.assert_not_awaited()
+    assert completed is False
 
 
 @pytest.mark.asyncio
@@ -77,7 +78,7 @@ async def test_skips_symbols_already_captured_today_and_persists_the_rest(
         iv_universe_backfill, "async_session_maker", lambda: _FakeSessionContext(db_session)
     )
 
-    await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
+    completed = await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
 
     compute_atm_iv.assert_awaited_once_with(active_broker_session, "TCS")
     latest = {
@@ -87,10 +88,11 @@ async def test_skips_symbols_already_captured_today_and_persists_the_rest(
     assert latest["RELIANCE"].atm_iv == 0.18  # untouched — already captured today
     assert latest["TCS"].atm_iv == 0.25
     assert latest["TCS"].spot == 3800.0
+    assert completed is True
 
 
 @pytest.mark.asyncio
-async def test_refreshes_a_stale_current_day_snapshot(
+async def test_refreshes_a_snapshot_older_than_the_daily_window(
     db_session: AsyncSession,
     fast_settings: Settings,
     active_broker_session: AsyncMock,
@@ -107,7 +109,7 @@ async def test_refreshes_a_stale_current_day_snapshot(
         iv_rank=None,
         iv_percentile=None,
     )
-    snapshot.updated_at = datetime.now(UTC) - timedelta(hours=2)
+    snapshot.updated_at = datetime.now(UTC) - timedelta(days=2)
     await db_session.commit()
     monkeypatch.setattr(
         iv_universe_backfill,
@@ -148,7 +150,7 @@ async def test_one_failing_symbol_does_not_block_the_rest(
         iv_universe_backfill, "async_session_maker", lambda: _FakeSessionContext(db_session)
     )
 
-    await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
+    completed = await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
 
     latest = {
         snapshot.symbol: snapshot
@@ -156,6 +158,31 @@ async def test_one_failing_symbol_does_not_block_the_rest(
     }
     assert "BROKEN" not in latest
     assert latest["TCS"].atm_iv == 0.30
+    assert completed is False
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_stops_the_cycle_before_the_next_symbol(
+    db_session: AsyncSession,
+    fast_settings: Settings,
+    active_broker_session: AsyncMock,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        iv_universe_backfill, "NSE_FO_SYMBOLS", {"RELIANCE": "Reliance", "TCS": "TCS"}
+    )
+    compute = AsyncMock(
+        side_effect=BrokerRateLimitError("Fyers request limit reached", retry_after=30)
+    )
+    monkeypatch.setattr(iv_universe_backfill, "compute_atm_iv", compute)
+    monkeypatch.setattr(
+        iv_universe_backfill, "async_session_maker", lambda: _FakeSessionContext(db_session)
+    )
+
+    with pytest.raises(BrokerRateLimitError):
+        await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
+
+    compute.assert_awaited_once_with(active_broker_session, "RELIANCE")
 
 
 @pytest.mark.asyncio
@@ -469,10 +496,11 @@ async def test_a_symbol_with_no_usable_quote_is_left_for_a_later_cycle(
     )
     monkeypatch.setattr(iv_universe_backfill, "compute_atm_iv", AsyncMock(return_value=None))
 
-    await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
+    completed = await iv_universe_backfill.run_iv_universe_backfill(fast_settings)
 
     latest = await load_latest_snapshot_per_symbol(db_session)
     assert latest == []  # nothing persisted — no usable quote to persist
+    assert completed is False
 
 
 @pytest.mark.asyncio
@@ -487,6 +515,11 @@ async def test_loop_runs_immediately_then_stops_on_the_stop_event(
         stop_event.set()
 
     monkeypatch.setattr(iv_universe_backfill, "run_iv_universe_backfill", fake_run)
+    monkeypatch.setattr(
+        iv_universe_backfill,
+        "_utc_now",
+        lambda: datetime(2026, 8, 7, 11, 0, tzinfo=UTC),  # 16:30 IST
+    )
     stop_event = asyncio.Event()
 
     await iv_universe_backfill.iv_universe_backfill_loop(fast_settings, stop_event)
@@ -504,7 +537,7 @@ async def test_loop_survives_a_cycle_that_raises_outside_the_per_symbol_guard(
     the stats refresh) used to propagate out of iv_universe_backfill_loop's
     while loop and permanently end IV backfill for the process's life."""
     settings = fast_settings.model_copy(
-        update={"iv_universe_backfill_interval_seconds": 0.01}
+        update={"iv_universe_backfill_retry_seconds": 0.01}
     )
     attempts = 0
 
@@ -516,8 +549,36 @@ async def test_loop_survives_a_cycle_that_raises_outside_the_per_symbol_guard(
         stop_event.set()
 
     monkeypatch.setattr(iv_universe_backfill, "run_iv_universe_backfill", flaky_run)
+    monkeypatch.setattr(
+        iv_universe_backfill,
+        "_utc_now",
+        lambda: datetime(2026, 8, 7, 11, 0, tzinfo=UTC),  # 16:30 IST
+    )
     stop_event = asyncio.Event()
 
     await iv_universe_backfill.iv_universe_backfill_loop(settings, stop_event)  # must not raise
 
     assert attempts == 2
+
+
+def test_post_market_schedule_waits_until_1600_ist(test_settings: Settings) -> None:
+    before_close = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)  # Friday 15:30 IST
+    after_schedule = datetime(2026, 8, 7, 11, 0, tzinfo=UTC)  # Friday 16:30 IST
+
+    assert not iv_universe_backfill.is_post_market_run_due(
+        before_close, test_settings, None
+    )
+    assert iv_universe_backfill.next_scheduled_run(
+        before_close, test_settings
+    ) == datetime(2026, 8, 7, 10, 30, tzinfo=UTC)
+    assert iv_universe_backfill.is_post_market_run_due(
+        after_schedule, test_settings, None
+    )
+
+
+def test_post_market_schedule_skips_weekends(test_settings: Settings) -> None:
+    friday_after_run = datetime(2026, 8, 7, 11, 0, tzinfo=UTC)
+
+    assert iv_universe_backfill.next_scheduled_run(
+        friday_after_run, test_settings
+    ) == datetime(2026, 8, 10, 10, 30, tzinfo=UTC)

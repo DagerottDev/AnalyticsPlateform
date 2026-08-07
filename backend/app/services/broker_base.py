@@ -36,6 +36,15 @@ class BrokerService(ABC):
         """Retrieve active instruments for a given symbol."""
         pass
 
+    async def get_nearest_expiry_instruments(self, symbol: str) -> list[dict[str, Any]]:
+        """Retrieve only the nearest expiry when a consumer does not need all months.
+
+        Brokers may override this with a cheaper endpoint call. The default
+        preserves compatibility for adapters whose option-chain API only
+        exposes the complete instrument universe.
+        """
+        return await self.get_instruments(symbol)
+
     @abstractmethod
     async def get_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
         """Retrieve live REST price quotes for a list of symbols."""

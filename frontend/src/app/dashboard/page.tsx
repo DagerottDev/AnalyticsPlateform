@@ -24,7 +24,7 @@ import { Eyebrow } from "@/components/ui/SectionHeader";
 import { AddTickerModal } from "@/components/market/AddTickerModal";
 import { MarketTick } from "@/types/market";
 import { DataFreshness } from "@/components/market/DataFreshness";
-import { isFreshBrokerStreamTick } from "@/lib/dataFreshness";
+import { isFreshBrokerStreamTick, tickAgeSeconds } from "@/lib/dataFreshness";
 import { useNseMarketSession } from "@/hooks/useNseMarketSession";
 import {
   BarChart3,
@@ -241,12 +241,26 @@ export default function DashboardPage() {
   const ticks = useTickStore((state) => state.ticks);
   const getTick = (symbol: string) => ticks[symbol] ?? null;
   const brokerStreamActive = tickers.some((symbol) => isFreshBrokerStreamTick(ticks[symbol]));
-  const feedActive = marketSession.state === "open" || brokerStreamActive;
+  const freshQuoteActive = tickers.some((symbol) => {
+    const age = tickAgeSeconds(ticks[symbol]);
+    return age != null && age <= 15;
+  });
+  const feedActive =
+    marketSession.state === "open" && (brokerStreamActive || freshQuoteActive);
   const feedDetail = !isAuthenticated
     ? "Connect a broker account from the Accounts page to start the market stream."
-    : brokerStreamActive && marketSession.state !== "open"
-    ? "Fyers is still sending recent ticks; broker stream activity takes precedence over the regular-session calendar."
+    : marketSession.state === "open" && !feedActive
+    ? "No recent broker tick or quote snapshot has arrived. The market connection is reconnecting."
     : marketSession.detail;
+  const feedLabel = !isAuthenticated
+    ? "Not authenticated"
+    : feedActive
+    ? "Live Feed Active"
+    : marketSession.state === "open"
+    ? "Feed Stale · Reconnecting"
+    : marketSession.state === "preopen"
+    ? "Pre-open · Feed Paused"
+    : "Market Closed · Feed Paused";
 
   return (
     <DashboardLayout>
@@ -282,7 +296,7 @@ export default function DashboardPage() {
                 <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${feedActive ? "bg-[var(--color-status-good)]" : "bg-[var(--color-text-muted)]"}`} />
               </span>
               <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
-                {!isAuthenticated ? "Not authenticated" : feedActive ? "Live Feed Active" : marketSession.state === "preopen" ? "Pre-open · Feed Paused" : "Market Closed · Feed Paused"}
+                {feedLabel}
               </span>
             </div>
           </div>
@@ -309,7 +323,7 @@ export default function DashboardPage() {
                 key={sym}
                 symbol={sym}
                 tick={getTick(sym)}
-                feedPaused={!feedActive}
+                feedPaused={marketSession.state !== "open"}
                 authenticated={isAuthenticated}
                 onRemove={tickers.length > 1 ? () => removeTicker(sym) : undefined}
               />

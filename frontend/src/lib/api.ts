@@ -43,7 +43,7 @@ apiClient.interceptors.request.use(
 // caller (see authStore.ts's hydrate(), which always wraps this in a
 // non-blocking .catch()) — logging them would just be permanent noise in
 // the failure panel for something that isn't actually a problem.
-const SILENT_FAILURE_URLS = ["/auth/auto-login"];
+const SILENT_FAILURE_URLS = ["/auth/auto-login", "/auth/session"];
 
 // The backend's broker session lives in an in-memory map keyed by client_id
 // and doesn't survive a server restart, independently of the browser's own

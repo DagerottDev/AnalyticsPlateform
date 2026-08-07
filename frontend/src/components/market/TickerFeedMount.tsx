@@ -63,6 +63,7 @@ export function TickerFeedMount() {
     const addedSymbols = requestedSymbols.filter((s) => !prevSymbols.current.includes(s));
     if (prevSymbols.current.length > 0 || addedSymbols.length > 0) {
       const ws = getWebSocket();
+      ws.updateAuthToken(token);
       if (removedSymbols.length > 0) ws.unsubscribeMany(removedSymbols, handleTick);
       if (addedSymbols.length > 0) {
         ws.subscribeMany(addedSymbols, handleTick);
@@ -70,6 +71,10 @@ export function TickerFeedMount() {
         // per-session fallback poll running. Do not duplicate it with a REST
         // request for every mount/navigation.
       }
+    } else if (token) {
+      // Auth can rotate while the watchlist stays identical. The singleton
+      // transport must still reconnect with the new token.
+      getWebSocket().updateAuthToken(token);
     }
 
     prevSymbols.current = requestedSymbols;

@@ -13,11 +13,13 @@ candles so rank/percentile become useful without waiting a full month.
 import asyncio
 import logging
 from datetime import UTC, date, datetime, timedelta
+from datetime import time as datetime_time
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.core.exceptions import is_broker_auth_error
+from app.core.exceptions import BrokerRateLimitError, is_broker_auth_error
 from app.data.nse_fo_symbols import NSE_FO_SYMBOLS
 from app.db.session import async_session_maker
 from app.services.atm_iv import compute_atm_iv
@@ -38,6 +40,53 @@ logger = logging.getLogger(__name__)
 # without the history query scanning an unbounded table.
 _HISTORY_LOOKBACK_DAYS = 400
 _history_seed_attempted: set[tuple[date, str]] = set()
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def next_scheduled_run(now: datetime, settings: Settings) -> datetime:
+    """Return the next weekday post-market IV run in UTC."""
+    local_now = now.astimezone(IST)
+    for offset in range(8):
+        run_date = local_now.date() + timedelta(days=offset)
+        if run_date.weekday() >= 5:
+            continue
+        candidate = datetime.combine(
+            run_date,
+            datetime_time(
+                hour=settings.iv_universe_backfill_hour_ist,
+                minute=settings.iv_universe_backfill_minute_ist,
+            ),
+            tzinfo=IST,
+        )
+        if candidate > local_now:
+            return candidate.astimezone(UTC)
+    raise RuntimeError("Unable to calculate the next IV-universe run")
+
+
+def is_post_market_run_due(
+    now: datetime, settings: Settings, last_successful_date: date | None
+) -> bool:
+    local_now = now.astimezone(IST)
+    scheduled = datetime_time(
+        hour=settings.iv_universe_backfill_hour_ist,
+        minute=settings.iv_universe_backfill_minute_ist,
+    )
+    return (
+        local_now.weekday() < 5
+        and local_now.time().replace(tzinfo=None) >= scheduled
+        and last_successful_date != local_now.date()
+    )
+
+
+async def _wait_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=max(0.0, seconds))
+    except TimeoutError:
+        return
 
 
 def _snapshot_is_due(
@@ -109,11 +158,11 @@ async def _seed_symbol_history_if_needed(
     return True
 
 
-async def run_iv_universe_backfill(settings: Settings) -> None:
+async def run_iv_universe_backfill(settings: Settings) -> bool:
     """Capture due ATM-IV observations and optionally seed prior history."""
-    today = datetime.now(UTC).date()
+    today = _utc_now().date()
     from_date = today - timedelta(days=_HISTORY_LOOKBACK_DAYS)
-    now = datetime.now(UTC)
+    now = _utc_now()
     async with async_session_maker() as db:
         current_snapshots = await load_snapshots_for_date(db, today)
         await _refresh_current_day_stats(db, today, from_date)
@@ -121,7 +170,7 @@ async def run_iv_universe_backfill(settings: Settings) -> None:
     service = session_manager.get_active_session()
     if service is None:
         logger.info("Skipping IV universe backfill: no active broker session")
-        return
+        return False
 
     universe = NSE_FO_SYMBOLS
     if getattr(service, "supports_live_fno_symbol_master", False) is True:
@@ -138,13 +187,15 @@ async def run_iv_universe_backfill(settings: Settings) -> None:
         )
     ]
     if not pending:
-        return
+        return True
 
     seed_attempts = 0
+    incomplete = False
     for symbol in pending:
         try:
             result = await compute_atm_iv(service, symbol)
             if result is None:
+                incomplete = True
                 logger.info("No usable live ATM-IV quote for %s; retrying later", symbol)
                 await asyncio.sleep(settings.iv_universe_backfill_symbol_delay_seconds)
                 continue
@@ -186,6 +237,16 @@ async def run_iv_universe_backfill(settings: Settings) -> None:
                     iv_rank=rank,
                     iv_percentile=percentile,
                 )
+        except BrokerRateLimitError:
+            # Broker capacity is shared with every interactive view. Stop the
+            # whole background cycle at the first explicit 429; the scheduler
+            # retries after a cooldown instead of hammering the remaining
+            # universe and starving user-facing option-chain requests.
+            logger.warning(
+                "Pausing IV universe backfill after broker rate limit at %s",
+                symbol,
+            )
+            raise
         except Exception as exc:
             if is_broker_auth_error(exc):
                 logger.warning(
@@ -193,9 +254,10 @@ async def run_iv_universe_backfill(settings: Settings) -> None:
                     "Reconnect the broker to resume live data."
                 )
                 await invalidate_broker_session()
-                return
+                return False
             # One unavailable chain should not stop the rest of the universe
             # from being captured this cycle.
+            incomplete = True
             logger.exception("IV universe backfill failed for %s", symbol)
         await asyncio.sleep(settings.iv_universe_backfill_symbol_delay_seconds)
 
@@ -203,6 +265,9 @@ async def run_iv_universe_backfill(settings: Settings) -> None:
     # rank/percentile without requiring another broker quote cycle.
     async with async_session_maker() as db:
         await _refresh_current_day_stats(db, today, from_date)
+    # Successful rows are skipped on the retry, so returning False here lets
+    # the scheduler revisit only missing/unavailable symbols after cooldown.
+    return not incomplete
 
 
 async def _refresh_current_day_stats(
@@ -226,25 +291,31 @@ async def _refresh_current_day_stats(
 
 
 async def iv_universe_backfill_loop(settings: Settings, stop_event: asyncio.Event) -> None:
-    """Run immediately, then repeat at the configured interval until shutdown."""
+    """Run once after the weekday market close, retrying only on cooldown."""
+    last_successful_date: date | None = None
     while not stop_event.is_set():
+        now = _utc_now()
+        if not is_post_market_run_due(now, settings, last_successful_date):
+            next_run = next_scheduled_run(now, settings)
+            logger.info("Next IV universe backfill scheduled for %s", next_run.astimezone(IST))
+            await _wait_or_stop(stop_event, (next_run - now).total_seconds())
+            continue
+
         try:
-            await run_iv_universe_backfill(settings)
+            completed = await run_iv_universe_backfill(settings)
+        except BrokerRateLimitError as exc:
+            cooldown = max(settings.iv_universe_backfill_retry_seconds, exc.retry_after)
+            logger.warning(
+                "IV universe backfill rate-limited; retrying post-market in %.0fs",
+                cooldown,
+            )
+            await _wait_or_stop(stop_event, cooldown)
+            continue
         except Exception:
-            # run_iv_universe_backfill only guards its per-symbol body — a
-            # failure in the setup/teardown around it (async_session_maker,
-            # fno_symbol_store, the stats refresh) would otherwise propagate
-            # out of this while loop and permanently end IV universe
-            # backfill for the rest of the process's life. Log and retry
-            # next cycle instead (same fix already applied to the GTT/
-            # basket monitor loops).
-            logger.exception("IV universe backfill cycle failed; will retry next cycle")
-        stop_wait = asyncio.create_task(stop_event.wait())
-        done, pending = await asyncio.wait(
-            {stop_wait},
-            timeout=settings.iv_universe_backfill_interval_seconds,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+            logger.exception("IV universe backfill cycle failed; retrying post-market")
+            completed = False
+
+        if completed:
+            last_successful_date = _utc_now().astimezone(IST).date()
+            continue
+        await _wait_or_stop(stop_event, settings.iv_universe_backfill_retry_seconds)

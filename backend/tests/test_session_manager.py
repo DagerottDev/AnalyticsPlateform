@@ -52,6 +52,21 @@ async def test_second_login_evicts_the_first_session(manager: SessionManager) ->
 
 
 @pytest.mark.asyncio
+async def test_session_replacement_signals_long_lived_consumers(manager: SessionManager) -> None:
+    service_a = AsyncMock()
+    service_b = AsyncMock()
+    await manager.set_session("CLIENT_A", service_a)
+    _, generation, changed = manager.get_session_snapshot("CLIENT_A")
+
+    await manager.set_session("CLIENT_A", service_b)
+
+    assert changed.is_set()
+    assert manager.generation == generation + 1
+    current, _, _ = manager.get_session_snapshot("CLIENT_A")
+    assert current is service_b
+
+
+@pytest.mark.asyncio
 async def test_clear_closes_and_removes_the_active_session(manager: SessionManager) -> None:
     service = AsyncMock()
     await manager.set_session("CLIENT_A", service)

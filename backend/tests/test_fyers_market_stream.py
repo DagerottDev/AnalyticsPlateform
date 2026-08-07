@@ -380,6 +380,7 @@ async def test_shared_quote_poll_fetches_and_dispatches_to_all_listeners() -> No
             access_token="fake-token",
             quote_fetcher=quote_fetcher,
             quote_poll_interval_seconds=0.01,
+            market_open_checker=lambda: True,
         )
         manager.bind_loop()
 
@@ -409,6 +410,25 @@ async def test_shared_quote_poll_skips_fetch_when_nothing_subscribed() -> None:
         quote_fetcher=quote_fetcher,
         quote_poll_interval_seconds=0.01,
     )
+    manager.bind_loop()
+
+    await asyncio.sleep(0.05)
+    manager.close()
+
+    quote_fetcher.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_shared_quote_poll_stops_after_market_close() -> None:
+    quote_fetcher = AsyncMock(return_value=[])
+    manager = FyersMarketStreamManager(
+        app_id="TESTAPP-100",
+        access_token="fake-token",
+        quote_fetcher=quote_fetcher,
+        quote_poll_interval_seconds=0.01,
+        market_open_checker=lambda: False,
+    )
+    manager._refcounts["NSE:NIFTY50-INDEX"] = 1
     manager.bind_loop()
 
     await asyncio.sleep(0.05)
@@ -587,6 +607,7 @@ async def test_shared_quote_poll_survives_a_fetcher_exception() -> None:
         access_token="fake-token",
         quote_fetcher=flaky_fetcher,
         quote_poll_interval_seconds=0.01,
+        market_open_checker=lambda: True,
     )
     manager.subscribe = lambda *_a, **_k: None  # unused here
     manager._refcounts["NSE:NIFTY50-INDEX"] = 1

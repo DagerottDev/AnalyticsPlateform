@@ -203,6 +203,39 @@ async def test_get_instruments_parses_option_chain_across_expiries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nearest_expiry_instruments_use_one_wide_chain_request() -> None:
+    service = _make_service()
+    service.client.optionchain = MagicMock(
+        return_value={
+            "s": "ok",
+            "data": {
+                "expiryData": [{"date": "10-Jul-2025", "expiry": "1752105000"}],
+                "optionsChain": [
+                    {"symbol": "NSE:NIFTY50-INDEX", "option_type": "", "strike_price": -1},
+                    {
+                        "symbol": "NSE:NIFTY25071017500CE",
+                        "option_type": "CE",
+                        "strike_price": 17500,
+                    },
+                    {
+                        "symbol": "NSE:NIFTY25071017500PE",
+                        "option_type": "PE",
+                        "strike_price": 17500,
+                    },
+                ],
+            },
+        }
+    )
+
+    instruments = await service.get_nearest_expiry_instruments("NIFTY")
+
+    assert {item["option_type"] for item in instruments} == {"CE", "PE"}
+    service.client.optionchain.assert_called_once_with(
+        {"symbol": "NSE:NIFTY50-INDEX", "strikecount": 50, "timestamp": ""}
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_instruments_parses_oi_change_fields() -> None:
     """oi/oich/oichp from Fyers' optionchain rows are passed through so the
     frontend can classify long/short buildup; missing on the index row is fine."""
@@ -984,10 +1017,12 @@ async def test_get_quotes_gives_up_after_exhausting_429_retries() -> None:
     service = _make_service()
     service.client.quotes = MagicMock(return_value={"s": "error", "code": 429})
 
-    with patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()):
-        quotes = await service.get_quotes(["NIFTY"])
+    with (
+        patch("app.services.fyers_service.asyncio.sleep", new=AsyncMock()),
+        pytest.raises(BrokerRateLimitError),
+    ):
+        await service.get_quotes(["NIFTY"])
 
-    assert quotes == []
     assert service.client.quotes.call_count == FyersService._MAX_QUOTE_FETCH_RETRIES
 
 

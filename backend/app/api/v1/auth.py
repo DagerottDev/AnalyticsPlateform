@@ -21,12 +21,17 @@ from app.db.session import get_db
 from app.models.user import TradingMode
 from app.schemas.auth import (
     AuthErrorResponse,
+    BrokerSessionStatusResponse,
     LoginRequest,
     LoginResponse,
     UserProfileResponse,
 )
 from app.services.broker_credentials_store import load_broker_credentials, save_broker_credentials
-from app.services.broker_session_store import clear_broker_session, save_broker_session
+from app.services.broker_session_store import (
+    clear_broker_session,
+    load_broker_session,
+    save_broker_session,
+)
 from app.services.dhan_service import DhanService
 from app.services.fyers_headless import get_fyers_access_token_headless
 from app.services.fyers_service import FyersService
@@ -37,6 +42,46 @@ from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+_auto_login_lock = asyncio.Lock()
+
+
+def _login_response_from_profile(
+    profile: Any, settings: Settings
+) -> LoginResponse:
+    token = create_access_token(data=profile.to_jwt_payload(), settings=settings)
+    return LoginResponse(
+        access_token=token,
+        expires_in=settings.jwt_expiry_minutes * 60,
+        user=UserProfileResponse(
+            client_id=profile.client_id,
+            broker_name=profile.broker_name,
+            trading_mode=profile.trading_mode.value,
+            account_name=profile.account_name,
+            connected_at=profile.connected_at,
+        ),
+    )
+
+
+def _login_response_from_record(record: Any, settings: Settings) -> LoginResponse:
+    broker_name = "Dhan" if record.broker == "dhan" else "Fyers"
+    payload = {
+        "sub": record.client_id,
+        "broker": broker_name,
+        "trading_mode": record.trading_mode,
+        "account_name": record.account_name,
+        "connected_at": record.connected_at.isoformat(),
+    }
+    return LoginResponse(
+        access_token=create_access_token(payload, settings=settings),
+        expires_in=settings.jwt_expiry_minutes * 60,
+        user=UserProfileResponse(
+            client_id=record.client_id,
+            broker_name=broker_name,
+            trading_mode=record.trading_mode,
+            account_name=record.account_name,
+            connected_at=record.connected_at,
+        ),
+    )
 
 
 async def _resolve_access_token(request: LoginRequest, settings: Settings) -> str:
@@ -100,8 +145,8 @@ async def _complete_login(
     try:
         profile = await service.get_profile()
 
-        token = create_access_token(data=profile.to_jwt_payload(), settings=settings)
-        await session_manager.set_session(profile.client_id, service)
+        # Persist first. A database failure must not tear down the live
+        # service that is currently feeding already-connected browser tabs.
         await save_broker_session(
             db,
             settings,
@@ -112,20 +157,10 @@ async def _complete_login(
             trading_mode=trading_mode,
             account_name=profile.account_name,
         )
+        await session_manager.set_session(profile.client_id, service)
         if settings.market_data_backfill_enabled:
             request_market_data_backfill()
-
-        return LoginResponse(
-            access_token=token,
-            expires_in=settings.jwt_expiry_minutes * 60,
-            user=UserProfileResponse(
-                client_id=profile.client_id,
-                broker_name=profile.broker_name,
-                trading_mode=profile.trading_mode.value,
-                account_name=profile.account_name,
-                connected_at=profile.connected_at,
-            ),
-        )
+        return _login_response_from_profile(profile, settings)
 
     except BrokerAuthError as e:
         await service.close()
@@ -135,6 +170,29 @@ async def _complete_login(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=e.message
         ) from e
+    except Exception:
+        # Persistence/setup failures happen before the service becomes active.
+        # Do not leak the newly-created SDK client, but also do not close it if
+        # activation itself succeeded and a later non-critical hook failed.
+        if session_manager.get_active_session() is not service:
+            await service.close()
+        raise
+
+
+@router.get(
+    "/session",
+    response_model=BrokerSessionStatusResponse,
+    summary="Verify that the authenticated browser still has a live broker service",
+)
+async def broker_session_status(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> BrokerSessionStatusResponse:
+    """Check the restored in-memory session without logging into Fyers again."""
+    client_id = current_user.get("sub")
+    service, generation, _ = session_manager.get_session_snapshot(client_id)
+    if service is None:
+        raise HTTPException(status_code=401, detail="Active broker session not found")
+    return BrokerSessionStatusResponse(active=True, generation=generation)
 
 
 @router.post(
@@ -237,35 +295,43 @@ async def auto_login(
     from broker_credentials_store instead of the request, so the frontend
     can attempt this silently before ever showing the login form.
     """
-    creds = await load_broker_credentials(db, settings)
-    if creds is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Auto-login is not configured — log in once with TOTP credentials first.",
-        )
+    # Multiple tabs can start together. Serialize the whole recovery and
+    # re-check the persisted/in-memory session after acquiring the lock so
+    # all but the first request reuse the service it established.
+    async with _auto_login_lock:
+        record = await load_broker_session(db)
+        if record is not None and session_manager.get_session(record.client_id) is not None:
+            return _login_response_from_record(record, settings)
 
-    try:
-        access_token = await get_fyers_access_token_headless(
-            client_id=creds.client_id,
-            totp_secret=creds.totp_secret,
-            pin=creds.pin,
-            app_id=creds.app_id,
-            app_secret=creds.api_secret,
-            redirect_uri=creds.redirect_uri,
-            ttl_seconds=settings.broker_token_cache_ttl_seconds,
-        )
-    except BrokerAuthError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
+        creds = await load_broker_credentials(db, settings)
+        if creds is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Auto-login is not configured — log in once with TOTP credentials first.",
+            )
 
-    return await _complete_login(
-        access_token,
-        "fyers",
-        creds.app_id,
-        creds.client_id,
-        TradingMode(creds.trading_mode),
-        settings,
-        db,
-    )
+        try:
+            access_token = await get_fyers_access_token_headless(
+                client_id=creds.client_id,
+                totp_secret=creds.totp_secret,
+                pin=creds.pin,
+                app_id=creds.app_id,
+                app_secret=creds.api_secret,
+                redirect_uri=creds.redirect_uri,
+                ttl_seconds=settings.broker_token_cache_ttl_seconds,
+            )
+        except BrokerAuthError as e:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
+
+        return await _complete_login(
+            access_token,
+            "fyers",
+            creds.app_id,
+            creds.client_id,
+            TradingMode(creds.trading_mode),
+            settings,
+            db,
+        )
 
 
 @router.post(

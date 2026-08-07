@@ -8,7 +8,12 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { AuthStore, TradingMode } from "@/types/auth";
-import { autoLoginBroker, loginWithBroker, logoutUser } from "@/lib/auth";
+import {
+  autoLoginBroker,
+  loginWithBroker,
+  logoutUser,
+  verifyBrokerSession,
+} from "@/lib/auth";
 
 // hydrate() is called from every useAuth()-consuming component's mount
 // effect (Header, DashboardLayout, and several pages all call it), and
@@ -122,12 +127,25 @@ export const useAuthStore = create<AuthStore>()(
           hasHydratedOnce = true;
           hydratePromise = Promise.resolve();
 
-          // Silently restore the server-side broker session. A user may log
-          // out or manually log in while this request is pending, so only
-          // apply the result if this is still the same startup session.
-          void autoLoginBroker()
+          // The backend persists and restores the broker service itself. If
+          // this browser already has a JWT, verify that restored service
+          // first; logging into Fyers again would replace it and kill every
+          // websocket still attached to the previous service. Only perform
+          // the expensive credential flow when verification says the service
+          // is genuinely absent or the browser token has expired.
+          const restoreSession = hadPersistedSession
+            ? verifyBrokerSession().then(() => null).catch(() => autoLoginBroker())
+            : autoLoginBroker();
+
+          // A user may log out or manually log in while recovery is pending,
+          // so only apply a new token if this is still the startup session.
+          void restoreSession
             .then((response) => {
               const current = get();
+              if (response === null) {
+                if (current.token === persistedToken) set({ sessionLive: true });
+                return;
+              }
               const startupSessionIsCurrent = hadPersistedSession
                 ? current.token === persistedToken
                 : !current.isAuthenticated;

@@ -22,6 +22,9 @@ from typing import Any
 
 import certifi
 
+from app.core.exceptions import BrokerRateLimitError
+from app.services.market_session import is_regular_market_open
+
 # The underlying websocket-client library (used internally by
 # fyers_apiv3.FyersWebsocket.data_ws) builds its own default SSL context and
 # doesn't expose a way to pass ca_certs through FyersDataSocket's public
@@ -115,6 +118,7 @@ class FyersMarketStreamManager:
         access_token: str,
         quote_fetcher: QuoteFetcher | None = None,
         quote_poll_interval_seconds: float = 3.0,
+        market_open_checker: Callable[[], bool] | None = None,
     ) -> None:
         self._app_id = app_id
         self._access_token = access_token
@@ -125,6 +129,9 @@ class FyersMarketStreamManager:
         self._connected = False
         self._quote_fetcher = quote_fetcher
         self._quote_poll_interval_seconds = quote_poll_interval_seconds
+        self._market_open_checker = market_open_checker or (
+            lambda: is_regular_market_open(segment="fno")
+        )
         self._quote_poll_task: asyncio.Task[None] | None = None
         self._reconnect_task: asyncio.Task[None] | None = None
         self._state_lock = threading.RLock()
@@ -147,6 +154,11 @@ class FyersMarketStreamManager:
         assert self._quote_fetcher is not None
         while True:
             await asyncio.sleep(self._quote_poll_interval_seconds)
+            # The websocket naturally goes quiet after the exchange closes.
+            # Stop the resilience-only REST poll too, leaving broker capacity
+            # for post-market IV-universe population and other batch jobs.
+            if not self._market_open_checker():
+                continue
             with self._state_lock:
                 symbols = list(self._refcounts.keys())
             if not symbols:
@@ -155,6 +167,13 @@ class FyersMarketStreamManager:
                 quotes = await self._quote_fetcher(symbols)
                 for quote in quotes:
                     self._dispatch(quote)
+            except BrokerRateLimitError as exc:
+                logger.warning(
+                    "Shared quote-poll rate-limited for %s; cooling down for %ss",
+                    symbols,
+                    exc.retry_after,
+                )
+                await asyncio.sleep(exc.retry_after)
             except Exception:
                 logger.exception("Shared quote-poll failed for %s", symbols)
 

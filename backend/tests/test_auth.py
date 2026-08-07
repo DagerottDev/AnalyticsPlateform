@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import create_access_token, decode_token
 from app.models.user import TradingMode
 from app.services.broker_credentials_store import load_broker_credentials, save_broker_credentials
+from app.services.broker_session_store import save_broker_session
+from app.services.session_manager import session_manager
 from tests.conftest import FakeTokenBlocklist, get_test_settings
 
 
@@ -172,6 +174,62 @@ async def test_auto_login_success(
         redirect_uri="http://127.0.0.1:3000",
         ttl_seconds=get_test_settings().broker_token_cache_ttl_seconds,
     )
+
+
+@pytest.mark.asyncio
+async def test_auto_login_reuses_the_active_persisted_session(
+    client: AsyncClient,
+    mock_broker_service: AsyncMock,
+    db_session: AsyncSession,
+) -> None:
+    await save_broker_session(
+        db_session,
+        get_test_settings(),
+        client_id="TEST_CLIENT_001",
+        app_id="test-app-id-100",
+        access_token="already-active-token",
+        trading_mode=TradingMode.PAPER,
+        account_name="Default",
+    )
+    await session_manager.set_session("TEST_CLIENT_001", mock_broker_service)
+
+    with patch("app.api.v1.auth.get_fyers_access_token_headless") as headless_login:
+        response = await client.post("/api/v1/auth/auto-login")
+
+    assert response.status_code == 200
+    assert response.json()["user"]["client_id"] == "TEST_CLIENT_001"
+    headless_login.assert_not_called()
+    mock_broker_service.close.assert_not_awaited()
+    await session_manager.remove_session("TEST_CLIENT_001")
+
+
+@pytest.mark.asyncio
+async def test_session_status_reuses_active_service_without_replacing_it(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    mock_broker_service: AsyncMock,
+) -> None:
+    await session_manager.set_session("TEST_CLIENT_001", mock_broker_service)
+
+    response = await client.get("/api/v1/auth/session", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["active"] is True
+    mock_broker_service.close.assert_not_awaited()
+    await session_manager.remove_session("TEST_CLIENT_001")
+
+
+@pytest.mark.asyncio
+async def test_session_status_reports_a_missing_broker_service(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    await session_manager.clear()
+
+    response = await client.get("/api/v1/auth/session", headers=auth_headers)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Active broker session not found"
 
 
 @pytest.mark.asyncio

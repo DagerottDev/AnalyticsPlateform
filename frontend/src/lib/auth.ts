@@ -74,6 +74,11 @@ export async function autoLoginBroker(): Promise<LoginResponse> {
   return response.data;
 }
 
+/** Verify the backend-restored broker service without replacing it. */
+export async function verifyBrokerSession(): Promise<void> {
+  await apiClient.get("/auth/session");
+}
+
 export async function logoutUser(): Promise<void> {
   try {
     await apiClient.post("/auth/logout", {});

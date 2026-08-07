@@ -4,7 +4,9 @@ import { useApiErrorLogStore } from "@/stores/apiErrorLogStore";
 type TickHandler = (tick: MarketTick) => void;
 
 const WS_CLOSE_REASONS: Record<number, string> = {
+  4000: "No market data received within the liveness window.",
   4401: "Authentication failed (invalid or expired session token).",
+  4410: "The broker session changed; reconnecting to the current stream.",
 };
 
 function logWsFailure(message: string, status: number | null, detail?: string): void {
@@ -23,6 +25,7 @@ const API_URL_WITH_VERSION = API_BASE_URL.endsWith("/api/v1")
   : `${API_BASE_URL.replace(/\/api$/, "")}/api/v1`;
 
 const MAX_RECONNECT_DELAY_MS = 15000;
+const MAX_TICK_SILENCE_MS = 60_000;
 
 function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -123,6 +126,9 @@ export class MarketWebSocketClient {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private preferredToken: string | null | undefined;
+  private activeToken: string | null = null;
+  private lastTickAt: number | null = null;
   private destroyed = false;
   private suspended = false;
   private readonly handlePageHide = () => {
@@ -175,7 +181,7 @@ export class MarketWebSocketClient {
       return;
     }
     this.ws = null;
-    const token = getAuthToken();
+    const token = this.preferredToken === undefined ? getAuthToken() : this.preferredToken;
     if (!token) {
       // Authentication is a normal prerequisite, not a transport failure.
       // Hooks subscribe only after auth hydration/login, so waiting here must
@@ -183,6 +189,7 @@ export class MarketWebSocketClient {
       // unauthenticated page reload.
       return;
     }
+    this.activeToken = token;
 
     const url = `${toWebSocketUrl(API_URL_WITH_VERSION)}/market/ws?token=${encodeURIComponent(token)}`;
     let ws: WebSocket;
@@ -204,6 +211,7 @@ export class MarketWebSocketClient {
 
     ws.onopen = () => {
       this.reconnectAttempts = 0;
+      this.lastTickAt = Date.now();
       this.startHeartbeat();
       const symbols = Array.from(this.subscribers.keys());
       if (symbols.length > 0) {
@@ -222,6 +230,7 @@ export class MarketWebSocketClient {
         if (msg.type !== "tick") return;
         const tick = normalizeTick(msg.data as RawFyersTick);
         if (!tick) return;
+        this.lastTickAt = Date.now();
         this.subscribers.get(tick.trading_symbol)?.forEach((handler) => handler(tick));
       } catch {
         // Ignore malformed frames.
@@ -233,9 +242,10 @@ export class MarketWebSocketClient {
       const isCurrentSocket = this.ws === ws;
       if (isCurrentSocket) {
         this.ws = null;
+        this.activeToken = null;
         this.stopHeartbeat();
       }
-      if (!this.destroyed && event.code !== 1000) {
+      if (!this.destroyed && event.code !== 1000 && event.code !== 4410) {
         const reason = WS_CLOSE_REASONS[event.code] || event.reason || "Connection closed unexpectedly.";
         logWsFailure(`Market stream disconnected (code ${event.code}): ${reason}`, event.code);
       }
@@ -273,8 +283,19 @@ export class MarketWebSocketClient {
     this.stopHeartbeat();
     // A small application-level heartbeat prevents an idle intermediary from
     // silently dropping the browser socket.  The backend answers with pong;
-    // reconnect still relies on the normal close/error events.
+    // pong alone is not enough: the backend proxy can stay reachable while
+    // its captured broker stream has gone silent. Reconnect after a full
+    // minute without either a stream tick or REST fallback quote.
     this.heartbeatTimer = setInterval(() => {
+      if (
+        this.ws?.readyState === WebSocket.OPEN &&
+        this.subscribers.size > 0 &&
+        this.lastTickAt != null &&
+        Date.now() - this.lastTickAt >= MAX_TICK_SILENCE_MS
+      ) {
+        this.ws.close(4000, "Market data stalled");
+        return;
+      }
       this.send({ action: "ping" });
     }, 20_000);
   }
@@ -325,6 +346,34 @@ export class MarketWebSocketClient {
     if (dropSymbols.length > 0) this.send({ action: "unsubscribe", symbols: dropSymbols });
   }
 
+  /** Recreate the transport when auth rotates, even if symbols are unchanged. */
+  updateAuthToken(token: string | null): void {
+    if (this.preferredToken === token) return;
+    this.preferredToken = token;
+
+    const ws = this.ws;
+    if (
+      this.activeToken === token &&
+      ws &&
+      (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      ws.close(1000, "Authentication changed");
+      return;
+    }
+    this.ws = null;
+    this.activeToken = null;
+    if (token && this.subscribers.size > 0) this.scheduleReconnect(0);
+  }
+
   destroy(): void {
     this.destroyed = true;
     this.suspended = true;
@@ -333,6 +382,8 @@ export class MarketWebSocketClient {
     this.stopHeartbeat();
     this.ws?.close();
     this.ws = null;
+    this.activeToken = null;
+    this.lastTickAt = null;
     this.subscribers.clear();
     if (typeof window !== "undefined") {
       window.removeEventListener("pagehide", this.handlePageHide);

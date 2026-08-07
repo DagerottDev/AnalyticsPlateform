@@ -88,12 +88,18 @@ class Settings(BaseSettings):
     alert_evaluation_interval_seconds: float = 15.0
 
     # Daily ATM-IV/IV-Rank/IV-Percentile persistence across every NSE F&O
-    # stock, powering the IV screener. Current-day rows are refreshed only
-    # after this interval so the worker has a bounded broker-call cadence.
+    # stock, powering the IV screener. Run after the extended F&O session
+    # closes (15:40 IST) so interactive option chains and live quote fallback
+    # retain broker capacity during market hours.
     iv_universe_backfill_enabled: bool = True
+    iv_universe_backfill_hour_ist: int = 16
+    iv_universe_backfill_minute_ist: int = 0
+    iv_universe_backfill_retry_seconds: float = 300.0
+    # Retained for environment-file compatibility; the scheduler is now
+    # wall-clock based rather than interval based.
     iv_universe_backfill_interval_seconds: float = 1800.0
     iv_universe_backfill_symbol_delay_seconds: float = 0.35
-    iv_universe_snapshot_refresh_interval_seconds: float = 1800.0
+    iv_universe_snapshot_refresh_interval_seconds: float = 24 * 60 * 60
     # Fyers can provide daily candles for exchange-qualified option symbols.
     # The optional seed fills prior ATM-IV observations so rank/percentile do
     # not need to wait a full month after first deployment. It is capped per

@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -40,9 +42,13 @@ async def save_broker_session(
     trading_mode: TradingMode,
     account_name: str,
 ) -> None:
-    """Replace the persisted session row with the newly established one."""
-    await db.execute(delete(BrokerSessionRecord))
-    record = BrokerSessionRecord(
+    """Atomically replace the singleton persisted broker session.
+
+    A delete followed by an insert lets concurrent auto-login requests both
+    observe an empty table and then race on the ``active`` primary key. Use a
+    dialect-native upsert so replacement is one database statement.
+    """
+    values = dict(
         id=_SINGLETON_ID,
         broker=broker,
         client_id=client_id,
@@ -52,7 +58,22 @@ async def save_broker_session(
         account_name=account_name,
         connected_at=datetime.now(UTC),
     )
-    db.add(record)
+    update_values = {key: value for key, value in values.items() if key != "id"}
+    dialect_name = db.bind.dialect.name if db.bind is not None else ""
+    if dialect_name == "postgresql":
+        statement = postgresql_insert(BrokerSessionRecord).values(**values)
+        statement = statement.on_conflict_do_update(
+            index_elements=[BrokerSessionRecord.id], set_=update_values
+        )
+        await db.execute(statement)
+    elif dialect_name == "sqlite":
+        statement = sqlite_insert(BrokerSessionRecord).values(**values)
+        statement = statement.on_conflict_do_update(
+            index_elements=[BrokerSessionRecord.id], set_=update_values
+        )
+        await db.execute(statement)
+    else:
+        await db.merge(BrokerSessionRecord(**values))
     await db.commit()
 
 

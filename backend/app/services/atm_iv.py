@@ -12,7 +12,7 @@ async def compute_atm_iv(service: Any, symbol: str) -> tuple[float, float] | Non
 
     Returns ``(atm_iv, spot)``, or ``None`` if the chain/quotes were unavailable.
     """
-    instruments = await service.get_instruments(symbol)
+    instruments = await service.get_nearest_expiry_instruments(symbol)
     today = datetime.now(UTC).date()
     dated_contracts: list[tuple[date, dict[str, Any]]] = []
     for instrument in instruments:

@@ -165,6 +165,33 @@ describe("MarketWebSocketClient lifecycle", () => {
     client.destroy();
   });
 
+  it("reconnects with a rotated auth token even when symbols are unchanged", () => {
+    const client = new MarketWebSocketClient();
+    client.subscribeMany(["NSE:NIFTY50-INDEX"], () => undefined);
+    const firstSocket = FakeWebSocket.instances[0];
+    firstSocket.open();
+
+    client.updateAuthToken("fresh-token");
+    vi.advanceTimersByTime(1000);
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(FakeWebSocket.instances[1].url).toContain("token=fresh-token");
+    client.destroy();
+  });
+
+  it("reconnects when browser heartbeats work but market data stays silent", () => {
+    const client = new MarketWebSocketClient();
+    client.subscribeMany(["NSE:NIFTY50-INDEX"], () => undefined);
+    const firstSocket = FakeWebSocket.instances[0];
+    firstSocket.open();
+
+    vi.advanceTimersByTime(60_000);
+    expect(firstSocket.readyState).toBe(FakeWebSocket.CLOSED);
+    vi.advanceTimersByTime(1000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    client.destroy();
+  });
+
   it("suspends on pagehide and resumes the retained subscription set on pageshow", () => {
     const client = new MarketWebSocketClient();
     client.subscribeMany(["NSE:NIFTY50-INDEX"], () => undefined);

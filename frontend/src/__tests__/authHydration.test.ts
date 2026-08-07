@@ -5,6 +5,7 @@ const authApi = vi.hoisted(() => ({
   autoLoginBroker: vi.fn(),
   loginWithBroker: vi.fn(),
   logoutUser: vi.fn(),
+  verifyBrokerSession: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => authApi);
@@ -41,17 +42,15 @@ describe("authentication hydration", () => {
     authApi.autoLoginBroker.mockReset();
     authApi.loginWithBroker.mockReset();
     authApi.logoutUser.mockReset();
+    authApi.verifyBrokerSession.mockReset();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the persisted session without waiting for broker reconnection", async () => {
-    let resolveReconnect: (value: LoginResponse) => void = () => undefined;
-    authApi.autoLoginBroker.mockReturnValue(new Promise<LoginResponse>((resolve) => {
-      resolveReconnect = resolve;
-    }));
+  it("reuses a verified persisted broker session without auto-login", async () => {
+    authApi.verifyBrokerSession.mockResolvedValue(undefined);
 
     const { useAuthStore, isAuthHydrated } = await import("@/stores/authStore");
     useAuthStore.setState({ token: "persisted-token", user: response.user, isAuthenticated: false });
@@ -59,8 +58,10 @@ describe("authentication hydration", () => {
     await expect(useAuthStore.getState().hydrate()).resolves.toBeUndefined();
     expect(useAuthStore.getState().isAuthenticated).toBe(true);
     expect(isAuthHydrated()).toBe(true);
-
-    resolveReconnect(response);
+    await Promise.resolve();
+    expect(authApi.verifyBrokerSession).toHaveBeenCalledOnce();
+    expect(authApi.autoLoginBroker).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().token).toBe("persisted-token");
   });
 
   it("does not restore a session after the user logs out while reconnecting", async () => {
@@ -68,6 +69,7 @@ describe("authentication hydration", () => {
     authApi.autoLoginBroker.mockReturnValue(new Promise<LoginResponse>((resolve) => {
       resolveReconnect = resolve;
     }));
+    authApi.verifyBrokerSession.mockRejectedValue(new Error("backend session missing"));
 
     const { useAuthStore } = await import("@/stores/authStore");
     useAuthStore.setState({ token: "persisted-token", user: response.user, isAuthenticated: false });

@@ -214,9 +214,13 @@ class FyersService(BrokerService):
                 if (
                     not response
                     or response.get("code") != 429
-                    or attempt == self._MAX_QUOTE_FETCH_RETRIES - 1
                 ):
                     return []
+                if attempt == self._MAX_QUOTE_FETCH_RETRIES - 1:
+                    raise BrokerRateLimitError(
+                        "Fyers quote request rate-limited: request limit reached",
+                        retry_after=5,
+                    )
                 await asyncio.sleep(compute_backoff_delay(attempt, self._RETRY_BASE_DELAY_SECONDS))
 
             if not response or response.get("s") != "ok":
@@ -228,9 +232,10 @@ class FyersService(BrokerService):
                 if parsed is not None:
                     quotes_list.append(parsed)
             return quotes_list
+        except BrokerRateLimitError:
+            raise
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).error("Failed to fetch Fyers quotes: %s", e)
+            logger.error("Failed to fetch Fyers quotes: %s", e)
             return []
 
     async def _fetch_quotes_with_pacing(self, payload: dict[str, str]) -> dict[str, Any] | None:
@@ -301,6 +306,72 @@ class FyersService(BrokerService):
             await asyncio.sleep(delay)
         return await asyncio.to_thread(self.client.optionchain, payload)
 
+    def _parse_option_instruments(
+        self, symbol: str, expiry_label: str, rows: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        is_index = symbol.upper() in INDEX_SYMBOL_MAP
+        instruments: list[dict[str, Any]] = []
+        for row in rows:
+            option_type = row.get("option_type")
+            if option_type not in ("CE", "PE"):
+                continue
+            trading_symbol = str(row["symbol"])
+            instruments.append(
+                {
+                    "trading_symbol": trading_symbol,
+                    "symbol": symbol.upper(),
+                    "instrument_type": "OPTIDX" if is_index else "OPTSTK",
+                    "expiry": expiry_label,
+                    "strike": row.get("strike_price"),
+                    "option_type": option_type,
+                    "exchange": "BFO" if trading_symbol.startswith("BFO:") else "NFO",
+                    "oi": row.get("oi"),
+                    "oi_change": row.get("oich"),
+                    "oi_change_percent": row.get("oichp"),
+                }
+            )
+        return instruments
+
+    async def get_nearest_expiry_instruments(self, symbol: str) -> list[dict[str, Any]]:
+        """Fetch the nearest chain in one Fyers call for ATM-IV collection.
+
+        ``get_instruments`` needs discovery plus up to six expiry calls for
+        the interactive Option Chain. The IV universe only uses the nearest
+        ATM CE/PE pair, and Fyers already includes that nearest chain when
+        ``timestamp`` is empty, so loading every expiry wastes most of the
+        broker quota.
+        """
+        cache_key = symbol.upper()
+        cached = self._instruments_cache.get(cache_key)
+        if cached and (time.monotonic() - cached[0]) < self._INSTRUMENTS_CACHE_TTL_SECONDS:
+            dated: list[tuple[datetime, dict[str, Any]]] = []
+            for instrument in cached[1]:
+                try:
+                    expiry_at = datetime.strptime(str(instrument["expiry"]), "%d-%b-%Y")
+                except (KeyError, ValueError):
+                    continue
+                dated.append((expiry_at, instrument))
+            if dated:
+                nearest = min(item[0] for item in dated)
+                return [item[1] for item in dated if item[0] == nearest]
+
+        chain = await self._fetch_option_chain(
+            symbol, strikecount=self._DEFAULT_STRIKE_COUNT
+        )
+        if chain is None:
+            return []
+        expiry_data = chain.get("expiryData") or []
+        timestamp = str(expiry_data[0].get("expiry") or "") if expiry_data else ""
+        if not timestamp:
+            return []
+        try:
+            expiry_label = datetime.fromtimestamp(int(timestamp), tz=UTC).strftime("%d-%b-%Y")
+        except (ValueError, OSError):
+            return []
+        return self._parse_option_instruments(
+            symbol, expiry_label, list(chain.get("optionsChain") or [])
+        )
+
     async def get_instruments(self, symbol: str) -> list[dict[str, Any]]:
         """Fetch option contracts for a symbol across its near-term expiries.
 
@@ -355,7 +426,6 @@ class FyersService(BrokerService):
                 return []
 
             self._no_contract_cache.pop(cache_key, None)
-            is_index = symbol.upper() in INDEX_SYMBOL_MAP
             instruments: list[dict[str, Any]] = []
             rate_limited = False
 
@@ -387,25 +457,11 @@ class FyersService(BrokerService):
                 if chain is None:
                     continue
 
-                for row in chain.get("optionsChain", []):
-                    option_type = row.get("option_type")
-                    if option_type not in ("CE", "PE"):
-                        continue  # The underlying/index row has option_type "".
-                    trading_symbol = str(row["symbol"])
-                    instruments.append(
-                        {
-                            "trading_symbol": trading_symbol,
-                            "symbol": symbol.upper(),
-                            "instrument_type": "OPTIDX" if is_index else "OPTSTK",
-                            "expiry": expiry_label,
-                            "strike": row.get("strike_price"),
-                            "option_type": option_type,
-                            "exchange": "BFO" if trading_symbol.startswith("BFO:") else "NFO",
-                            "oi": row.get("oi"),
-                            "oi_change": row.get("oich"),
-                            "oi_change_percent": row.get("oichp"),
-                        }
+                instruments.extend(
+                    self._parse_option_instruments(
+                        symbol, expiry_label, list(chain.get("optionsChain") or [])
                     )
+                )
 
             if rate_limited:
                 if cached and cached[1]:

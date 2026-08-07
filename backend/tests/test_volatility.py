@@ -239,7 +239,7 @@ class TestVolatilityRouter:
         active_broker_session.get_historical_data.return_value = _candles(
             [22000.0 + (i % 11) - 5 for i in range(300)]
         )
-        active_broker_session.get_instruments.return_value = [
+        active_broker_session.get_nearest_expiry_instruments.return_value = [
             {
                 "trading_symbol": "NSE:NIFTY27DEC22000CE",
                 "expiry": "30-Dec-2027",
@@ -271,7 +271,7 @@ class TestVolatilityRouter:
         assert len(snapshots) == 1
         assert snapshots[0].symbol == "NIFTY"
         assert snapshots[0].atm_iv > 0
-        assert active_broker_session.get_instruments.await_count == 1
+        assert active_broker_session.get_nearest_expiry_instruments.await_count == 1
 
     @pytest.mark.asyncio
     async def test_universe_reads_only_the_db_and_needs_no_broker_session(

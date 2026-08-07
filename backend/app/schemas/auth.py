@@ -110,6 +110,13 @@ class AuthErrorResponse(BaseModel):
     error_type: str = "auth_error"
 
 
+class BrokerSessionStatusResponse(BaseModel):
+    """Status of the in-memory broker service backing an authenticated JWT."""
+
+    active: bool = True
+    generation: int
+
+
 class HealthResponse(BaseModel):
     """Health check response.
 

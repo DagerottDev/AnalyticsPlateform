@@ -10,11 +10,12 @@ import { renderHook, act } from "@testing-library/react";
 import { useMarketData } from "@/hooks/useMarketData";
 import type { MarketTick } from "@/types/market";
 
-const { subscribeMany, unsubscribeMany, getWebSocket } = vi.hoisted(() => {
+const { subscribeMany, unsubscribeMany, updateAuthToken, getWebSocket } = vi.hoisted(() => {
   const subscribeMany = vi.fn();
   const unsubscribeMany = vi.fn();
-  const getWebSocket = vi.fn(() => ({ subscribeMany, unsubscribeMany }));
-  return { subscribeMany, unsubscribeMany, getWebSocket };
+  const updateAuthToken = vi.fn();
+  const getWebSocket = vi.fn(() => ({ subscribeMany, unsubscribeMany, updateAuthToken }));
+  return { subscribeMany, unsubscribeMany, updateAuthToken, getWebSocket };
 });
 
 // Hoisted so useAuth() returns the SAME object reference on every call, like
@@ -52,6 +53,7 @@ describe("useMarketData", () => {
   beforeEach(() => {
     subscribeMany.mockClear();
     unsubscribeMany.mockClear();
+    updateAuthToken.mockClear();
     getWebSocket.mockClear();
     authState.user = stableUser;
     authState.token = "test-token";
