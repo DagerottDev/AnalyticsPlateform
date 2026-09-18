@@ -1,10 +1,41 @@
-# Design System
+# Design System: Midnight Exchange
 
-The frontend is a dark, "modern trading terminal" UI — flat and crisp by
-default, glassmorphism reserved for a handful of hero moments, dense enough
-for options data without feeling cluttered. This file is the single reference
+The frontend is a dark, "modern trading terminal" UI with deep ink surfaces,
+an ice-blue interaction accent, and high-legibility market data. It is flat
+and crisp by default, with glass reserved for a handful of hero moments. The
+system is dense enough for options data without feeling cluttered. This file is the single reference
 for tokens, primitives, and chart color rules; check it before inventing a new
 color, card style, or button in a page.
+
+## Palette
+
+The product uses one interface accent and a separate semantic data layer. Ice
+blue identifies selection, focus, navigation, and primary actions. Green and
+red are reserved for market direction or state, never decoration.
+
+| Role | Dark | Light | Usage |
+|---|---:|---:|---|
+| Canvas | `#071019` | `#f3f7fb` | App background |
+| Navigation | `#0a141f` | `#ffffff` | Header and sidebar |
+| Surface | `#0f1a27` | `#ffffff` | Panels and cards |
+| Raised surface | `#142131` | `#ffffff` | Menus, tooltips, elevated controls |
+| Border | `#213147` | `#cfdae6` | Default separation |
+| Primary text | `#d7e3ef` | `#1c2a3a` | Body and data labels |
+| Bright text | `#f4f8fc` | `#081420` | Headings and key values |
+| Interaction accent | `#55b6ff` | `#087fc4` | CTA, focus, selection, active nav |
+| Profit | `#2dd4a7` | `#087c60` | Positive market direction only |
+| Loss | `#ff6b7a` | `#c53d51` | Negative market direction only |
+
+## Type and shape
+
+- UI type uses the platform-native humanist sans stack for fast rendering and
+  a familiar professional feel.
+- Prices, percentages, timestamps, and compact market values use the mono
+  stack plus tabular lining numerals.
+- The radius system is deliberately restrained: 5px small, 8px controls,
+  10px panels, and 14px hero or modal surfaces.
+- Motion is feedback-only at 150-250ms. Reduced-motion preferences disable
+  nonessential animation globally.
 
 ## Principles
 

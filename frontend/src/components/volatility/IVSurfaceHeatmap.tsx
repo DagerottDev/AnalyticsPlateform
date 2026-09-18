@@ -15,7 +15,7 @@ interface IVSurfaceHeatmapProps {
 // Sequential ramp (single hue, light -> dark magnitude), validated with the
 // dataviz skill's ordinal check against the app's dark chart surface — see
 // docs/DESIGN_SYSTEM.md. Never a rainbow: one hue only for magnitude data.
-const SEQUENTIAL_RAMP = ["#1c5866", "#0e839a", "#00a6c4", "#1ecbe8", "#a0eefa"];
+const SEQUENTIAL_RAMP = ["#163c50", "#17607a", "#178aa7", "#37b7d0", "#a3e8f2"];
 
 function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);

@@ -17,14 +17,14 @@ import { zoomLightweightChart } from "@/lib/lightweightChartZoom";
 // these hex literals mirror the design tokens in globals.css (documented in
 // docs/DESIGN_SYSTEM.md). Indicator lines use a fixed categorical order;
 // Supertrend is the exception because its color encodes bullish/bearish state.
-const COLOR_GRID = "#1e222d"; // --color-border-subtle
-const COLOR_BORDER = "#2a2e3e"; // --color-border-default
-const COLOR_AXIS_TEXT = "#787b86"; // --color-text-secondary
-const COLOR_PROFIT = "#26a69a"; // --color-profit
-const COLOR_LOSS = "#ef5350"; // --color-loss
-const COLOR_CAT_1 = "#2962ff"; // --color-cat-1 (blue)
-const COLOR_CAT_2 = "#ff9800"; // --color-cat-2 (orange)
-const COLOR_CAT_3 = "#ab47bc"; // --color-cat-3 (purple)
+const COLOR_GRID = "#172436"; // --color-border-subtle
+const COLOR_BORDER = "#213147"; // --color-border-default
+const COLOR_AXIS_TEXT = "#95a6ba"; // --color-text-secondary
+const COLOR_PROFIT = "#2dd4a7"; // --color-profit
+const COLOR_LOSS = "#ff6b7a"; // --color-loss
+const COLOR_CAT_1 = "#55b6ff"; // --color-cat-1 (blue)
+const COLOR_CAT_2 = "#ffb454"; // --color-cat-2 (orange)
+const COLOR_CAT_3 = "#b7a4ff"; // --color-cat-3 (purple)
 
 function nearestValue(values: Map<number, number>, time: Time): number | null {
   const target = timeToUnixSeconds(time);

@@ -52,7 +52,7 @@ export function ApiErrorLogPanel() {
         onClick={() => setOpen(true)}
         title="API failure log"
         className={cn(
-          "fixed bottom-4 right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full border shadow-lg transition-colors",
+          "fixed bottom-20 right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full border shadow-lg transition-colors md:bottom-4",
           errors.length > 0
             ? "border-[var(--color-status-critical)]/40 bg-[var(--color-status-critical)]/15 text-[var(--color-status-critical)] hover:bg-[var(--color-status-critical)]/25"
             : "border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"

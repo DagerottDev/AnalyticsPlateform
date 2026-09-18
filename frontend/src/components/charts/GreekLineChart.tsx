@@ -11,9 +11,9 @@ import { zoomLightweightChart } from "@/lib/lightweightChartZoom";
 import { DEFAULT_GREEK_DISPLAY_MODE, displayGreekPoints, formatGreekValue, GREEK_UNITS, type GreekDisplayMode } from "@/lib/greekPresentation";
 import type { GreekMetric, GreekPoint } from "@/lib/strikeGreekAnalysis";
 
-const GRID = "#1e222d";
-const BORDER = "#2a2e3e";
-const TEXT = "#787b86";
+const GRID = "#172436";
+const BORDER = "#213147";
+const TEXT = "#95a6ba";
 
 export type GreekOverlay = "none" | "sma" | "ema" | "bbands" | "supertrend";
 
@@ -155,7 +155,7 @@ export function GreekLineChart({ metric, points, overlay, overlayPeriod, bolling
     );
     const priceFormat = metric === "rho" ? RHO_PRICE_FORMAT : undefined;
     const combined = chart.addLineSeries({
-      color: "#2962ff",
+      color: "#55b6ff",
       lineWidth: 3,
       title: "Combined",
       lastValueVisible: true,
@@ -164,7 +164,7 @@ export function GreekLineChart({ metric, points, overlay, overlayPeriod, bolling
     });
     combined.setData(toChartData(normalizedPoints));
     lineRefs.current.push(combined);
-    const zero = chart.addLineSeries({ color: "#787b8680", lineWidth: 1, lineStyle: 2, title: "Zero", priceLineVisible: false, lastValueVisible: false, priceFormat });
+    const zero = chart.addLineSeries({ color: "#95a6ba80", lineWidth: 1, lineStyle: 2, title: "Zero", priceLineVisible: false, lastValueVisible: false, priceFormat });
     zero.setData(normalizedPoints.map((point) => ({ time: (new Date(point.time).getTime() / 1000) as Time, value: 0 })));
     lineRefs.current.push(zero);
 
@@ -185,8 +185,8 @@ export function GreekLineChart({ metric, points, overlay, overlayPeriod, bolling
       lineRefs.current.push(line);
     } else if (overlay === "bbands") {
       const bands = calculateBollingerBands(ohlcv, overlayPeriod, bollingerMultiplier);
-      const upper = chart.addLineSeries({ color: "#ab47bc", lineWidth: 1, lineStyle: 2, title: "BB upper", priceFormat });
-      const lower = chart.addLineSeries({ color: "#ab47bc", lineWidth: 1, lineStyle: 2, title: "BB lower", priceFormat });
+      const upper = chart.addLineSeries({ color: "#b7a4ff", lineWidth: 1, lineStyle: 2, title: "BB upper", priceFormat });
+      const lower = chart.addLineSeries({ color: "#b7a4ff", lineWidth: 1, lineStyle: 2, title: "BB lower", priceFormat });
       upper.setData(bands.map((point) => ({ time: (new Date(String(point.time)).getTime() / 1000) as Time, value: point.upper })));
       lower.setData(bands.map((point) => ({ time: (new Date(String(point.time)).getTime() / 1000) as Time, value: point.lower })));
       lineRefs.current.push(upper, lower);

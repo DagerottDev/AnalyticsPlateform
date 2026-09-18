@@ -19,7 +19,8 @@ export function Switch({ checked, onChange, disabled, label, className }: Switch
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "focus-ring inline-flex h-6 w-10 shrink-0 items-center rounded-full p-1 transition-colors duration-150",
+        "focus-ring inline-flex h-7 w-12 shrink-0 items-center rounded-full border p-1 transition-colors duration-150",
+        checked ? "border-[var(--color-accent-blue)]" : "border-[var(--color-border-accent)]",
         checked ? "bg-[var(--color-accent-blue)]" : "bg-[var(--color-bg-hover)]",
         disabled && "cursor-not-allowed opacity-50",
         className
@@ -27,8 +28,8 @@ export function Switch({ checked, onChange, disabled, label, className }: Switch
     >
       <span
         className={cn(
-          "h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-150",
-          checked && "translate-x-4"
+          "h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-150",
+          checked && "translate-x-5"
         )}
       />
     </button>

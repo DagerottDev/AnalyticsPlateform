@@ -11,11 +11,11 @@ import { hasFullSessionHistory } from "@/lib/openInterestHistory";
 import { normalizeOpenInterestSeries } from "@/lib/openInterestChart";
 import type { OpenInterestSnapshot } from "@/lib/market";
 
-const GRID = "#1e222d";
-const BORDER = "#2a2e3e";
-const TEXT = "#787b86";
-const CALL = "#ef5350";
-const PUT = "#26a69a";
+const GRID = "#172436";
+const BORDER = "#213147";
+const TEXT = "#95a6ba";
+const CALL = "#ff6b7a";
+const PUT = "#2dd4a7";
 
 interface OpenInterestTimeSeriesChartProps {
   points: OpenInterestSnapshot[];

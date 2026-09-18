@@ -37,16 +37,16 @@ export function Header() {
   const clearTriggerLog = useAlertStore((state) => state.clearTriggerLog);
 
   return (
-    <header className="glass-strong sticky top-0 z-50 flex h-14 items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 sm:px-4">
+    <header className="relative z-50 flex h-16 shrink-0 items-center justify-between gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-secondary)]/95 px-3 shadow-[0_1px_0_rgba(255,255,255,0.025)] backdrop-blur-xl sm:px-5">
       {/* Left — Brand */}
-      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--color-accent-blue)] to-[var(--color-accent-cyan)]">
-          <Activity className="h-4 w-4 text-white" />
+      <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-accent-blue)]/35 bg-[var(--color-accent-blue)]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+          <Activity className="h-[18px] w-[18px] text-[var(--color-accent-blue)]" />
         </div>
         <div className="min-w-0">
-          <h1 className="truncate text-sm font-bold text-[var(--color-text-bright)]">
+          <p className="truncate text-sm font-bold tracking-[-0.02em] text-[var(--color-text-bright)]">
             Option Analytics
-          </h1>
+          </p>
           <p className="hidden text-[10px] text-[var(--color-text-muted)] sm:block">
             {brokerName}
           </p>
@@ -175,7 +175,7 @@ export function Header() {
               setShowUserMenu((v) => !v);
               setShowNotifications(false);
             }}
-            className="flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] sm:px-2"
+            className="focus-ring flex min-h-10 items-center gap-2 rounded-md border border-transparent px-1.5 py-1.5 text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] sm:px-2"
             aria-label="User menu"
           >
             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-bg-surface)]">
@@ -189,7 +189,7 @@ export function Header() {
 
           {/* Dropdown */}
           {showUserMenu && (
-            <div className="glass-strong absolute right-0 top-full mt-1 w-48 rounded-lg border border-[var(--color-border-default)] p-1 shadow-lg animate-fade-in">
+            <div className="glass-strong absolute right-0 top-full mt-2 w-52 rounded-lg border border-[var(--color-border-default)] p-1.5 animate-fade-in">
               <div className="border-b border-[var(--color-border-subtle)] px-3 py-2">
                 <p className="text-xs font-medium text-[var(--color-text-bright)]">
                   {user?.client_id}

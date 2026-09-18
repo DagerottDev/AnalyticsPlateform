@@ -12,7 +12,6 @@ import {
   ArrowUpDown,
   BarChart3,
   Blocks,
-  Boxes,
   Briefcase,
   CandlestickChart,
   CircleUserRound,
@@ -24,6 +23,8 @@ import {
   UsersRound,
   Waves,
   Zap,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { useRouter, usePathname } from "next/navigation";
 import { useState } from "react";
@@ -92,25 +93,29 @@ export function Sidebar({ initialCollapsed = false }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "hidden h-full flex-col border-r border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] transition-all duration-300 md:flex",
-        collapsed ? "w-16" : "w-56"
+        "hidden h-full shrink-0 flex-col border-r border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] transition-[width] duration-300 md:flex",
+        collapsed ? "w-[4.5rem]" : "w-64"
       )}
     >
       {/* Collapse Toggle */}
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="focus-ring flex h-10 items-center justify-center border-b border-[var(--color-border-subtle)] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)]"
+        className={cn(
+          "focus-ring m-2 flex min-h-10 items-center rounded-md border border-transparent text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
+          collapsed ? "justify-center" : "justify-between px-3"
+        )}
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
-        <Boxes className="h-4 w-4" />
+        {!collapsed && <span>Navigation</span>}
+        {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
       </button>
 
       {/* Navigation Groups */}
-      <nav className="flex-1 overflow-y-auto p-2">
+      <nav className="flex-1 overflow-y-auto px-2 pb-4">
         {navigation.map((group) => (
-          <div key={group.title} className="mb-4">
+          <div key={group.title} className="mb-5">
             {!collapsed && (
-              <h3 className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
+              <h3 className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
                 {group.title}
               </h3>
             )}
@@ -125,13 +130,14 @@ export function Sidebar({ initialCollapsed = false }: SidebarProps) {
                       onClick={() => !item.disabled && router.push(item.href)}
                       disabled={item.disabled}
                       title={collapsed ? item.label : undefined}
+                      aria-current={isActive ? "page" : undefined}
                       className={cn(
-                        "focus-ring group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all",
+                        "focus-ring group relative flex min-h-10 w-full items-center gap-3 rounded-md border px-3 py-2 text-[13px] font-medium transition-[background-color,border-color,color]",
                         isActive
-                          ? "bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]"
+                          ? "border-[var(--color-accent-blue)]/20 bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)] shadow-[inset_2px_0_0_var(--color-accent-blue)]"
                           : item.disabled
-                            ? "cursor-not-allowed text-[var(--color-text-muted)]/50"
-                            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
+                            ? "cursor-not-allowed border-transparent text-[var(--color-text-muted)]/50"
+                            : "border-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
                         collapsed && "justify-center px-0"
                       )}
                     >

@@ -37,7 +37,7 @@ export function Tabs({ tabs, value, onChange, className }: TabsProps) {
   return (
     <div
       role="tablist"
-      className={cn("flex items-center gap-1 border-b border-[var(--color-border-default)]", className)}
+      className={cn("flex items-center gap-1 overflow-x-auto border-b border-[var(--color-border-default)]", className)}
     >
       {tabs.map((tab, index) => {
         const Icon = tab.icon;
@@ -52,7 +52,7 @@ export function Tabs({ tabs, value, onChange, className }: TabsProps) {
             onKeyDown={(event) => onKeyDown(event, index)}
             ref={(element) => { tabRefs.current[index] = element; }}
             className={cn(
-              "focus-ring relative flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-colors",
+              "focus-ring relative flex min-h-11 shrink-0 items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-colors",
               isActive
                 ? "text-[var(--color-accent-blue)]"
                 : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"

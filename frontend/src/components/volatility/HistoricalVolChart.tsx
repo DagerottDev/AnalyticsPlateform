@@ -12,11 +12,11 @@ import { zoomLightweightChart } from "@/lib/lightweightChartZoom";
 // lightweight-charts renders to <canvas>, which cannot resolve CSS var() —
 // these hex literals mirror the design tokens in globals.css. Fixed
 // categorical order: 1st series = blue, 2nd = orange.
-const COLOR_GRID = "#1e222d"; // --color-border-subtle
-const COLOR_BORDER = "#2a2e3e"; // --color-border-default
-const COLOR_AXIS_TEXT = "#787b86"; // --color-text-secondary
-const COLOR_CAT_1 = "#2962ff"; // --color-cat-1 (blue) — Implied Volatility
-const COLOR_CAT_2 = "#ff9800"; // --color-cat-2 (orange) — Realized Volatility
+const COLOR_GRID = "#172436"; // --color-border-subtle
+const COLOR_BORDER = "#213147"; // --color-border-default
+const COLOR_AXIS_TEXT = "#95a6ba"; // --color-text-secondary
+const COLOR_CAT_1 = "#55b6ff"; // --color-cat-1 (blue) - Implied Volatility
+const COLOR_CAT_2 = "#ffb454"; // --color-cat-2 (orange) - Realized Volatility
 
 interface HistoricalVolChartProps {
   data: VolatilityHistoricalData[];

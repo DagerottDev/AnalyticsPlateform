@@ -71,12 +71,12 @@ export function MobileNavigation() {
       {isOpen && (
         <button
           aria-label="Close navigation menu"
-          className="fixed inset-0 z-40 bg-black/45 md:hidden"
+          className="fixed inset-0 z-40 bg-[#02070d]/65 backdrop-blur-sm md:hidden"
           onClick={closeMenu}
         />
       )}
 
-      <nav className="glass-strong fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-border-default)] px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-border-default)] bg-[var(--color-bg-secondary)]/96 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_32px_rgba(0,5,12,0.22)] backdrop-blur-xl md:hidden">
         <div className="mx-auto grid max-w-md grid-cols-4">
           {primaryItems.map((item) => {
             const Icon = item.icon;
@@ -85,9 +85,10 @@ export function MobileNavigation() {
               <button
                 key={item.href}
                 onClick={() => navigate(item.href)}
+                aria-current={active ? "page" : undefined}
                 className={cn(
-                  "focus-ring flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-semibold",
-                  active ? "text-[var(--color-accent-blue)]" : "text-[var(--color-text-muted)]"
+                  "focus-ring flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md border text-[10px] font-semibold transition-colors",
+                  active ? "border-[var(--color-accent-blue)]/20 bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]" : "border-transparent text-[var(--color-text-muted)]"
                 )}
               >
                 <Icon className="h-5 w-5" />
@@ -117,7 +118,7 @@ export function MobileNavigation() {
           tabIndex={-1}
           aria-label="All navigation"
           onKeyDown={(event) => { if (event.key === "Escape") closeMenu(); }}
-          className="glass-strong fixed inset-x-3 bottom-20 z-50 max-h-[min(70vh,34rem)] overflow-y-auto rounded-xl border border-[var(--color-border-default)] p-3 shadow-[var(--shadow-elevation-3)] focus:outline-none md:hidden"
+          className="glass-strong fixed inset-x-3 bottom-20 z-50 max-h-[min(70dvh,34rem)] overflow-y-auto rounded-xl border border-[var(--color-border-default)] p-3 focus:outline-none md:hidden"
         >
           <p className="px-2 pb-2 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
             Navigate
@@ -130,11 +131,12 @@ export function MobileNavigation() {
                 <button
                   key={item.href}
                   onClick={() => navigate(item.href)}
+                  aria-current={active ? "page" : undefined}
                   className={cn(
-                    "focus-ring flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-medium",
+                    "focus-ring flex min-h-11 items-center gap-2 rounded-md border px-3 py-2.5 text-left text-xs font-medium",
                     active
-                      ? "bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]"
-                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
+                      ? "border-[var(--color-accent-blue)]/20 bg-[var(--color-accent-blue)]/10 text-[var(--color-accent-blue)]"
+                      : "border-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-hover)]"
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />

@@ -11,7 +11,7 @@ export function Card({ variant = "panel", className, children, ...props }: CardP
   if (variant === "glass") {
     return (
       <div className="gradient-border rounded-xl">
-        <div className={cn("glass-strong rounded-xl p-6", className)} {...props}>
+        <div className={cn("glass-strong rounded-xl p-5 sm:p-6", className)} {...props}>
           {children}
         </div>
       </div>
@@ -19,7 +19,7 @@ export function Card({ variant = "panel", className, children, ...props }: CardP
   }
 
   return (
-    <div className={cn("panel p-4", className)} {...props}>
+    <div className={cn("panel p-4 sm:p-5", className)} {...props}>
       {children}
     </div>
   );

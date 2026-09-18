@@ -11,11 +11,11 @@ interface SectionHeaderProps {
 export function SectionHeader({ title, description, className }: SectionHeaderProps) {
   return (
     <div className={className}>
-      <h2 className="text-xl font-black tracking-tight text-[var(--color-text-bright)]">
+      <h1 className="text-xl font-bold tracking-[-0.025em] text-[var(--color-text-bright)] sm:text-2xl">
         {title}
-      </h2>
+      </h1>
       {description && (
-        <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{description}</p>
+        <p className="mt-1 max-w-3xl text-sm leading-6 text-[var(--color-text-secondary)]">{description}</p>
       )}
     </div>
   );

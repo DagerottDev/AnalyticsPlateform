@@ -21,19 +21,19 @@ const toneClasses: Record<Tone, string> = {
 
 export function StatTile({ label, value, icon: Icon, education, tone = "neutral", className }: StatTileProps) {
   return (
-    <Card className={cn("flex items-center justify-between", className)}>
+    <Card className={cn("flex items-center justify-between overflow-hidden", className)}>
       <div>
         <div className="flex items-center gap-1">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
             {label}
           </p>
           {education}
         </div>
-        <p className={cn("tnum mt-2 text-2xl font-black", toneClasses[tone])}>{value}</p>
+        <p className={cn("tnum mt-2 font-mono text-2xl font-bold tracking-[-0.04em]", toneClasses[tone])}>{value}</p>
       </div>
       {Icon && (
-        <div className="rounded-xl bg-[var(--color-bg-hover)] p-2">
-          <Icon className="h-6 w-6 text-[var(--color-text-secondary)]" />
+        <div className="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-tertiary)] p-2.5">
+          <Icon className="h-5 w-5 text-[var(--color-text-secondary)]" />
         </div>
       )}
     </Card>
