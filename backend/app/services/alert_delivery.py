@@ -1,8 +1,10 @@
 """External delivery for durable alert trigger events."""
 
 import asyncio
+import ipaddress
 import logging
 import smtplib
+import socket
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -92,8 +94,35 @@ async def _send_email(settings: Settings, recipient: str, event: DeliveryEvent) 
 
 
 async def _post_json(url: str, payload: dict[str, Any]) -> None:
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(url, json=payload)
+    target = httpx.URL(url)
+    if target.scheme != "https" or not target.host or target.userinfo or "%" in target.host:
+        raise ValueError("Alert delivery requires a public HTTPS URL without credentials")
+    addresses = await asyncio.wait_for(
+        asyncio.get_running_loop().getaddrinfo(
+            target.host, target.port or 443, type=socket.SOCK_STREAM
+        ),
+        timeout=10,
+    )
+    ips = [ipaddress.ip_address(address[4][0]) for address in addresses]
+    if not ips or any(
+        not ip.is_global
+        or ip.is_multicast
+        or (
+            isinstance(ip, ipaddress.IPv6Address)
+            and ip.ipv4_mapped is not None
+            and not ip.ipv4_mapped.is_global
+        )
+        for ip in ips
+    ):
+        raise ValueError("Alert delivery destination must resolve only to public addresses")
+    # Pin the validated address while keeping the original TLS identity and HTTP authority.
+    async with httpx.AsyncClient(timeout=10, trust_env=False, follow_redirects=False) as client:
+        response = await client.post(
+            target.copy_with(host=str(ips[0])),
+            json=payload,
+            headers={"Host": target.netloc.decode()},
+            extensions={"sni_hostname": target.host},
+        )
         response.raise_for_status()
 
 
@@ -122,7 +151,10 @@ async def _deliver_with_retry(
             await operation()
             logger.info(
                 "alert_delivery.sent channel=%s owner_id=%s symbol=%s attempt=%s",
-                channel, event.owner_id, event.trading_symbol, attempt + 1,
+                channel,
+                event.owner_id,
+                event.trading_symbol,
+                attempt + 1,
             )
             return
         except Exception as error:
@@ -137,7 +169,7 @@ async def _deliver_with_retry(
                     event.trading_symbol,
                     attempt + 1,
                     retryable,
-                    type(error).__name__, exc_info=True,
+                    type(error).__name__,
                 )
                 return
             delay = compute_backoff_delay(attempt, base_delay=0.25, jitter=0.25)
@@ -165,16 +197,12 @@ async def dispatch_alert_delivery(
     if channels.email_enabled and channels.email_recipient:
         jobs.append(("email", lambda: _send_email(settings, channels.email_recipient or "", event)))
     if channels.webhook_enabled and channels.webhook_url:
-        jobs.append(
-            ("webhook", lambda: _post_json(channels.webhook_url or "", payload))
-        )
+        jobs.append(("webhook", lambda: _post_json(channels.webhook_url or "", payload)))
     if channels.slack_enabled and channels.slack_webhook_url:
         jobs.append(
             (
                 "slack",
-                lambda: _post_json(
-                    channels.slack_webhook_url or "", {"text": _message(event)}
-                ),
+                lambda: _post_json(channels.slack_webhook_url or "", {"text": _message(event)}),
             )
         )
     if channels.telegram_enabled and channels.telegram_bot_token and channels.telegram_chat_id:
@@ -198,7 +226,9 @@ async def dispatch_alert_delivery(
         if enabled and channel not in scheduled:
             logger.warning(
                 "alert_delivery.not_configured channel=%s owner_id=%s symbol=%s",
-                channel, event.owner_id, event.trading_symbol,
+                channel,
+                event.owner_id,
+                event.trading_symbol,
             )
     await asyncio.gather(
         *(_deliver_with_retry(channel, event, operation) for channel, operation in jobs)

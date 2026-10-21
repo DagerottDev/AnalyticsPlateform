@@ -7,6 +7,7 @@ Revises: 0015_open_interest_snapshots
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0016_nse_participant_data"

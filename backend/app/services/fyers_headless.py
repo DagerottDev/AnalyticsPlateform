@@ -18,6 +18,7 @@ same day don't re-trigger this flow and risk Cloudflare rate limiting.
 import asyncio
 import base64
 import hashlib
+import json
 import logging
 from datetime import datetime
 from time import sleep
@@ -143,7 +144,8 @@ async def get_fyers_access_token_headless(
     Raises:
         BrokerAuthError: on any step failure.
     """
-    cache_key = f"fyers:{client_id}"
+    credentials = json.dumps([client_id, totp_secret, pin, app_id, app_secret, redirect_uri])
+    cache_key = "fyers:" + hashlib.sha256(credentials.encode()).hexdigest()
     cached_token = broker_token_cache.get(cache_key)
     if cached_token:
         return cached_token

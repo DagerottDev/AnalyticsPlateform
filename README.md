@@ -59,7 +59,7 @@ Implemented workspaces include:
 - **Strategy Builder and Replay:** strategy presets, custom legs, payoff and net-Greek calculations, Monte Carlo analysis, backtesting, and historical-candle replay with modeled fallbacks.
 - **Trading and preferences:** paper/live modes, orders, positions, a trade journal, persisted alerts, and server-synced settings with a local fallback.
 
-The backend holds one active broker connection per API process. Connecting another account replaces the previous session; this is a single-account workspace.
+The backend runs one worker and holds one active broker connection per API process. Connecting another account replaces the previous session; this is a single-account workspace.
 
 ### Built With
 
@@ -78,14 +78,14 @@ The backend holds one active broker connection per API process. Connecting anoth
 
 ## Getting Started
 
-Run from source with Docker, or run the application natively while Docker supplies PostgreSQL and Redis. The repository is private and has no published GitHub releases.
+Run from source with Docker, or run the application natively while Docker supplies PostgreSQL and Redis. The repository is private. Source releases are published in its GitHub Releases page.
 
 ### Prerequisites
 
 - Git and access to [DagerottDev/AnalyticsPlateform][repo-url].
 - Docker with the Compose plugin and a running Docker daemon.
 - For broker-backed analytics: a Fyers app ID and secret with either OAuth authorization or client ID, PIN and TOTP secret; alternatively, a Dhan client ID and a current access token.
-- For native development only: Python **3.12**, Poetry **1.8.4**, and Node.js **20** with npm, matching the Dockerfiles and CI configuration.
+- For native development only: Python **3.12**, Poetry **2.4.1**, and Node.js **24** with npm, matching the Dockerfiles and CI configuration.
 
 Broker access and data availability determine which workspaces can load market data. See [Data and Trading Constraints](#data-and-trading-constraints) before choosing a broker.
 
@@ -96,12 +96,11 @@ For a fresh checkout:
 ```bash
 git clone https://github.com/DagerottDev/AnalyticsPlateform.git
 cd AnalyticsPlateform
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env.local
+./install.sh
 ./start.sh
 ```
 
-If you already have environment files, keep them rather than repeating the copy commands. `start.sh` builds and starts the four-service development stack with frontend and backend hot reload. The backend waits for PostgreSQL and runs `alembic upgrade head` before starting the API.
+The installer creates missing environment files with distinct random signing/encryption keys and mode 0600. It preserves existing environment files. Existing installations must replace a placeholder or short `JWT_SECRET` before upgrading; keep any existing encryption key. `start.sh` builds and starts the four-service development stack with frontend and backend hot reload. The backend waits for PostgreSQL and runs `alembic upgrade head` before starting the API.
 
 | Service | Local address |
 | --- | --- |
@@ -129,16 +128,16 @@ The committed [backend example](backend/.env.example) and [frontend example](fro
 | `NEXT_PUBLIC_API_URL` | Browser-facing API base, `http://localhost:8001` |
 | `DATABASE_URL` | Native backend: `postgresql+asyncpg://postgres:postgres@localhost:5433/option_analytics` |
 | `REDIS_URL` | Native backend: `redis://localhost:6380/0` |
-| `JWT_SECRET` | Application signing secret; replace the example value before deployment |
+| `JWT_SECRET` | Required independently generated signing secret, at least 32 characters; shipped placeholders are rejected |
 | `JWT_ALGORITHM`, `JWT_EXPIRY_MINUTES` | Application token settings, default `HS256` and `480` |
-| `APP_ENV`, `APP_DEBUG`, `CORS_ORIGINS` | Local defaults: `development`, `true`, `http://localhost:3001` |
+| `APP_ENV`, `APP_DEBUG`, `CORS_ORIGINS` | Local defaults: `development`, `false`, `http://localhost:3001` |
 | `BROKER_TOKEN_ENCRYPTION_KEY` | Optional Fernet key for persisted broker secrets; without it, persistence is plaintext |
 | `MARKET_QUOTE_POLL_INTERVAL_SECONDS` | REST fallback polling interval, default `3.0` seconds |
 | `API_RATE_LIMIT_BROKER_REQUESTS` | Broker-route budget, default `120` per client IP per minute |
 | `MARKET_DATA_BACKFILL_ENABLED`, `MARKET_DATA_BACKFILL_SYMBOLS` | Scheduled daily candle storage, default `true` and `NIFTY,BANKNIFTY` |
 | `LOG_LEVEL`, `SENTRY_DSN`, `SENTRY_TRACES_SAMPLE_RATE` | Optional logging and error reporting |
 
-**Docker environment handling:** the development bind mount exposes `backend/.env`, but Compose's explicit `environment` values take precedence. It sets container database/cache addresses, development mode, CORS and `JWT_SECRET`. To override the latter, export `JWT_SECRET` in the shell before starting Compose. The production backend image does not copy `backend/.env`; additional settings must be passed into the container through a Compose override or another deployment configuration. Exporting an arbitrary setting alone does not forward it unless Compose references it.
+**Docker environment handling:** Compose loads `backend/.env` through `env_file` and overrides only container database/cache addresses and migration control. Configure `JWT_SECRET`, encryption, `APP_ENV`, debug and CORS in that file. All published ports bind to `127.0.0.1`. The production image does not contain environment files. Set `NEXT_PUBLIC_API_URL` in the Compose shell before building to supply the frontend build argument; runtime changes do not rewrite the client bundle.
 
 `RUN_MIGRATIONS=false` skips the Docker migration step only when migrations are handled separately. To build production images locally, use the base Compose file alone:
 
@@ -146,9 +145,9 @@ The committed [backend example](backend/.env.example) and [frontend example](fro
 docker compose -f docker/docker-compose.yml up --build -d
 ```
 
-That file retains local development credentials and environment settings; it needs deployment-specific configuration before use on a server. Set the browser API URL at frontend **build time** for production: `NEXT_PUBLIC_*` values are bundled into the client, and runtime-only changes do not rewrite that build. See [Deployment](docs/DEPLOYMENT.md), checking its examples against the current Compose files and ports.
+That file retains local database credentials; use deployment-specific database credentials and a TLS reverse proxy before use on a server. Set the browser API URL at frontend **build time** for production: `NEXT_PUBLIC_*` values are bundled into the client, and runtime-only changes do not rewrite that build. See [Deployment](docs/DEPLOYMENT.md), checking its examples against the current Compose files and ports.
 
-The login form saves credentials, including PIN/TOTP fields and Dhan tokens, in browser local storage for reuse. Use a trusted browser profile. Database encryption does not encrypt these browser values.
+Recovery requires an existing unexpired, nonrevoked browser JWT bound to the same account, broker and trading mode. Expired or missing browser tokens require manual broker login. The login form saves credentials, including PIN/TOTP fields and Dhan tokens, in browser local storage for reuse. Use a trusted browser profile. Database encryption does not encrypt these browser values.
 
 ### Native Development
 
@@ -223,7 +222,7 @@ npm test
 npm run build
 ```
 
-`npm run test:watch` starts interactive Vitest. The existing `npm run lint` script invokes `next lint`, which is not a command in the installed Next.js 15.5 CLI; use ESLint directly as above. The CI frontend lint step currently calls that legacy script too.
+`npm run test:watch` starts interactive Vitest. `npm run lint` runs the same ESLint check used in CI.
 
 To serve a native production frontend after building, from `frontend/`:
 

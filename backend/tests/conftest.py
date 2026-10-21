@@ -87,7 +87,7 @@ def get_test_settings() -> Settings:
     return Settings(
         app_env="development",
         app_debug=True,
-        jwt_secret="test-secret-key-for-testing-only",
+        jwt_secret="test-secret-key-for-testing-only-32-plus",
         jwt_expiry_minutes=60,
         database_url="postgresql+asyncpg://postgres:postgres@localhost:5432/test_db",
         cors_origins="http://localhost:3000",
@@ -214,6 +214,7 @@ async def active_broker_session() -> AsyncGenerator[AsyncMock, None]:
     session themselves.
     """
     mock = AsyncMock()
+    mock.trading_mode = TradingMode.LIVE
     mock.get_instruments.return_value = [
         {
             "trading_symbol": "NIFTY24JUL22000CE",

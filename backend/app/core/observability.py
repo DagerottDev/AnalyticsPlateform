@@ -32,6 +32,9 @@ def configure_observability(settings: Settings) -> None:
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+    # HTTP request logs include credential-bearing webhook and Telegram URL paths.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     if not settings.sentry_dsn:
         return
     try:

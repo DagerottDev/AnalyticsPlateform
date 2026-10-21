@@ -21,7 +21,7 @@ async def test_health_check_contains_version(client: AsyncClient) -> None:
     """Health endpoint should include the application version."""
     response = await client.get("/api/v1/health")
     data = response.json()
-    assert data["version"] == "0.1.0"
+    assert data["version"] == "0.1.1"
 
 
 @pytest.mark.asyncio

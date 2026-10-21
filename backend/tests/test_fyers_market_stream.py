@@ -13,14 +13,16 @@ import os
 import subprocess
 import sys
 import threading
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.services.fyers_market_stream import FyersMarketStreamManager
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @pytest.mark.asyncio

@@ -60,7 +60,7 @@ This approach uses Docker only for the database/cache, while you run the fronten
    ```
 
 3. **Start Frontend**:
-   Ensure you have Node.js 20+ installed.
+   Ensure you have Node.js 24+ installed.
    ```bash
    cd frontend
    cp .env.example .env.local
@@ -96,7 +96,7 @@ To deploy this platform securely to a live server (e.g., Ubuntu 22.04 on Digital
      # backend/.env
      APP_ENV=production
      APP_DEBUG=false
-     JWT_SECRET=generate_a_very_long_random_string_here
+     JWT_SECRET=<independently-generated-random-secret-at-least-32-characters>
      JWT_ALGORITHM=HS256
      JWT_EXPIRY_MINUTES=480
      DATABASE_URL=postgresql+asyncpg://postgres:secure_prod_password@postgres:5432/option_analytics
@@ -117,7 +117,7 @@ To deploy this platform securely to a live server (e.g., Ubuntu 22.04 on Digital
 The base `docker-compose.yml` uses built production images. Do not include
 `docker-compose.dev.yml` in a production deployment.
 
-If you haven't created a specific production docker-compose file, simply run the existing one. It will build the production-ready Next.js artifact and FastAPI container.
+The base file is a local stack. It loads backend/.env, binds published ports to loopback and overrides database/cache addresses for its containers. Before server use, configure matching database credentials in a deployment override and its DATABASE_URL; remove database/cache port publications. Set APP_ENV=production, APP_DEBUG=false and a specific HTTPS CORS_ORIGINS in backend/.env. Set NEXT_PUBLIC_API_URL in the build shell to the HTTPS API address. Run a single backend worker because broker state and monitors are process-local.
 
 ```bash
 # Build and run in detached mode
@@ -139,7 +139,7 @@ You do not want to expose ports 3000 and 8000 directly. Instead, use Nginx to ro
 
        # Route to Frontend
        location / {
-           proxy_pass http://localhost:3000;
+           proxy_pass http://127.0.0.1:3001;
            proxy_http_version 1.1;
            proxy_set_header Upgrade $http_upgrade;
            proxy_set_header Connection 'upgrade';
@@ -149,7 +149,7 @@ You do not want to expose ports 3000 and 8000 directly. Instead, use Nginx to ro
 
        # Route to Backend APIs
        location /api/ {
-           proxy_pass http://localhost:8000/api/;
+           proxy_pass http://127.0.0.1:8001/api/;
            proxy_set_header Host $host;
            proxy_set_header X-Real-IP $remote_addr;
            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

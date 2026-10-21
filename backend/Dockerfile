@@ -10,10 +10,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
-RUN pip install --no-cache-dir poetry==1.8.4
+RUN pip install --no-cache-dir poetry==2.4.1
 
 # Copy dependency files
 COPY pyproject.toml poetry.lock* ./
+COPY vendor/ ./vendor/
 
 # Install dependencies (no dev dependencies in production)
 RUN poetry config virtualenvs.in-project true && \
@@ -81,4 +82,4 @@ EXPOSE 8000
 ENTRYPOINT ["/usr/local/bin/oap-entrypoint.sh"]
 
 # Run with uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

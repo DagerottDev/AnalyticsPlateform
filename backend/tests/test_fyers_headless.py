@@ -246,7 +246,8 @@ class TestGetFyersAccessTokenHeadless:
         )
 
         assert token == "fresh-token"
-        assert stored["fyers:YR02352"] == ("fresh-token", 100)
+        assert list(stored.values()) == [("fresh-token", 100)]
+        assert "secret" not in next(iter(stored))
 
     async def test_wraps_an_unexpected_exception_as_a_broker_auth_error(
         self, monkeypatch: pytest.MonkeyPatch
