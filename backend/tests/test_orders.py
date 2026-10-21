@@ -264,6 +264,7 @@ async def test_create_gtt_order_dhan_ambiguous_failure_is_marked_unknown(
     and left "Unknown" for the GTT monitor to reconcile against the order
     book instead (see order_reconciliation.py)."""
     service = type("DhanService", (AsyncMock,), {})()
+    service.trading_mode = "live"
     service.get_quotes.return_value = [{"last_price": 100.0}]
     service.place_gtt_order.side_effect = RuntimeError("Dhan response timeout")
     await session_manager.set_session("TEST_CLIENT_001", service)

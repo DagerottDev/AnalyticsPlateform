@@ -7,6 +7,7 @@ Revises: 0014_create_user_preferences
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0015_open_interest_snapshots"

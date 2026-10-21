@@ -69,7 +69,7 @@ describe("authentication hydration", () => {
     authApi.autoLoginBroker.mockReturnValue(new Promise<LoginResponse>((resolve) => {
       resolveReconnect = resolve;
     }));
-    authApi.verifyBrokerSession.mockRejectedValue(new Error("backend session missing"));
+    authApi.verifyBrokerSession.mockRejectedValue({ response: { status: 401, data: { detail: "Active broker session not found" } } });
 
     const { useAuthStore } = await import("@/stores/authStore");
     useAuthStore.setState({ token: "persisted-token", user: response.user, isAuthenticated: false });
@@ -81,5 +81,23 @@ describe("authentication hydration", () => {
 
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useAuthStore.getState().token).toBeNull();
+  });
+
+  it("does not probe saved broker credentials without a browser session", async () => {
+    const { useAuthStore } = await import("@/stores/authStore");
+    await useAuthStore.getState().hydrate();
+    expect(authApi.autoLoginBroker).not.toHaveBeenCalled();
+    expect(authApi.verifyBrokerSession).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it("does not renew an expired JWT from saved broker credentials", async () => {
+    authApi.verifyBrokerSession.mockRejectedValue({ response: { status: 401,
+      data: { detail: "Invalid or expired token: Signature has expired." } } });
+    const { useAuthStore } = await import("@/stores/authStore");
+    useAuthStore.setState({ token: "expired-token", user: response.user });
+    await useAuthStore.getState().hydrate();
+    await Promise.resolve();
+    expect(authApi.autoLoginBroker).not.toHaveBeenCalled();
   });
 });

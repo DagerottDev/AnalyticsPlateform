@@ -24,7 +24,7 @@ apiClient.interceptors.request.use(
       if (authStorage) {
         try {
           const { state } = JSON.parse(authStorage);
-          if (state?.token) {
+          if (state?.token && !config.headers.Authorization) {
             config.headers.Authorization = `Bearer ${state.token}`;
           }
         } catch (e) {
@@ -51,28 +51,24 @@ const SILENT_FAILURE_URLS = ["/auth/auto-login", "/auth/session"];
 // signature of that specific failure — see session_manager.get_session().
 const SESSION_LOST_DETAIL = "Active broker session not found";
 
-// The other recoverable 401: the browser's own JWT has expired
-// (JWT_EXPIRY_MINUTES elapsed) — see security.py's decode_token(). Since
-// /auto-login doesn't require a valid JWT, it can silently mint a new one
-// here too, the same way it recovers a lost broker session.
-const isExpiredTokenDetail = (detail: unknown): boolean =>
-  typeof detail === "string" && detail.startsWith("Invalid or expired token");
-
 // Recovery calls are deduped: if several requests 401 with a lost session at
 // once, they all await the same in-flight auto-login rather than each
 // triggering their own.
-let sessionRecovery: Promise<LoginResponse> | null = null;
+let sessionRecovery: { token: string; promise: Promise<LoginResponse> } | null = null;
 
-function recoverBrokerSession(): Promise<LoginResponse> {
-  if (!sessionRecovery) {
-    sessionRecovery = apiClient
-      .post<LoginResponse>("/auth/auto-login")
+function recoverBrokerSession(token: string): Promise<LoginResponse> {
+  if (!sessionRecovery || sessionRecovery.token !== token) {
+    const promise = apiClient
+      .post<LoginResponse>("/auth/auto-login", {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       .then((res) => res.data)
       .finally(() => {
-        sessionRecovery = null;
+        if (sessionRecovery?.promise === promise) sessionRecovery = null;
       });
+    sessionRecovery = { token, promise };
   }
-  return sessionRecovery;
+  return sessionRecovery.promise;
 }
 
 // Log every failed request so it can be reviewed/copied from the API error
@@ -83,19 +79,31 @@ apiClient.interceptors.response.use(
     const url = error?.config?.url || "unknown";
     const status: number | null = error?.response?.status ?? null;
     const detail = error?.response?.data?.detail;
+    const session = useAuthStore.getState();
+    const requestToken = error.config?.headers?.Authorization;
 
     // Try one silent recovery before surfacing the failure — mirrors what
     // authStore.hydrate() does on app mount, but reacts to the session
     // being lost mid-session instead of only at page load.
     if (
       status === 401 &&
-      (detail === SESSION_LOST_DETAIL || isExpiredTokenDetail(detail)) &&
+      detail === SESSION_LOST_DETAIL &&
+      session.token && session.user && session.isAuthenticated && !session.isLoading &&
+      requestToken === `Bearer ${session.token}` &&
       !url.includes("/auth/") &&
       !error.config?.__sessionRecoveryAttempted
     ) {
       error.config.__sessionRecoveryAttempted = true;
       try {
-        const recovered = await recoverBrokerSession();
+        const recovered = await recoverBrokerSession(session.token);
+        const current = useAuthStore.getState();
+        if (
+          !current.isAuthenticated || current.isLoading ||
+          (current.token !== session.token && current.token !== recovered.access_token) ||
+          recovered.user.client_id !== session.user.client_id ||
+          recovered.user.broker_name.toLowerCase() !== session.user.broker_name.toLowerCase() ||
+          recovered.user.trading_mode !== session.user.trading_mode
+        ) return Promise.reject(error);
         useAuthStore.setState({
           token: recovered.access_token,
           user: recovered.user,
@@ -112,7 +120,10 @@ apiClient.interceptors.response.use(
       } catch {
         // No server-side auto-login credentials configured, or recovery
         // failed — the session is genuinely gone until the user relogins.
-        useAuthStore.setState({ sessionLive: false });
+        const current = useAuthStore.getState();
+        if (current.token === session.token && !current.isLoading) {
+          useAuthStore.setState({ sessionLive: false });
+        }
       }
     }
 

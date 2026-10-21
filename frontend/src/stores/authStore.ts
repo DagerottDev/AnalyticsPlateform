@@ -75,7 +75,7 @@ export const useAuthStore = create<AuthStore>()(
 
       logout: () => {
         // Fire-and-forget server-side logout
-        logoutUser();
+        logoutUser(get().token);
         set({
           token: null,
           user: null,
@@ -133,9 +133,16 @@ export const useAuthStore = create<AuthStore>()(
           // websocket still attached to the previous service. Only perform
           // the expensive credential flow when verification says the service
           // is genuinely absent or the browser token has expired.
-          const restoreSession = hadPersistedSession
-            ? verifyBrokerSession().then(() => null).catch(() => autoLoginBroker())
-            : autoLoginBroker();
+          if (!persistedToken || !state.user) return hydratePromise;
+          const restoreSession = verifyBrokerSession(persistedToken)
+            .then(() => null)
+            .catch((error: unknown) => {
+              const failure = error as { response?: { status?: number; data?: { detail?: unknown } } };
+              if (failure.response?.status !== 401 ||
+                  failure.response.data?.detail !== "Active broker session not found" ||
+                  get().token !== persistedToken || get().isLoading) throw error;
+              return autoLoginBroker(persistedToken);
+            });
 
           // A user may log out or manually log in while recovery is pending,
           // so only apply a new token if this is still the startup session.
@@ -146,9 +153,11 @@ export const useAuthStore = create<AuthStore>()(
                 if (current.token === persistedToken) set({ sessionLive: true });
                 return;
               }
-              const startupSessionIsCurrent = hadPersistedSession
-                ? current.token === persistedToken
-                : !current.isAuthenticated;
+              const startupSessionIsCurrent = current.token === persistedToken &&
+                !current.isLoading && current.isAuthenticated &&
+                response.user.client_id === state.user?.client_id &&
+                response.user.broker_name.toLowerCase() === state.user?.broker_name.toLowerCase() &&
+                response.user.trading_mode === state.user?.trading_mode;
               if (!startupSessionIsCurrent) return;
 
               set({

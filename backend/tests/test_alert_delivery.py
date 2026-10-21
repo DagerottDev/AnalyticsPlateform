@@ -11,6 +11,7 @@ another's (see dispatch_alert_delivery's asyncio.gather).
 import smtplib
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -294,6 +295,15 @@ class TestSendEmail:
 
 @pytest.mark.asyncio
 class TestPostJson:
+    @pytest.fixture(autouse=True)
+    async def public_dns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            alert_delivery.asyncio.get_running_loop(), "getaddrinfo",
+            AsyncMock(
+                return_value=[(2, 1, 6, "", ("8.8.8.8", 443))]
+            ),
+        )
+
     async def test_posts_the_payload_and_raises_on_a_non_2xx_response(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

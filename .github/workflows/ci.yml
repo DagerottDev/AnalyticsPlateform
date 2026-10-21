@@ -8,7 +8,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.12"
-  NODE_VERSION: "20"
+  NODE_VERSION: "24"
 
 jobs:
   # ─── Backend ───────────────────────────────────────────
@@ -28,7 +28,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Poetry
-        run: pip install poetry==1.8.4
+        run: pip install poetry==2.4.1
 
       - name: Cache Poetry dependencies
         uses: actions/cache@v4
@@ -39,6 +39,12 @@ jobs:
 
       - name: Install dependencies
         run: poetry install --no-interaction
+
+      - name: Verify reproducible broker SDK patch
+        run: |
+          curl -fsSL https://files.pythonhosted.org/packages/24/dc/553a556fb6dd4b2e4d4251d5ec53536a36cde34f9aae8aaf88280239a5bb/fyers_apiv3-3.1.14-py3-none-any.whl -o "$RUNNER_TEMP/fyers-upstream.whl"
+          python ../scripts/build-fyers-wheel.py "$RUNNER_TEMP/fyers-upstream.whl" "$RUNNER_TEMP/fyers-patched.whl"
+          cmp vendor/fyers_apiv3-3.1.14+oap.1-py3-none-any.whl "$RUNNER_TEMP/fyers-patched.whl"
 
       - name: Lint with Ruff
         run: poetry run ruff check .
@@ -88,7 +94,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Poetry
-        run: pip install poetry==1.8.4
+        run: pip install poetry==2.4.1
 
       - name: Install dependencies
         run: poetry install --no-interaction
@@ -97,7 +103,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
           REDIS_URL: redis://localhost:6379/1
-          JWT_SECRET: test-secret-key
+          JWT_SECRET: isolated-ci-signing-secret-at-least-32-characters
           APP_ENV: development
         run: poetry run pytest -v --cov=app --cov-report=xml
 
@@ -127,6 +133,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify reproducible lint dependency patch
+        run: |
+          curl -fsSL https://registry.npmjs.org/braces/-/braces-3.0.3.tgz -o "$RUNNER_TEMP/braces-upstream.tgz"
+          python3 ../scripts/build-braces-package.py "$RUNNER_TEMP/braces-upstream.tgz" "$RUNNER_TEMP/braces-patched.tgz"
+          cmp vendor/braces-3.0.3-oap.1.tgz "$RUNNER_TEMP/braces-patched.tgz"
 
       - name: Lint
         run: npm run lint
@@ -175,9 +187,34 @@ jobs:
 
       - name: Verify backend health
         run: |
-          docker run -d --name backend-test -p 8000:8000 \
-            -e JWT_SECRET=test -e APP_ENV=development \
+          docker network create oap-ci
+          docker run -d --name oap-ci-db --network oap-ci \
+            -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=option_analytics timescale/timescaledb:latest-pg16
+          docker run -d --name oap-ci-redis --network oap-ci redis:7-alpine
+          docker run -d --name backend-test --network oap-ci -p 127.0.0.1:8000:8000 \
+            -e JWT_SECRET=isolated-ci-signing-secret-at-least-32-characters -e APP_ENV=development \
+            -e DATABASE_URL=postgresql+asyncpg://postgres:postgres@oap-ci-db:5432/option_analytics \
+            -e REDIS_URL=redis://oap-ci-redis:6379/0 \
+            -e MARKET_DATA_BACKFILL_ENABLED=false -e IV_UNIVERSE_BACKFILL_ENABLED=false \
+            -e PARTICIPANT_DATA_ENABLED=false -e ALERT_EVALUATION_ENABLED=false \
+            -e BASKET_MONITOR_ENABLED=false -e OPEN_INTEREST_SNAPSHOT_ENABLED=false \
             oap-backend:ci
-          sleep 10
-          curl -f http://localhost:8000/api/v1/health || exit 1
-          docker stop backend-test
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/api/v1/health; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/api/v1/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/api/v1/auth/auto-login)" = 403
+          docker run -d --name frontend-test -p 127.0.0.1:3000:3000 oap-frontend:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/accounts > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:3000/accounts > /dev/null
+
+      - name: Container diagnostics
+        if: failure()
+        run: |
+          docker logs backend-test || true
+          docker logs frontend-test || true

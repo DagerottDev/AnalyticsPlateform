@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.core.exceptions import BrokerAuthError, BrokerConnectionError
-from app.core.security import create_access_token, get_current_user
+from app.core.security import create_access_token, ensure_not_revoked, get_current_user
 from app.db.session import get_db
 from app.models.user import TradingMode
 from app.schemas.auth import (
@@ -43,6 +43,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 _auto_login_lock = asyncio.Lock()
+
+
+def _require_recovery_owner(
+    user: dict[str, Any], client_id: str, broker: str, trading_mode: str
+) -> None:
+    if (
+        user.get("sub") != client_id
+        or str(user.get("broker", "")).lower() != broker.lower()
+        or user.get("trading_mode") != trading_mode
+    ):
+        raise HTTPException(status_code=403, detail="Broker recovery identity does not match")
 
 
 def _login_response_from_profile(
@@ -130,6 +141,7 @@ async def _complete_login(
     trading_mode: TradingMode,
     settings: Settings,
     db: AsyncSession,
+    recovery_user: dict[str, Any] | None = None,
 ) -> LoginResponse:
     """Verify a resolved access token and establish the broker session.
 
@@ -144,6 +156,11 @@ async def _complete_login(
 
     try:
         profile = await service.get_profile()
+
+        if recovery_user is not None:
+            _require_recovery_owner(
+                recovery_user, profile.client_id, profile.broker_name, profile.trading_mode.value
+            )
 
         # Persist first. A database failure must not tear down the live
         # service that is currently feeding already-connected browser tabs.
@@ -229,41 +246,42 @@ async def login(
     Returns:
         LoginResponse with JWT token and user profile.
     """
-    trading_mode = TradingMode(request.trading_mode)
+    async with _auto_login_lock:
+        trading_mode = TradingMode(request.trading_mode)
 
-    try:
-        access_token = await _resolve_access_token(request, settings)
-    except BrokerAuthError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
+        try:
+            access_token = await _resolve_access_token(request, settings)
+        except BrokerAuthError as e:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=e.message) from e
 
-    response = await _complete_login(
-        access_token,
-        request.broker,
-        request.app_id or "",
-        request.client_id,
-        trading_mode,
-        settings,
-        db,
-    )
-
-    if request.totp_secret:
-        # A successful headless TOTP login gives us everything /auto-login
-        # needs to silently re-authenticate later — persist it (encrypted)
-        # as the new source of truth, superseding whatever was saved before.
-        assert request.client_id and request.pin
-        await save_broker_credentials(
-            db,
+        response = await _complete_login(
+            access_token,
+            request.broker,
+            request.app_id or "",
+            request.client_id,
+            trading_mode,
             settings,
-            app_id=request.app_id or "",
-            api_secret=request.api_secret or "",
-            client_id=request.client_id,
-            totp_secret=request.totp_secret,
-            pin=request.pin,
-            redirect_uri=request.redirect_uri,
-            trading_mode=request.trading_mode,
+            db,
         )
 
-    return response
+        if request.totp_secret:
+            # A successful headless TOTP login gives us everything /auto-login
+            # needs to silently re-authenticate later — persist it (encrypted)
+            # as the new source of truth, superseding whatever was saved before.
+            assert request.client_id and request.pin
+            await save_broker_credentials(
+                db,
+                settings,
+                app_id=request.app_id or "",
+                api_secret=request.api_secret or "",
+                client_id=request.client_id,
+                totp_secret=request.totp_secret,
+                pin=request.pin,
+                redirect_uri=request.redirect_uri,
+                trading_mode=request.trading_mode,
+            )
+
+        return response
 
 
 @router.post(
@@ -275,7 +293,8 @@ async def login(
         "Attempts a headless TOTP login using the credentials persisted "
         "from the last successful /login call made with client_id + "
         "totp_secret + pin (see save_broker_credentials). Used by the "
-        "frontend to skip the manual login form on startup. Returns 503 "
+        "authenticated frontend to recover the same account. Expired tokens require login. "
+        "Returns 503 "
         "if no TOTP login has ever succeeded."
     ),
     responses={
@@ -287,6 +306,8 @@ async def login(
     },
 )
 async def auto_login(
+    current_user: dict[str, Any] = Depends(get_current_user),
+    blocklist: TokenBlocklist = Depends(get_token_blocklist),
     settings: Settings = Depends(get_settings), db: AsyncSession = Depends(get_db)
 ) -> LoginResponse:
     """Authenticate using DB-persisted Fyers TOTP credentials, no request body.
@@ -299,7 +320,12 @@ async def auto_login(
     # re-check the persisted/in-memory session after acquiring the lock so
     # all but the first request reuse the service it established.
     async with _auto_login_lock:
+        await ensure_not_revoked(current_user, blocklist)
         record = await load_broker_session(db)
+        if record is not None:
+            _require_recovery_owner(
+                current_user, record.client_id, record.broker, record.trading_mode
+            )
         if record is not None and session_manager.get_session(record.client_id) is not None:
             return _login_response_from_record(record, settings)
 
@@ -309,6 +335,8 @@ async def auto_login(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Auto-login is not configured — log in once with TOTP credentials first.",
             )
+
+        _require_recovery_owner(current_user, creds.client_id, "fyers", creds.trading_mode)
 
         try:
             access_token = await get_fyers_access_token_headless(
@@ -331,6 +359,7 @@ async def auto_login(
             TradingMode(creds.trading_mode),
             settings,
             db,
+            recovery_user=current_user,
         )
 
 
@@ -360,11 +389,18 @@ async def logout(
     Returns:
         Success message.
     """
-    client_id = current_user["sub"]
-    jti = current_user.get("jti")
-    exp = current_user.get("exp")
-    if jti and exp:
-        await blocklist.revoke(jti, datetime.fromtimestamp(exp, tz=UTC))
-    await session_manager.remove_session(client_id)
-    await clear_broker_session(db)
-    return {"message": "Successfully logged out", "client_id": client_id}
+    async with _auto_login_lock:
+        client_id = current_user["sub"]
+        jti = current_user.get("jti")
+        exp = current_user.get("exp")
+        if jti and exp:
+            await blocklist.revoke(jti, datetime.fromtimestamp(exp, tz=UTC))
+        record = await load_broker_session(db)
+        if record is None or (
+            record.client_id == client_id
+            and record.broker.lower() == str(current_user.get("broker", "")).lower()
+        ):
+            await session_manager.remove_session(client_id)
+            if record is not None:
+                await clear_broker_session(db)
+        return {"message": "Successfully logged out", "client_id": client_id}

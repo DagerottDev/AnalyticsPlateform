@@ -1,6 +1,6 @@
 """JWT token creation, verification, and authentication dependencies.
 
-Uses python-jose for JWT operations. Authentication is API-key-based
+Uses PyJWT for JWT operations. Authentication is API-key-based
 through the native Fyers SDK — no passwords are stored or managed.
 """
 
@@ -8,9 +8,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+from jwt import InvalidTokenError
 
 from app.config import Settings, get_settings
 from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
@@ -19,7 +20,7 @@ from app.services.token_blocklist import TokenBlocklist, get_token_blocklist
 bearer_scheme = HTTPBearer(
     scheme_name="JWT",
     description="JWT token obtained from /api/v1/auth/login",
-    auto_error=True,
+    auto_error=False,
 )
 
 
@@ -87,7 +88,7 @@ def decode_token(
             algorithms=[settings.jwt_algorithm],
         )
         return payload
-    except JWTError as e:
+    except InvalidTokenError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid or expired token: {e}",
@@ -113,7 +114,7 @@ async def ensure_not_revoked(payload: dict[str, Any], blocklist: TokenBlocklist)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     settings: Settings = Depends(get_settings),
     blocklist: TokenBlocklist = Depends(get_token_blocklist),
 ) -> dict[str, Any]:
@@ -130,6 +131,8 @@ async def get_current_user(
     Raises:
         HTTPException: If token is missing, invalid, expired, or revoked.
     """
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authenticated")
     payload = decode_token(credentials.credentials, settings)
 
     # Validate required fields

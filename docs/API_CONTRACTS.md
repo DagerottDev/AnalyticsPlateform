@@ -427,7 +427,7 @@ underlying candle and current live spot tick.
 ```json
 {
   "status": "healthy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "environment": "development"
 }
 ```

@@ -7,6 +7,7 @@ Revises: 0013_create_gtt_orders
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0014_create_user_preferences"

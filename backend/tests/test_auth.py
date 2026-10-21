@@ -14,6 +14,12 @@ from app.services.session_manager import session_manager
 from tests.conftest import FakeTokenBlocklist, get_test_settings
 
 
+def _recovery_headers(**overrides: str) -> dict[str, str]:
+    payload = {"sub": "TEST_CLIENT_001", "broker": "Fyers", "trading_mode": "paper"}
+    payload.update(overrides)
+    return {"Authorization": f"Bearer {create_access_token(payload, get_test_settings())}"}
+
+
 @pytest.mark.asyncio
 async def test_login_oauth_success(
     client: AsyncClient,
@@ -125,10 +131,10 @@ async def test_login_dhan_success(
 
 
 @pytest.mark.asyncio
-async def test_auto_login_not_configured(client: AsyncClient) -> None:
+async def test_auto_login_not_configured(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """Auto-login should 503 when no TOTP login has ever succeeded (nothing
     persisted in broker_credentials yet)."""
-    response = await client.post("/api/v1/auth/auto-login")
+    response = await client.post("/api/v1/auth/auto-login", headers=_recovery_headers())
     assert response.status_code == 503
 
 
@@ -145,13 +151,18 @@ async def test_auto_login_success(
         get_test_settings(),
         app_id="test-app-id-100",
         api_secret="test-api-secret",
-        client_id="test-client",
+        client_id="TEST_CLIENT_001",
         totp_secret="test-totp-secret",
         pin="1234",
         redirect_uri="http://127.0.0.1:3000",
         trading_mode=TradingMode.PAPER.value,
     )
 
+    from app.models.user import UserProfile
+
+    mock_broker_service.get_profile.return_value = UserProfile(
+        client_id="TEST_CLIENT_001", broker_name="Fyers", trading_mode=TradingMode.PAPER
+    )
     with (
         patch("app.api.v1.auth.FyersService", return_value=mock_broker_service),
         patch(
@@ -159,14 +170,14 @@ async def test_auto_login_success(
             return_value="test-headless-access-token",
         ) as mock_headless,
     ):
-        response = await client.post("/api/v1/auth/auto-login")
+        response = await client.post("/api/v1/auth/auto-login", headers=_recovery_headers())
 
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
     assert data["user"]["client_id"] == "TEST_CLIENT_001"
     mock_headless.assert_called_once_with(
-        client_id="test-client",
+        client_id="TEST_CLIENT_001",
         totp_secret="test-totp-secret",
         pin="1234",
         app_id="test-app-id-100",
@@ -194,7 +205,7 @@ async def test_auto_login_reuses_the_active_persisted_session(
     await session_manager.set_session("TEST_CLIENT_001", mock_broker_service)
 
     with patch("app.api.v1.auth.get_fyers_access_token_headless") as headless_login:
-        response = await client.post("/api/v1/auth/auto-login")
+        response = await client.post("/api/v1/auth/auto-login", headers=_recovery_headers())
 
     assert response.status_code == 200
     assert response.json()["user"]["client_id"] == "TEST_CLIENT_001"

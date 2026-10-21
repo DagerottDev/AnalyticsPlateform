@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "option-analytics-backend"
-version = "0.1.0"
+version = "0.1.1"
 description = "FastAPI backend for Option Analytics Platform with native Fyers broker integration"
 authors = ["Option Analytics Team"]
 readme = "README.md"
@@ -8,29 +8,30 @@ packages = [{include = "app"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-fastapi = "^0.115.0"
+fastapi = "^0.156.4"
+starlette = ">=1.3.1,<2"
 uvicorn = {extras = ["standard"], version = "^0.34.0"}
 pydantic = "^2.10.0"
 pydantic-settings = "^2.7.0"
-python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+pyjwt = "^2.15.1"
 httpx = "^0.28.0"
-fyers-apiv3 = "^3.1.2"
+fyers-apiv3 = {path = "vendor/fyers_apiv3-3.1.14+oap.1-py3-none-any.whl"}
 sqlalchemy = "^2.0.0"
 asyncpg = "^0.30.0"
 greenlet = "^3.1.0"
 alembic = "^1.14.0"
-python-multipart = "^0.0.20"
+python-multipart = "^0.0.31"
 pyotp = "^2.9.0"
-certifi = "^2026.6.17"
-requests = "2.31.0"  # pinned to match fyers-apiv3's own dependency constraint
-cryptography = "^49.0.0"
+certifi = "^2026.10.19"
+requests = "^2.34.2"
+cryptography = "^50.0.2"
 sentry-sdk = {extras = ["fastapi"], version = "^2.0.0"}
 redis = ">=5.0"
 nselib = "^2.5.1"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.3.0"
-pytest-asyncio = "^0.25.0"
+pytest = "^9.1.1"
+pytest-asyncio = "^1.4.0"
 pytest-cov = "^6.0.0"
 ruff = "^0.8.0"
 mypy = "^1.13.0"

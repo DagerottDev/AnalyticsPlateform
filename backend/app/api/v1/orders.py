@@ -66,6 +66,8 @@ def _live_execution_service(current_user: dict[str, Any]) -> Any:
     service = session_manager.get_session(current_user["sub"])
     if not service:
         raise HTTPException(status_code=401, detail="Active broker session not found")
+    if service.trading_mode != "live":
+        raise HTTPException(status_code=403, detail="The active broker session is not in Live mode")
     return service
 
 

@@ -516,7 +516,9 @@ async def test_get_instruments_serves_stale_cache_when_refresh_is_rate_limited()
         ]
     )
     cached = await service.get_instruments("NIFTY")
-    service._instruments_cache["NIFTY"] = (0.0, cached)
+    service._instruments_cache["NIFTY"] = (
+        time.monotonic() - service._INSTRUMENTS_CACHE_TTL_SECONDS - 1.0, cached
+    )
     service.client.optionchain = MagicMock(
         return_value={"s": "error", "code": 429, "message": "request limit reached"}
     )

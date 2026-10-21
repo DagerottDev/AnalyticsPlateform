@@ -65,23 +65,25 @@ export function clearSavedLoginCredentials(): void {
 }
 
 /**
- * Attempt a silent login using Fyers credentials configured server-side
- * (backend/.env). Throws if the backend has none configured or the login
- * fails — callers should treat that as "fall back to the manual form."
+ * Recover the same broker account using an existing, unexpired browser session.
  */
-export async function autoLoginBroker(): Promise<LoginResponse> {
-  const response = await apiClient.post<LoginResponse>("/auth/auto-login");
+export async function autoLoginBroker(token: string): Promise<LoginResponse> {
+  const response = await apiClient.post<LoginResponse>("/auth/auto-login", {}, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   return response.data;
 }
 
 /** Verify the backend-restored broker service without replacing it. */
-export async function verifyBrokerSession(): Promise<void> {
-  await apiClient.get("/auth/session");
+export async function verifyBrokerSession(token: string): Promise<void> {
+  await apiClient.get("/auth/session", { headers: { Authorization: `Bearer ${token}` } });
 }
 
-export async function logoutUser(): Promise<void> {
+export async function logoutUser(token: string | null): Promise<void> {
   try {
-    await apiClient.post("/auth/logout", {});
+    await apiClient.post("/auth/logout", {}, {
+      headers: { Authorization: `Bearer ${token ?? ""}` },
+    });
   } catch (e) {
     console.error("Logout request failed on backend", e);
   }

@@ -11,7 +11,13 @@ echo ""
 echo "[1/3] Setting up environment files..."
 
 if [ ! -f backend/.env ]; then
-    cp backend/.env.example backend/.env
+    umask 077
+    jwt_secret=$(openssl rand -hex 32)
+    broker_key=$(openssl rand -base64 32 | tr '+/' '-_')
+    sed -e "s/^JWT_SECRET=.*/JWT_SECRET=$jwt_secret/" \
+        -e "s/^BROKER_TOKEN_ENCRYPTION_KEY=.*/BROKER_TOKEN_ENCRYPTION_KEY=$broker_key/" \
+        backend/.env.example > backend/.env
+    unset jwt_secret broker_key
     echo "  ✅ Created backend/.env"
 else
     echo "  ⏭️  backend/.env already exists."

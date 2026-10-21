@@ -67,11 +67,11 @@ async def save_broker_session(
         )
         await db.execute(statement)
     elif dialect_name == "sqlite":
-        statement = sqlite_insert(BrokerSessionRecord).values(**values)
-        statement = statement.on_conflict_do_update(
+        sqlite_statement = sqlite_insert(BrokerSessionRecord).values(**values)
+        sqlite_statement = sqlite_statement.on_conflict_do_update(
             index_elements=[BrokerSessionRecord.id], set_=update_values
         )
-        await db.execute(statement)
+        await db.execute(sqlite_statement)
     else:
         await db.merge(BrokerSessionRecord(**values))
     await db.commit()

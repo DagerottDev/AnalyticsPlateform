@@ -4,8 +4,9 @@ Revision ID: 0013_create_gtt_orders
 Revises: 0012
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0013_create_gtt_orders"
 down_revision = "0012"

@@ -7,6 +7,7 @@ All settings are validated at startup.
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,15 +25,22 @@ class Settings(BaseSettings):
     app_env: Literal["development", "staging", "production"] = "development"
     app_debug: bool = False
     app_title: str = "Option Analytics Platform"
-    app_version: str = "0.1.0"
+    app_version: str = "0.1.1"
     log_level: str = "INFO"
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
 
     # JWT
-    jwt_secret: str = "change-this-to-a-secure-random-string-in-production"
+    jwt_secret: str = Field(default="", min_length=32)
     jwt_algorithm: str = "HS256"
     jwt_expiry_minutes: int = 480  # 8 hours
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, value: str) -> str:
+        if value.startswith(("change-this", "generate_a_", "replace-")) or not value.strip():
+            raise ValueError("Configure JWT_SECRET with an independently generated random secret")
+        return value
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/option_analytics"
