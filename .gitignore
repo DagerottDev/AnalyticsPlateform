@@ -38,6 +38,9 @@ ENV/
 
 # Environment files
 .env
+.env.*
+!.env.example
+!.env.*.example
 .env.local
 .env.*.local
 
@@ -65,3 +68,26 @@ Thumbs.db
 
 # Redis dump
 dump.rdb
+
+# Credentials and local account data
+*.pem
+*.key
+*.p12
+*.pfx
+.aws/
+.ssh/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.dump
+*.sql.gz
+*.bak
+
+# Local tool output
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+*.tsbuildinfo

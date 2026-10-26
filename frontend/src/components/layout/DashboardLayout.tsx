@@ -36,6 +36,12 @@ export function DashboardLayout({ children, sidebarCollapsed = false }: Dashboar
         <Sidebar initialCollapsed={sidebarCollapsed} />
         <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto px-3 pb-24 pt-4 sm:px-5 sm:pb-24 sm:pt-5 md:pb-6 lg:px-7 lg:pt-6">
           {children}
+          <footer className="mt-8 border-t border-[var(--color-border-subtle)] pt-3 text-xs text-[var(--color-text-muted)]">
+            TradingView Lightweight Charts™ — Copyright (с) 2024 TradingView, Inc.{" "}
+            <a className="focus-ring underline" href="https://www.tradingview.com/">TradingView</a>
+            {" · "}
+            <a className="focus-ring underline" href="/licenses/lightweight-charts-LICENSE.txt">Apache 2.0 license</a>
+          </footer>
         </main>
       </div>
       <MobileNavigation />

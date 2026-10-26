@@ -4,7 +4,8 @@
 [![TypeScript][typescript-shield]][typescript-url]
 [![FastAPI][fastapi-shield]][fastapi-url]
 [![Python][python-shield]][python-url]
-[![Docker][docker-shield]][docker-url]
+[![Containers][container-shield]][container-url]
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 <div align="center">
   <h1>Option Analytics Platform</h1>
@@ -71,19 +72,20 @@ The backend runs one worker and holds one active broker connection per API proce
 | Analytics | TypeScript and Python option-pricing/Greek calculations |
 | Storage | PostgreSQL 16 with TimescaleDB; Redis for JWT revocation |
 | Brokers | Fyers API v3 SDK; Dhan API v2 adapter |
-| Development | Docker Compose, npm, Poetry, Vitest, Pytest, Ruff, Mypy, ESLint |
+| Development | Podman Compose (or Docker Compose), npm, Poetry, Vitest, Pytest, Ruff, Mypy, ESLint |
 | Automation | [GitHub Actions checks](.github/workflows/ci.yml) |
 
 <p align="right"><a href="#readme-top">Back to top</a></p>
 
 ## Getting Started
 
-Run from source with Docker, or run the application natively while Docker supplies PostgreSQL and Redis. The repository is private. Source releases are published in its GitHub Releases page.
+Run from source with Podman Compose, or run the application natively while containers supply PostgreSQL and Redis. This is a self-hosted, single-account workspace. Start in paper mode; broker-backed data requires your own authorized account.
 
 ### Prerequisites
 
-- Git and access to [DagerottDev/AnalyticsPlateform][repo-url].
-- Docker with the Compose plugin and a running Docker daemon.
+- Git and the source from [DagerottDev/AnalyticsPlateform][repo-url].
+- Bash and OpenSSL for `install.sh` (on Windows, use WSL).
+- Podman with a Compose provider (`podman compose version`). On macOS/Windows, start your Podman machine first. Docker Compose can also run the supplied Compose files.
 - For broker-backed analytics: a Fyers app ID and secret with either OAuth authorization or client ID, PIN and TOTP secret; alternatively, a Dhan client ID and a current access token.
 - For native development only: Python **3.12**, Poetry **2.4.1**, and Node.js **24** with npm, matching the Dockerfiles and CI configuration.
 
@@ -97,10 +99,10 @@ For a fresh checkout:
 git clone https://github.com/DagerottDev/AnalyticsPlateform.git
 cd AnalyticsPlateform
 ./install.sh
-./start.sh
+podman compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build
 ```
 
-The installer creates missing environment files with distinct random signing/encryption keys and mode 0600. It preserves existing environment files. Existing installations must replace a placeholder or short `JWT_SECRET` before upgrading; keep any existing encryption key. `start.sh` builds and starts the four-service development stack with frontend and backend hot reload. The backend waits for PostgreSQL and runs `alembic upgrade head` before starting the API.
+The installer creates missing environment files with distinct random signing/encryption keys and mode 0600. It preserves existing environment files. Existing installations must replace a placeholder or short `JWT_SECRET` before upgrading; keep any existing encryption key. The Compose command builds and starts the four-service development stack with frontend and backend hot reload. The existing `start.sh` helper uses Docker; the commands here use Podman directly. The backend waits for PostgreSQL and runs `alembic upgrade head` before starting the API.
 
 | Service | Local address |
 | --- | --- |
@@ -114,7 +116,7 @@ The installer creates missing environment files with distinct random signing/enc
 To run development services in the background:
 
 ```bash
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build -d
+podman compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build -d
 ```
 
 Source changes hot reload. Rebuild after dependency, lockfile, Dockerfile, or entrypoint changes. Development dependency volumes persist between runs; recreate the affected dependency volume if it still contains an older installed dependency set, while preserving the database volume.
@@ -137,12 +139,12 @@ The committed [backend example](backend/.env.example) and [frontend example](fro
 | `MARKET_DATA_BACKFILL_ENABLED`, `MARKET_DATA_BACKFILL_SYMBOLS` | Scheduled daily candle storage, default `true` and `NIFTY,BANKNIFTY` |
 | `LOG_LEVEL`, `SENTRY_DSN`, `SENTRY_TRACES_SAMPLE_RATE` | Optional logging and error reporting |
 
-**Docker environment handling:** Compose loads `backend/.env` through `env_file` and overrides only container database/cache addresses and migration control. Configure `JWT_SECRET`, encryption, `APP_ENV`, debug and CORS in that file. All published ports bind to `127.0.0.1`. The production image does not contain environment files. Set `NEXT_PUBLIC_API_URL` in the Compose shell before building to supply the frontend build argument; runtime changes do not rewrite the client bundle.
+**Container environment handling:** Compose loads `backend/.env` through `env_file` and overrides only container database/cache addresses and migration control. Configure `JWT_SECRET`, encryption, `APP_ENV`, debug and CORS in that file. All published ports bind to `127.0.0.1`. Build-context ignore files exclude local environment files; production images use the configured runtime environment. Set `NEXT_PUBLIC_API_URL` in the Compose shell before building to supply the frontend build argument; runtime changes do not rewrite the client bundle.
 
-`RUN_MIGRATIONS=false` skips the Docker migration step only when migrations are handled separately. To build production images locally, use the base Compose file alone:
+`RUN_MIGRATIONS=false` skips the container migration step only when migrations are handled separately. To build production images locally, use the base Compose file alone:
 
 ```bash
-docker compose -f docker/docker-compose.yml up --build -d
+podman compose -f docker/docker-compose.yml up --build -d
 ```
 
 That file retains local database credentials; use deployment-specific database credentials and a TLS reverse proxy before use on a server. Set the browser API URL at frontend **build time** for production: `NEXT_PUBLIC_*` values are bundled into the client, and runtime-only changes do not rewrite that build. See [Deployment](docs/DEPLOYMENT.md), checking its examples against the current Compose files and ports.
@@ -154,14 +156,14 @@ Recovery requires an existing unexpired, nonrevoked browser JWT bound to the sam
 After creating the environment files above, start infrastructure and install backend dependencies from the repository root:
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d postgres redis
+podman compose -f docker/docker-compose.yml up -d --wait postgres redis
 cd backend
 poetry install
+poetry run alembic upgrade head
 cd ..
-./scripts/db-upgrade.sh
 ```
 
-The migration helper starts PostgreSQL, waits for readiness, then uses `backend/.venv/bin/alembic` or Poetry to apply migrations. In separate terminals, from the repository root:
+Wait for PostgreSQL to become healthy before applying migrations. The older `scripts/db-upgrade.sh` helper starts infrastructure through Docker; the commands above use Podman directly. In separate terminals, from the repository root:
 
 ```bash
 # Backend
@@ -176,7 +178,7 @@ npm ci
 npm run dev
 ```
 
-Install frontend dependencies inside `frontend/`, using its committed npm lockfile. Native development uses the same browser and API addresses as Docker development. The optional `install.sh` helper creates missing environment files and installs native dependencies when Poetry/npm are available; its frontend step uses `npm install`.
+Install frontend dependencies inside `frontend/`, using its committed npm lockfile. Native development uses the same browser and API addresses as container development. The optional `install.sh` helper creates missing environment files and installs native dependencies when Poetry/npm are available; its frontend step uses `npm ci`.
 
 <p align="right"><a href="#readme-top">Back to top</a></p>
 
@@ -249,8 +251,8 @@ The [CI workflow](.github/workflows/ci.yml) defines backend/frontend checks and 
 
 | Symptom | What to check |
 | --- | --- |
-| `start.sh` reports Docker is unavailable | Start Docker Desktop or the Docker daemon, then retry from the repository root. |
-| Native migrations cannot connect | Run `./scripts/db-upgrade.sh`; confirm native `DATABASE_URL` uses host port `5433`. |
+| Podman cannot connect or Compose is unavailable | Start your Podman machine and install a Compose provider; check `podman info` and `podman compose version`. |
+| Native migrations cannot connect | Confirm PostgreSQL is healthy and native `DATABASE_URL` uses host port `5433`, then run `poetry run alembic upgrade head` inside `backend/`. |
 | Browser API requests fail | Confirm the backend is on `8001`, `NEXT_PUBLIC_API_URL` matches, and CORS allows `http://localhost:3001`. Restart the development frontend after environment changes. |
 | Swagger URL returns 404 | Use `/api/docs`; interactive docs are enabled only in development mode. |
 | Broker session is lost or expired | Reconnect through Accounts. Saved Fyers TOTP credentials may support automatic recovery; Dhan requires a valid current token. |
@@ -262,7 +264,7 @@ The [CI workflow](.github/workflows/ci.yml) defines backend/frontend checks and 
 View development backend logs from the root:
 
 ```bash
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml logs -f backend
+podman compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml logs -f backend
 ```
 
 The UI includes an API error log and copyable error details. Include the relevant error when reporting a problem, after removing any private credentials or account data.
@@ -299,19 +301,21 @@ agents/      Project agent skill definitions
 
 ## Contributing
 
-For collaborators with repository access, discuss changes through [issues][issues-url] or submit a pull request. Follow the [coding standards](docs/CODING_STANDARDS.md) and [repository error-handling instructions](.agents/AGENTS.md), and run the relevant [checks](#development-and-checks). Include validation results and any remaining failures with your change.
+Contributions are welcome through [issues][issues-url] and pull requests. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and contribution expectations, and follow the [code of conduct](CODE_OF_CONDUCT.md). Report vulnerabilities using the [security reporting instructions](.github/SECURITY.md).
 
 <p align="right"><a href="#readme-top">Back to top</a></p>
 
 ## License
 
-Private — All rights reserved. No license file is present in this repository; no open-source license is granted here.
+Original project code is available under the [MIT License](LICENSE). Dependencies retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md). The code license does not grant redistribution rights for broker or exchange data.
+
+See the [open-source release checklist](docs/OPEN_SOURCE_READINESS.md) for verification results and remaining publication steps.
 
 <p align="right"><a href="#readme-top">Back to top</a></p>
 
 ## Contact
 
-Use the [repository][repo-url] and its [issue tracker][issues-url] for project support. Access requires repository permissions.
+Use the [repository][repo-url] and its [issue tracker][issues-url] for project support.
 
 <p align="right"><a href="#readme-top">Back to top</a></p>
 
@@ -333,5 +337,5 @@ Use the [repository][repo-url] and its [issue tracker][issues-url] for project s
 [fastapi-url]: https://fastapi.tiangolo.com/
 [python-shield]: https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white
 [python-url]: https://www.python.org/
-[docker-shield]: https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white
-[docker-url]: https://www.docker.com/
+[container-shield]: https://img.shields.io/badge/Podman-892CA0?style=for-the-badge&logo=podman&logoColor=white
+[container-url]: https://podman.io/

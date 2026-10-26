@@ -3,6 +3,7 @@ name = "option-analytics-backend"
 version = "0.1.1"
 description = "FastAPI backend for Option Analytics Platform with native Fyers broker integration"
 authors = ["Option Analytics Team"]
+license = "MIT"
 readme = "README.md"
 packages = [{include = "app"}]
 

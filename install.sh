@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -e
+umask 077
 
 echo "=============================================="
 echo " Option Analytics Platform - Installation"
@@ -11,7 +12,6 @@ echo ""
 echo "[1/3] Setting up environment files..."
 
 if [ ! -f backend/.env ]; then
-    umask 077
     jwt_secret=$(openssl rand -hex 32)
     broker_key=$(openssl rand -base64 32 | tr '+/' '-_')
     sed -e "s/^JWT_SECRET=.*/JWT_SECRET=$jwt_secret/" \
@@ -48,7 +48,7 @@ echo ""
 echo "[3/3] Installing Frontend Dependencies..."
 if command -v npm &> /dev/null; then
     cd frontend
-    npm install
+    npm ci
     cd ..
     echo "  ✅ Frontend dependencies installed."
 else

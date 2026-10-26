@@ -1,0 +1,17 @@
+name: Feature request
+description: Describe a problem and a focused improvement.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what prevents it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement and alternatives
+      description: Include relevant broker or data limitations and any simpler workaround.
+    validations:
+      required: true

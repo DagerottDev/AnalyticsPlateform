@@ -1,0 +1,27 @@
+name: Bug report
+description: Report a reproducible problem using synthetic or redacted data.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities, follow [security reporting](https://github.com/DagerottDev/AnalyticsPlateform/blob/main/.github/SECURITY.md).
+        Remove broker secrets, account identifiers, tokens, and private data from logs and screenshots.
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Steps, expected behavior, and what actually happened. Use paper mode and synthetic data.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Commit or release, OS, browser, setup method, broker, and paper/live mode. Do not include account IDs.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs or screenshots
+      description: Inspect copied API errors, headers, and request bodies for secrets before posting.

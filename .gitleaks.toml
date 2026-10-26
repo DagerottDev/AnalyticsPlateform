@@ -1,0 +1,25 @@
+title = "Option Analytics secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fixed signing fixture used only by isolated CI containers"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)\.github/workflows/ci\.yml$''']
+regexes = ['''^isolated-ci-signing-secret-at-least-32-characters$''']
+
+[[allowlists]]
+description = "Fixed encryption fixture for disposable test databases"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)backend/tests/conftest\.py$''']
+regexes = ['''^RE3Kurb2aXAoc60-vTry1BwGmXSpTT7RQeTkewOGVTg=$''']
+
+[[allowlists]]
+description = "Scanner interprets a Python keyword argument after a dummy secret as a key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)backend/tests/test_fyers_headless\.py$''']
+regexes = ['''^ttl_seconds=100$''']

@@ -4,3 +4,12 @@ node_modules
 !.env.example
 output
 tsconfig.tsbuildinfo
+.git
+.aws
+*.pem
+*.key
+*.p12
+*.pfx
+*.db
+*.sqlite*
+*.log
